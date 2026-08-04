@@ -18,8 +18,9 @@ the loop — write freely, revise later, let git remember old versions.
    - `styles/<style>/config.yaml` — mechanical knobs. Honor them literally
      (formality, sentence length, person, contractions, the `avoid` list).
    - `styles/<style>/exemplars/` — match the *texture* of these passages.
-3. Read the piece's `outline.md` and `notes.md` if they exist. Draft the outline's
-   spine, not whatever comes to mind.
+3. Read the piece's `outline.md` and `notes.md`, and the book's `facts.md` (the
+   witness/anchor ledger), if they exist. Draft the outline's spine, not whatever
+   comes to mind.
 
 ## Drafting
 
@@ -44,3 +45,8 @@ the loop — write freely, revise later, let git remember old versions.
   to `corrections.md` (that's `critique`/`tune-style` territory), never a live
   edit of the constitution.
 - Don't publish or send anything. Producing a draft is the whole job here.
+- **Render only the witness that's in the ledger.** Every concrete detail about a
+  real person or animal — a behavior, a feeling, an event, a timespan — must trace
+  to a fact in the book's `facts.md`. If a vivid specific would help but isn't in
+  the ledger, write a `[bracket]` for the author to fill; never invent it. The
+  machine renders; it does not live.

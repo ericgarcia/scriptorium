@@ -56,6 +56,9 @@ tools/new-desk ~/code/writing-desk
 
 - `skills/draft` — continue or start a piece in a chosen style.
 - `skills/critique` — review a draft against its style; give concrete feedback.
+- `skills/style-audit` — the linter to `critique`'s editor: a mechanical,
+  read-only sweep that checks a draft against every rule in the style and reports
+  each stray line. Use it to make a pass disciplined instead of impressionistic.
 - `skills/tune-style` — the gated pass that folds corrections into a style's
   constitution.
 - `skills/whats-on-the-desk` — cross-piece triage: what's in flight, what's the

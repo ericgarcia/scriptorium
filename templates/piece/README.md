@@ -2,6 +2,7 @@
 
 **Stage:** <idea | outline | drafting | revising | done>
 **Style:** <style name, e.g. my-voice>
+**Audience:** <who this is for + the approach — link the book's brief.md if it has one>
 **Updated:** <YYYY-MM-DD>
 
 ## What it is

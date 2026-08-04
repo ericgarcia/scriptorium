@@ -21,7 +21,7 @@ set -euo pipefail
 
 FRAMEWORK_URL="git@github.com:ericgarcia/scriptorium.git"
 STARTER_STYLE="plain-english"
-SKILLS=(draft critique tune-style whats-on-the-desk)
+SKILLS=(draft critique style-audit tune-style whats-on-the-desk)
 
 die() { printf 'new-desk: %s\n' "$1" >&2; exit 1; }
 
@@ -75,6 +75,8 @@ echo "==> bringing in starter style '$STARTER_STYLE' as styles/my-voice"
 [ -d "framework/styles/$STARTER_STYLE" ] || die "no such starter style: $STARTER_STYLE"
 mkdir -p styles
 cp -R "framework/styles/$STARTER_STYLE" styles/my-voice
+# Rename the copied constitution's header so it names the new style, not the source.
+sed -i.bak "1s|^# Style — .*|# Style — my-voice|" styles/my-voice/style.md && rm -f styles/my-voice/style.md.bak
 
 echo "==> creating first piece"
 mkdir -p pieces/first-piece

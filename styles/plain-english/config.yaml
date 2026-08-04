@@ -1,0 +1,12 @@
+formality: 2            # 1 casual … 5 formal
+sentence_length: short-to-medium
+person: second          # addresses the reader directly by default
+audience: general educated reader
+contractions: yes
+oxford_comma: yes
+
+avoid:
+  - clichés
+  - inflated verbs (utilize, leverage, facilitate)
+  - hedging ("it could be argued that")
+  - rhetorical-question openers

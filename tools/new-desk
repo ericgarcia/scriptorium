@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+#
+# new-desk — scaffold a private writing-desk instance from the scriptorium framework.
+#
+# Usage:
+#   new-desk <dest> [--framework <url|path>] [--style <name>]
+#
+#   <dest>              Where to create the instance (e.g. ~/code/writing-desk).
+#   --framework <ref>   Submodule source for the framework. Defaults to the public
+#                       URL. For local development before scriptorium is pushed,
+#                       pass the path to your local checkout.
+#   --style <name>      Starter style to copy in as your first voice. Default:
+#                       plain-english (copied to styles/my-voice).
+#
+# Creates the instance repo, mounts scriptorium as a submodule at framework/,
+# wires the shared skills, drops a starter style and a first piece, and makes the
+# initial commit. It does NOT create or push a GitHub repo — you do that when
+# you're ready (the script prints the commands).
+
+set -euo pipefail
+
+FRAMEWORK_URL="git@github.com:ericgarcia/scriptorium.git"
+STARTER_STYLE="plain-english"
+SKILLS=(draft critique tune-style whats-on-the-desk)
+
+die() { printf 'new-desk: %s\n' "$1" >&2; exit 1; }
+
+DEST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --framework) FRAMEWORK_URL="${2:?--framework needs a value}"; shift 2 ;;
+    --style)     STARTER_STYLE="${2:?--style needs a value}"; shift 2 ;;
+    -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
+    -*)          die "unknown option: $1" ;;
+    *)           [ -z "$DEST" ] || die "unexpected argument: $1"; DEST="$1"; shift ;;
+  esac
+done
+
+[ -n "$DEST" ] || die "need a destination path (see --help)"
+command -v git >/dev/null || die "git not found on PATH"
+
+# Resolve a local --framework path to absolute so the submodule ref is stable.
+if [ -d "$FRAMEWORK_URL" ]; then
+  FRAMEWORK_URL="$(cd "$FRAMEWORK_URL" && pwd)"
+fi
+
+if [ -e "$DEST" ]; then
+  [ -d "$DEST" ] && [ -z "$(ls -A "$DEST" 2>/dev/null)" ] || die "destination exists and is not empty: $DEST"
+fi
+
+mkdir -p "$DEST"
+DEST="$(cd "$DEST" && pwd)"
+NAME="$(basename "$DEST")"
+cd "$DEST"
+
+echo "==> git init ($NAME)"
+git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/heads/main; }
+
+echo "==> adding scriptorium as a submodule ($FRAMEWORK_URL)"
+git submodule add -q "$FRAMEWORK_URL" framework \
+  || die "submodule add failed. If scriptorium isn't pushed yet, pass --framework <local path>."
+
+echo "==> wiring shared skills"
+mkdir -p .claude/skills
+for s in "${SKILLS[@]}"; do
+  ln -snf "../../framework/skills/$s" ".claude/skills/$s"
+done
+
+echo "==> copying behavior file"
+cp framework/CLAUDE.md ./CLAUDE.md
+
+echo "==> bringing in starter style '$STARTER_STYLE' as styles/my-voice"
+[ -d "framework/styles/$STARTER_STYLE" ] || die "no such starter style: $STARTER_STYLE"
+mkdir -p styles
+cp -R "framework/styles/$STARTER_STYLE" styles/my-voice
+
+echo "==> creating first piece"
+mkdir -p pieces/first-piece
+cp -R framework/templates/piece/. pieces/first-piece/
+cat > pieces/first-piece/README.md <<'EOF'
+# First piece
+
+**Stage:** idea
+**Style:** my-voice
+**Updated:** (set on first session)
+
+## What it is
+A throwaway to test the loop: draft → critique → tune-style. Replace or delete it.
+
+## Next move
+Ask Claude "what's on the desk", or "draft this in my-voice".
+
+## Open questions
+—
+
+## Links
+- [outline.md](outline.md)
+- [draft.md](draft.md)
+- [notes.md](notes.md)
+- [log/](log/)
+EOF
+
+cat > DASHBOARD.md <<'EOF'
+# Desk
+
+One block per piece in flight. The README is truth; this is the summary.
+
+## first-piece
+**Stage:** idea · **Style:** my-voice
+**Next:** draft it, or delete and start your own.
+EOF
+
+cat > .gitignore <<'EOF'
+.DS_Store
+.claude/settings.local.json
+scratch/
+EOF
+
+echo "==> initial commit"
+git add -A
+git commit -qm "Scaffold writing desk from scriptorium"
+
+cat <<EOF
+
+Done. Your desk is at:
+  $DEST
+
+Skills wired:   ${SKILLS[*]}
+Starter style:  styles/my-voice (from $STARTER_STYLE)
+First piece:    pieces/first-piece
+
+Next:
+  cd $DEST
+  # open in Claude Code and try:  "what's on the desk"
+  # when ready to back it up privately:
+  gh repo create <you>/$NAME --private --source=. --remote=origin
+  git push -u origin main
+EOF

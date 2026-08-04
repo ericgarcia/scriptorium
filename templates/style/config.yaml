@@ -1,0 +1,13 @@
+# Mechanical knobs a skill can read without interpretation.
+# Delete any you don't want to pin; a skill treats an absent key as "no constraint".
+
+formality: 3            # 1 casual … 5 formal
+sentence_length: short-to-medium   # short | short-to-medium | varied | long
+person: first           # first | second | third
+audience: general educated reader
+contractions: yes       # yes | no
+oxford_comma: yes       # yes | no
+
+avoid:
+  - clichés
+  - hedging ("it could be argued that")

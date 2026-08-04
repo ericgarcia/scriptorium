@@ -57,7 +57,9 @@ echo "==> git init ($NAME)"
 git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/heads/main; }
 
 echo "==> adding scriptorium as a submodule ($FRAMEWORK_URL)"
-git submodule add -q "$FRAMEWORK_URL" framework \
+# Local-path submodules need file protocol explicitly allowed; scope it to this
+# one command rather than changing the user's global git config.
+git -c protocol.file.allow=always submodule add -q "$FRAMEWORK_URL" framework \
   || die "submodule add failed. If scriptorium isn't pushed yet, pass --framework <local path>."
 
 echo "==> wiring shared skills"

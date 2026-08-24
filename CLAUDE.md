@@ -25,6 +25,11 @@ A style is structured context that steers a draft — never model weights.
 - **Pick a style before drafting.** Every piece names a target style in its
   README. `draft` loads that style's `style.md`, `config.yaml`, and `exemplars/`
   as steering.
+- **A publication can carry more than one voice.** A book/publication may name
+  several styles — e.g. a witness voice that testifies and an argued-essay voice
+  that reasons. Each piece picks exactly one; never blend them in a draft. Name
+  siblings by a shared prefix (`being-good`, `being-good-essay`); the book README
+  lists the voices and says when to use each. See `docs/STYLES.md`.
 - **Corrections are append-only.** When you change Claude's wording, the *why*
   goes in `styles/<name>/corrections.md`. Never edit a past correction.
 - **The constitution changes only during a `tune-style` pass.** Don't rewrite

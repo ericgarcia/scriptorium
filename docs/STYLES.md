@@ -58,6 +58,34 @@ Every time you change a draft's wording for a reason worth keeping, log it:
 Append-only, like every log in this system. A correction you can quietly revise
 isn't evidence of how the voice actually behaves.
 
+## Multiple voices per publication
+
+A style is a *voice*, not a publication. One publication (or book) can draw on more
+than one — a memoir that testifies and an argued essay that reasons are different
+jobs, and forcing both through one constitution serves neither. The mechanism already
+allows it: styles are independent folders, and each piece names the one it wants. To
+make a set of voices legible as a family, use a shared prefix:
+
+```
+styles/
+  being-good/          # the witness voice — testifies to a life, God kept oblique
+  being-good-essay/    # the argued voice — reasons in the open, names God directly
+```
+
+Rules of thumb:
+
+- **Name the family by the publication, the voice by its job** — `being-good`,
+  `being-good-essay`. Siblings read as siblings.
+- **A piece picks exactly one.** Never blend two voices in a single draft; if a piece
+  seems to need both, it's probably two pieces.
+- **Cross-link the constitutions.** Each voice's `style.md` says what it shares with
+  its siblings and where it deliberately parts from them, so the contrast is a
+  decision, not an accident.
+- **The publication's home (a book README) lists its voices** and says when to reach
+  for each — that's where a writer chooses before drafting.
+- **Add a voice only when a real piece needs it** (the same rule as everything else):
+  a second constitution earns its place by being used, not anticipated.
+
 ## How "tuning" works
 
 Two speeds, on purpose:

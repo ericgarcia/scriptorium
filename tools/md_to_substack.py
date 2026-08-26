@@ -28,6 +28,17 @@ draft.md conventions:
   - Inline: **bold**, *italic*, [t](u); ![alt](path) -> inlined <img>.
   - Footnotes: `text[^n]` ref -> [[FNn]] marker; a block starting `[^n]: ...`
     is a footnote definition (collected, removed from the body).
+
+INTERNAL EDITORIAL NOTES (never publish):
+  - Anything inside an HTML comment `<!-- ... -->` is stripped (anywhere).
+  - Inside a footnote, anything after a dagger `†` is an internal note (verify:/
+    todo:/attribute:) and is dropped. Put "Verify X before print" style notes
+    after a `†` so they auto-strip at publish.
+  - Safety net: a trailing `Verify ….` sentence in a footnote is also dropped.
+  - GUARD: if a footnote still contains the word "verify" after cleaning, the
+    tool prints a WARNING and exits non-zero unless --allow-verify is passed, so
+    an unresolved editorial note can never silently ship. Run verification, then
+    move the note behind a `†` (or delete it), then re-run.
 """
 import sys, os, re, json, base64, mimetypes
 
@@ -61,6 +72,13 @@ def inline(text, piece_dir):
     text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
     return text
 
+def clean_footnote(raw):
+    """Drop internal editorial notes from a footnote's text.
+    Returns (cleaned_text, was_stripped)."""
+    cleaned = re.sub(r'\s*[†‡].*$', '', raw, flags=re.S)             # dagger-delimited tail
+    cleaned = re.sub(r'\s*\bVerify\b[^.]*\.\s*$', '', cleaned, flags=re.S)  # trailing "Verify …."
+    return cleaned.strip(), (cleaned.strip() != raw.strip())
+
 def convert(piece_dir):
     src = open(os.path.join(piece_dir, 'draft.md')).read()
     src = re.sub(r'<!--.*?-->', '', src, flags=re.S)                 # strip HTML comments
@@ -72,6 +90,7 @@ def convert(piece_dir):
     body = '\n'.join(lines).strip()
 
     footnotes = {}                                                   # n -> content HTML
+    stripped = 0                                                     # editorial notes removed
     out = []
     for block in re.split(r'\n\s*\n', body):
         b = block.strip()
@@ -79,7 +98,10 @@ def convert(piece_dir):
             continue
         m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b, re.S)              # footnote definition
         if m:
-            footnotes[m.group(1)] = inline(' '.join(m.group(2).split('\n')), piece_dir)
+            raw = ' '.join(m.group(2).split('\n'))
+            text, was_stripped = clean_footnote(raw)
+            stripped += 1 if was_stripped else 0
+            footnotes[m.group(1)] = inline(text, piece_dir)
             continue
         if b == '---':
             out.append('<hr>')
@@ -96,7 +118,32 @@ def convert(piece_dir):
     def key(n):
         return (0, int(n)) if n.isdigit() else (1, n)
     ordered = [[n, footnotes[n]] for n in sorted(footnotes, key=key)]
-    return '\n'.join(out), ordered
+    residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
+    return '\n'.join(out), ordered, stripped, residual
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    allow_verify = '--allow-verify' in sys.argv
+    piece_dir = args[0].rstrip('/')
+    out_js = args[1] if len(args) > 1 else 'paste.js'
+    man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    html, footnotes, stripped, residual = convert(piece_dir)
+    js = (JS_TEMPLATE
+          .replace('%TITLE%', json.dumps(man.get('title', '')))
+          .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
+          .replace('%BODY%', json.dumps(html))
+          .replace('%FOOTNOTES%', json.dumps(footnotes)))
+    print(f"paragraphs~{html.count('<p>')}  headings~{html.count('<h2>')+html.count('<h3>')}  "
+          f"dividers~{html.count('<hr>')}  images~{html.count('<img')}  footnotes~{len(footnotes)}  "
+          f"editorial-notes-stripped~{stripped}")
+    if residual:
+        print(f"WARNING: {len(residual)} footnote(s) still contain 'verify' after cleaning: "
+              f"{residual}. Verify the claim, then move the note behind a † (or delete it).")
+        if not allow_verify:
+            print("Refusing to write output. Re-run with --allow-verify to override.")
+            sys.exit(2)
+    open(out_js, 'w').write(js)
+    print(f"wrote {out_js} ({len(js)} bytes)")
 
 JS_TEMPLATE = """(() => {
   const setField = (el, v) => { if (!el) return; const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value'); d.set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); };
@@ -122,21 +169,6 @@ JS_TEMPLATE = """(() => {
   return 'body pasted (' + document.querySelectorAll('.ProseMirror > *').length + ' blocks pre-async); next: window.__sbInsertFootnotes()';
 })()
 """
-
-def main():
-    piece_dir = sys.argv[1].rstrip('/')
-    out_js = sys.argv[2] if len(sys.argv) > 2 else 'paste.js'
-    man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
-    html, footnotes = convert(piece_dir)
-    js = (JS_TEMPLATE
-          .replace('%TITLE%', json.dumps(man.get('title', '')))
-          .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
-          .replace('%BODY%', json.dumps(html))
-          .replace('%FOOTNOTES%', json.dumps(footnotes)))
-    open(out_js, 'w').write(js)
-    print(f"paragraphs~{html.count('<p>')}  headings~{html.count('<h2>')+html.count('<h3>')}  "
-          f"dividers~{html.count('<hr>')}  images~{html.count('<img')}  footnotes~{len(footnotes)}")
-    print(f"wrote {out_js} ({len(js)} bytes)")
 
 if __name__ == '__main__':
     main()

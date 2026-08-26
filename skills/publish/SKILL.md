@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. Produces a DRAFT only; the human reviews and clicks Publish. Never auto-publishes or sends email.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. Produces a DRAFT only; the human reviews and clicks Publish. Never auto-publishes or sends email.
 ---
 
 # Publish (to Substack)
@@ -20,11 +20,34 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 - Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
   never in this framework skill.
 
+## Preflight — verify & strip editorial notes (DO THIS FIRST)
+
+A published draft must carry **verified** claims and **zero** internal notes. The converter
+enforces the second; you enforce the first.
+
+0a. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
+   cites a work, or pins a scriptural/textual locus must be fact-checked before composing —
+   misquoting a real person in a public post is the failure to prevent. If the piece's
+   anchor ledger (`README.md` / `notes.md`) isn't already closed, run a verification pass
+   now (a fact-check sub-agent over the footnote claims is the fast path) and fold the
+   corrections into `draft.md`. Quote only what's confirmed.
+
+0b. **Move editorial notes out of the reader's way.** Internal "Verify X", "attribute
+   carefully", "todo" notes must not publish. The convention (auto-stripped by the
+   converter): put them **after a dagger `†`** inside the footnote, or inside an HTML
+   comment `<!-- … -->`. Everything after a `†` in a footnote, and every HTML comment, is
+   dropped at convert time. The converter also strips a trailing `Verify ….` sentence as a
+   safety net, and **refuses to emit output if any footnote still contains "verify"** — so a
+   stray note can't ship. If it warns, fix the note (verify → move behind `†` → delete) and
+   re-run; never reach for `--allow-verify` to silence a real one.
+
 ## Steps
 
 1. **Convert:** `python3 framework/tools/md_to_substack.py pieces/<name> <out.js>`
    Reads `draft.md` + `publish.yaml`, writes a self-contained JS snippet, and prints
-   paragraph/heading/divider/image/footnote counts — sanity-check them against the piece.
+   paragraph/heading/divider/image/footnote counts **plus `editorial-notes-stripped~N`** —
+   sanity-check them against the piece. A non-zero exit + WARNING means an unresolved
+   verify-note remains (see Preflight 0b); fix it, don't override.
 2. **Focus** the composer body (click into it).
 3. **Call A — body:** run the whole snippet via the browser's JS eval. It sets Title +
    Subtitle and pastes the entire formatted body in one synthetic ProseMirror paste
@@ -63,6 +86,10 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 - **Draft-only.** Never click Publish/Continue/Send — the human publishes. (Safety rule +
   editorial correctness.)
 - **Framework stays generic.** No publication specifics, no secrets, no personal writing here.
+- **Verified + clean before it ships.** Preflight is not optional: footnote claims are
+  fact-checked, and internal notes are stripped (the converter refuses output otherwise).
+  Misquoting a real person or leaking a "Verify X" note into a public draft is the failure
+  this step exists to prevent.
 - **Verify before hand-off.** Always run the post-check; a paste that silently half-lands is
   the failure mode to catch (paragraph/footnote/marker counts).
 - **Footnotes are coupled to Substack internals** (`.editor`, `insertFootnote`). If Substack

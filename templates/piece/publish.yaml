@@ -1,0 +1,7 @@
+# Publish manifest — maps this piece to its Substack post.
+# Read by the `publish` skill via framework/tools/md_to_substack.py.
+title: <post title>
+subtitle: <one-line subtitle>
+footnotes: native        # native | endnotes | none
+send_email: false        # web-only by default; send the email later if you want
+# cover: assets/hero.jpg  # optional hero image (path relative to the piece)

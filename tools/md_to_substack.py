@@ -111,6 +111,11 @@ def convert(piece_dir):
             out.append('<h2>' + inline(b[3:], piece_dir) + '</h2>')
         elif b.startswith('!['):
             out.append(inline(b, piece_dir))
+        elif b.startswith('> '):
+            # blockquote: strip the '> ' from every line, join, emit one <blockquote>.
+            # Without this the marker survives into the paragraph and is escaped to '&gt;'.
+            quoted = ' '.join(re.sub(r'^>\s?', '', ln) for ln in b.split('\n'))
+            out.append('<blockquote><p>' + inline(quoted, piece_dir) + '</p></blockquote>')
         else:
             out.append('<p>' + inline(' '.join(b.split('\n')), piece_dir) + '</p>')
 

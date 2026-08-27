@@ -23,19 +23,28 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 - Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
   never in this framework skill.
 
-## Preflight — verify & strip editorial notes (DO THIS FIRST)
+## Preflight — critique gate, verify & strip editorial notes (DO THIS FIRST)
 
-A published draft must carry **verified** claims and **zero** internal notes. The converter
-enforces the second; you enforce the first.
+A published draft must be **critiqued**, carry **verified** claims, and carry **zero** internal
+notes. The converter enforces the last; you enforce the first two.
 
-0a. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
+0a. **Critique gate — a piece is critiqued before it publishes.** Publishing is the end of the
+   quality loop, not a shortcut around it. Before composing a **fresh** draft (or a
+   **substantive** republish — a reworded passage, a new or changed section), confirm the piece's
+   `log/` records a `critique` (or `style-audit`) pass covering the **current** draft. If none —
+   or if the draft has changed materially since the last recorded pass — run `critique` first and
+   fold its accepted fixes into `draft.md` before continuing. Skip only on the user's **explicit**
+   say-so, and note the skip in the log. (A trivial re-sync — a casing sweep, a one-word fix, a
+   fixed typo — is exactly what republish mode is for and does **not** need a fresh critique.)
+
+0b. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
    cites a work, or pins a scriptural/textual locus must be fact-checked before composing —
    misquoting a real person in a public post is the failure to prevent. If the piece's
    anchor ledger (`README.md` / `notes.md`) isn't already closed, run a verification pass
    now (a fact-check sub-agent over the footnote claims is the fast path) and fold the
    corrections into `draft.md`. Quote only what's confirmed.
 
-0b. **Move editorial notes out of the reader's way.** Internal "Verify X", "attribute
+0c. **Move editorial notes out of the reader's way.** Internal "Verify X", "attribute
    carefully", "todo" notes must not publish. The convention (auto-stripped by the
    converter): put them **after a dagger `†`** inside the footnote, or inside an HTML
    comment `<!-- … -->`. Everything after a `†` in a footnote, and every HTML comment, is
@@ -79,9 +88,10 @@ Preconditions: `publish.yaml` has a **`post_url`**, and the browser is open and 
 that post's **editor** at `https://<pub>.substack.com/publish/post/<id>`. (Find the id from the
 post's dashboard row / the README; record `post_url` in the manifest the first time.)
 
-1. **Preflight is identical** — verify the footnotes (0a) and keep internal notes behind `†` /
-   in comments (0b). The repatch tool runs the same converter, so it **refuses on a stray
-   "verify"** exactly as a fresh publish does.
+1. **Preflight is identical** — verify the footnotes (0b) and keep internal notes behind `†` /
+   in comments (0c). The repatch tool runs the same converter, so it **refuses on a stray
+   "verify"** exactly as a fresh publish does. The **critique gate (0a)** applies to a
+   *substantive* re-sync (a reworded passage); a trivial touch-up (casing, a typo) is exempt.
 2. **Generate the patch:** `python3 framework/tools/substack_repatch.py pieces/<name> <out.js>`
    It renders the current draft's **reader-text** (body blocks + native footnotes, the same
    domain the live editor holds) and bakes it into a self-contained snippet. No baseline file:

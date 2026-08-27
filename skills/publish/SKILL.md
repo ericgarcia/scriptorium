@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. Produces a DRAFT only; the human reviews and clicks Publish. Never auto-publishes or sends email.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — staging only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. Produces a DRAFT / staged edit only; the human reviews and clicks Publish/Update. Never auto-publishes or sends email.
 ---
 
 # Publish (to Substack)
@@ -13,10 +13,13 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 
 - The piece is finished (`pieces/<name>/draft.md`) and has a **manifest**
   `pieces/<name>/publish.yaml` — `title`, `subtitle`, `footnotes` (native|endnotes|none),
-  `send_email` (default false), optional `cover`.
-- The browser is open on the target publication, **logged in**, at a **fresh empty** post
-  composer (`https://<pub>.substack.com/publish/post?type=newsletter`). The user logs in —
-  automation cannot enter credentials.
+  `send_email` (default false), optional `cover`, optional **`post_url`** (record it once the
+  piece is live; its presence switches this skill into **republish mode** — see below).
+- **Which mode:** no `post_url` → **fresh compose** (the default flow below), browser open on a
+  **fresh empty** composer (`https://<pub>.substack.com/publish/post?type=newsletter`).
+  `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
+  editor** (`https://<pub>.substack.com/publish/post/<id>`). Either way the user is **logged
+  in** — automation cannot enter credentials.
 - Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
   never in this framework skill.
 
@@ -64,6 +67,39 @@ enforces the second; you enforce the first.
    **Publish** (and send an email if they want) themselves. **Do not click Publish / Continue
    / Send.**
 
+## Republish — surgically re-sync a live post
+
+When a piece is **already published** and `draft.md` has since changed (a fixed quote, a
+pronoun-casing sweep, a reworded clause), don't recompose it from scratch — that would
+re-upload every image and wipe any Substack-side state. Instead stage a **minimal** edit that
+touches only what changed. This is the tool for **touch-ups**; a structural rewrite (blocks or
+footnotes added / removed / reordered) is out of scope and the tool **refuses** it (see below).
+
+Preconditions: `publish.yaml` has a **`post_url`**, and the browser is open and logged in on
+that post's **editor** at `https://<pub>.substack.com/publish/post/<id>`. (Find the id from the
+post's dashboard row / the README; record `post_url` in the manifest the first time.)
+
+1. **Preflight is identical** — verify the footnotes (0a) and keep internal notes behind `†` /
+   in comments (0b). The repatch tool runs the same converter, so it **refuses on a stray
+   "verify"** exactly as a fresh publish does.
+2. **Generate the patch:** `python3 framework/tools/substack_repatch.py pieces/<name> <out.js>`
+   It renders the current draft's **reader-text** (body blocks + native footnotes, the same
+   domain the live editor holds) and bakes it into a self-contained snippet. No baseline file:
+   it diffs against the **live post itself**, scraped at run time, so it is stateless and
+   self-correcting.
+3. **Run the snippet once** in the live editor's JS eval. It: sets title/subtitle iff changed;
+   scrapes the live doc; **aligns** non-empty body top-nodes 1:1 and footnote nodes 1:1;
+   **refuses** (returns `structural:true`, applies nothing) if the counts differ; else replaces
+   only the changed run inside each changed node, **preserving surrounding text and marks**
+   (bold/italic/links) across the edit.
+4. **Read the report** it returns: `{stagedEdits, unchanged, applied[], footnoteChanges[],
+   reviewMarks[], failed[], structural}`. **`failed` must be empty**; `structural:true` means
+   stop and either recompose or edit by hand; `reviewMarks` flags any hunk that crossed a
+   formatting boundary or was a large fallback — eyeball those in the editor.
+5. **Hand off:** staging the edits lights up **Continue**. Tell the user to review the diff and
+   click **Continue → Publish** (choosing **not** to resend email) themselves. **Do not click
+   Continue / Publish / Send.**
+
 ## How it works (re-probe here if Substack changes)
 
 - Substack's editor is **Tiptap** over ProseMirror, reachable at
@@ -80,11 +116,28 @@ enforces the second; you enforce the first.
   the doc for each marker so shifting positions don't matter; Substack renumbers by position.
 - **Title/subtitle** are React-controlled `<textarea>`s — set via the native value setter
   plus an `input` event.
+- **Republish (surgical):** the live post's editor is the same Tiptap/ProseMirror doc, opened
+  at `/publish/post/<id>`. Its top nodes are `heading`/`paragraph`/`hr` (body) and `footnote`
+  (native footnotes, at the tail, in order) — so body and footnotes separate cleanly and align
+  1:1 with the converter's output. The patch diffs **reader-text** (tags/`[[FN]]` markers
+  stripped, entities unescaped) so the diff domain equals the editor's text. Each changed run
+  is replaced in place with `tr.replaceWith(from, to, schema.text(new, marks))`, carrying the
+  marks resolved at the edit — casing flips inside an `<em>` keep the italic. Edits apply
+  **latest-position-first** (node then offset, descending) so unapplied positions stay valid.
+  Char-offset→doc-position uses `node.descendants` (correct whether a node is a bare textblock
+  or wraps a paragraph). **`Continue` stays disabled until a real edit lands** — a good check
+  that a no-op re-sync changed nothing.
 
 ## Guardrails
 
 - **Draft-only.** Never click Publish/Continue/Send — the human publishes. (Safety rule +
-  editorial correctness.)
+  editorial correctness.) **This holds doubly for republish:** it stages edits on a **live,
+  public** post; the skill only stages, the human clicks **Continue → Publish** and chooses
+  **not to resend email**.
+- **Republish is surgical, and touch-ups only.** It changes the smallest span that differs and
+  nothing else. If the diff is structural — a block or footnote added, removed, or reordered —
+  the tool **refuses** (`structural:true`, zero edits); recompose the piece or edit by hand
+  instead of nuking-and-repaving a live essay. Never pass a flag to force past a refusal.
 - **Framework stays generic.** No publication specifics, no secrets, no personal writing here.
 - **Verified + clean before it ships.** Preflight is not optional: footnote claims are
   fact-checked, and internal notes are stripped (the converter refuses output otherwise).

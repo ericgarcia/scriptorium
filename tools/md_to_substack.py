@@ -79,7 +79,13 @@ def clean_footnote(raw):
     cleaned = re.sub(r'\s*\bVerify\b[^.]*\.\s*$', '', cleaned, flags=re.S)  # trailing "Verify …."
     return cleaned.strip(), (cleaned.strip() != raw.strip())
 
-def convert(piece_dir):
+def parse_blocks(piece_dir):
+    """Parse draft.md into (blocks, footnotes_ordered, stripped, residual).
+    `blocks` is the ordered list of body-block HTML strings (<p>/<h2>/<h3>/<hr>/
+    <blockquote>/<figure>), each carrying [[FNn]] markers where a ref appeared.
+    `footnotes_ordered` is [[n, contentHTML], ...] with internal notes stripped.
+    This is the shared parser behind both convert() (fresh publish) and
+    render_reader() (surgical republish)."""
     src = open(os.path.join(piece_dir, 'draft.md')).read()
     src = re.sub(r'<!--.*?-->', '', src, flags=re.S)                 # strip HTML comments
     lines = src.split('\n')
@@ -124,7 +130,37 @@ def convert(piece_dir):
         return (0, int(n)) if n.isdigit() else (1, n)
     ordered = [[n, footnotes[n]] for n in sorted(footnotes, key=key)]
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
-    return '\n'.join(out), ordered, stripped, residual
+    return out, ordered, stripped, residual
+
+def convert(piece_dir):
+    blocks, ordered, stripped, residual = parse_blocks(piece_dir)
+    return '\n'.join(blocks), ordered, stripped, residual
+
+def strip_to_reader(html_fragment):
+    """Reduce a block/footnote HTML fragment to the plain reader-text that the
+    live Substack editor actually holds: drop [[FNn]] markers (they became native
+    footnotes), drop tags, unescape the three entities esc() introduces, collapse
+    whitespace. This is the domain the surgical diff and the live doc share."""
+    s = re.sub(r'\[\[FN\w+\]\]', '', html_fragment)
+    s = re.sub(r'<[^>]+>', '', s)
+    s = s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    return re.sub(r'\s+', ' ', s).strip()
+
+def render_reader(piece_dir):
+    """(title-independent) reader-text view of the piece, for surgical republish:
+    (body_texts, footnote_texts, residual). body_texts drops <hr>/empty blocks so
+    it aligns 1:1 with the live doc's non-empty, non-footnote top nodes; footnote_texts
+    is in the same numeric order the composer inserts them (= live doc order)."""
+    blocks, ordered, stripped, residual = parse_blocks(piece_dir)
+    body = []
+    for b in blocks:
+        if b.strip() == '<hr>':
+            continue
+        txt = strip_to_reader(b)
+        if txt:
+            body.append(txt)
+    fns = [strip_to_reader(c) for _n, c in ordered]
+    return body, fns, residual
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]

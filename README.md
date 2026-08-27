@@ -63,6 +63,22 @@ tools/new-desk ~/code/writing-desk
   constitution.
 - `skills/whats-on-the-desk` — cross-piece triage: what's in flight, what's the
   next move.
+
+Book-scale skills (for a long-form `books/<name>/` manuscript — novel, memoir):
+
+- `skills/book-status` — the `whats-on-the-desk` of book scale: reads the book
+  README (truth) and structure, proposes one next move.
+- `skills/gmc` — Goal / Motivation / Conflict sheets (Dixon) for characters and
+  chapters; the fix for a passive draft.
+- `skills/chapter-draft` — draft a chapter steered by the book's scaffold
+  (notes, characters, GMC, motifs, and any tuned style); medium-aware.
+- `skills/chapter-audit` — read-only craft gate for one chapter (POV, sensory,
+  show-not-tell, emotion, agency, metaphor openness, voice, conventions).
+- `skills/pov-audit` — does a second POV layer of one event *add* or just
+  re-narrate; the gate for an alternating / accordion multi-POV book.
+- `skills/continuity-audit` — timeline / age / fact drift and real-world (legal)
+  exposure across the manuscript.
+
 - `styles/plain-english` — a starter style to copy and tune.
 - `templates/piece` — the per-piece skeleton (README / outline / draft / notes /
   log). `templates/style` — the empty style skeleton.

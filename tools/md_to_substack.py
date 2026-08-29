@@ -67,7 +67,9 @@ def inline(text, piece_dir):
     def img(m):
         return f'<figure><img src="{data_uri(piece_dir, m.group(2))}" alt="{esc(m.group(1))}"></figure>'
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', img, text)
-    text = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', text)
+    # link text may not contain brackets, so a nearby footnote marker ([[FNx]]) can't be
+    # swallowed into the link when a link and a marker share a paragraph
+    text = re.sub(r'\[([^\[\]]+?)\]\(([^)]+?)\)', r'<a href="\2">\1</a>', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
     return text

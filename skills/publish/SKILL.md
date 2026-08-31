@@ -14,7 +14,14 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 - The piece is finished (`pieces/<name>/draft.md`) and has a **manifest**
   `pieces/<name>/publish.yaml` — `title`, `subtitle`, `footnotes` (native|endnotes|none),
   `send_email` (default false), optional `cover`, optional **`post_url`** (record it once the
-  piece is live; its presence switches this skill into **republish mode** — see below).
+  piece is live; its presence switches this skill into **republish mode** — see below), and
+  optional **`public_url`**.
+- **`post_url` and `public_url` are different URLs and both are needed.** `post_url` is the
+  **editor** address (`/publish/post/<id>`) that republish drives. `public_url` is the
+  **canonical reader** address (`/p/<slug>`) — the only one that may appear in another essay's
+  body under the in-text cross-link convention. Record both when a piece goes live: a piece that
+  carried only the editor URL left a sibling essay with no correct link to reach for. Take the
+  slug from the publication's archive rather than guessing it from the title.
 - **Which mode:** no `post_url` → **fresh compose** (the default flow below), browser open on a
   **fresh empty** composer (`https://<pub>.substack.com/publish/post?type=newsletter`).
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
@@ -37,6 +44,13 @@ notes. The converter enforces the last; you enforce the first two.
    say-so, and note the skip in the log. (A trivial re-sync — a casing sweep, a one-word fix, a
    fixed typo — is exactly what republish mode is for and does **not** need a fresh critique.)
 
+0b-links. **Status-check the in-body cross-links:**
+   `python3 framework/tools/check_links.py pieces/<name>` — exits non-zero and names any link
+   that does not resolve. A cross-link URL copied out of the scaffold is **unverified by
+   default**; a dead sibling slug once sat in a piece's README and DASHBOARD as its canonical
+   address from the day it published, because that URL had only ever been copied and never
+   followed. Fix a dead link here **and** in every scaffold file that repeats it.
+
 0b. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
    cites a work, or pins a scriptural/textual locus must be fact-checked before composing —
    misquoting a real person in a public post is the failure to prevent. If the piece's
@@ -47,11 +61,21 @@ notes. The converter enforces the last; you enforce the first two.
 0c. **Move editorial notes out of the reader's way.** Internal "Verify X", "attribute
    carefully", "todo" notes must not publish. The convention (auto-stripped by the
    converter): put them **after a dagger `†`** inside the footnote, or inside an HTML
-   comment `<!-- … -->`. Everything after a `†` in a footnote, and every HTML comment, is
-   dropped at convert time. The converter also strips a trailing `Verify ….` sentence as a
-   safety net, and **refuses to emit output if any footnote still contains "verify"** — so a
-   stray note can't ship. If it warns, fix the note (verify → move behind `†` → delete) and
-   re-run; never reach for `--allow-verify` to silence a real one.
+   comment `<!-- … -->`. Both are dropped at convert time.
+
+   **The converter enforces this two ways, and the second is the one that matters.** It refuses
+   if a footnote still contains "verify" *after* cleaning (a note someone forgot to put behind a
+   dagger), **and it refuses if a `†` note it stripped reads like an unverified-claim marker** —
+   `verify/todo/tk/check/confirm/pin/source/cite` — naming each one. That second guard was added
+   2026-08-29 after the first was found to be structurally inert: the convention is to put verify
+   notes behind a `†`, which strips them *before* the first guard looks, so a well-formed note
+   always passed. **A draft carrying 17 unverified anchors converted clean and exited 0.** Four
+   of those anchors were later found to be factually wrong, three of them misquotations of named
+   translators.
+
+   **A `†` marker means the claim is unverified.** Clear it by verifying the claim, not by
+   deleting the marker, and never reach for `--allow-verify` / `--allow-unverified` to silence a
+   real one.
 
 ## Steps
 

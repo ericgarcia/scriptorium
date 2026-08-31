@@ -5,3 +5,16 @@ subtitle: <one-line subtitle>
 footnotes: native        # native | endnotes | none
 send_email: false        # web-only by default; send the email later if you want
 # cover: assets/hero.jpg  # optional hero image (path relative to the piece)
+
+# --- set these once the piece is live -----------------------------------------
+# TWO different URLs. Keeping them apart is not pedantry: the editor URL is what
+# republish drives, and the public URL is the only one that may appear in another
+# essay's body. A piece once carried only the editor URL, so a sibling essay had
+# no correct link to reach for.
+#
+# post_url:   https://<pub>.substack.com/publish/post/<id>   # EDITOR — presence
+#             flips `publish` into surgical republish mode.
+# public_url: https://<pub>.substack.com/p/<slug>            # PUBLIC — the canonical
+#             reader URL, and the one in-body cross-links must use. Take the slug
+#             from the publication's archive and confirm it resolves; do not guess
+#             it from the title. A slug that merely looks right can 302 to a 404.

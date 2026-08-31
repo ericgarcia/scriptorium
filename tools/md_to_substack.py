@@ -35,10 +35,17 @@ INTERNAL EDITORIAL NOTES (never publish):
     todo:/attribute:) and is dropped. Put "Verify X before print" style notes
     after a `†` so they auto-strip at publish.
   - Safety net: a trailing `Verify ….` sentence in a footnote is also dropped.
-  - GUARD: if a footnote still contains the word "verify" after cleaning, the
-    tool prints a WARNING and exits non-zero unless --allow-verify is passed, so
-    an unresolved editorial note can never silently ship. Run verification, then
-    move the note behind a `†` (or delete it), then re-run.
+  - GUARD 1 (malformed note): if a footnote still contains "verify" AFTER
+    cleaning, exit non-zero unless --allow-verify. Catches a note someone forgot
+    to put behind a dagger.
+  - GUARD 2 (the real one): a `†` note whose text looks like an unverified-claim
+    marker (verify/todo/tk/check/confirm/pin/source/cite) exits non-zero unless
+    --allow-unverified. This is checked against the text that was REMOVED.
+    Guard 1 alone was structurally inert: the documented convention is to put
+    verify notes behind a `†`, which strips them before Guard 1 ever looks — so a
+    well-formed note always passed. A draft carrying 17 of them converted clean
+    (2026-08-29). A `†` marker means the claim is UNVERIFIED; publishing it
+    silently is exactly the failure these guards exist to prevent.
 """
 import sys, os, re, json, base64, mimetypes
 
@@ -74,12 +81,22 @@ def inline(text, piece_dir):
     text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
     return text
 
+# An editorial note that matches this is an UNVERIFIED-CLAIM marker, not a
+# harmless aside. Stripping one silently is the failure this guard exists to
+# stop, so it is checked against the text that was REMOVED, not what survived.
+UNVERIFIED_RE = re.compile(r'\b(verify|todo|tk|check|confirm|pin|source|cite)\b', re.I)
+
 def clean_footnote(raw):
     """Drop internal editorial notes from a footnote's text.
-    Returns (cleaned_text, was_stripped)."""
+    Returns (cleaned_text, removed_note_text)."""
     cleaned = re.sub(r'\s*[†‡].*$', '', raw, flags=re.S)             # dagger-delimited tail
     cleaned = re.sub(r'\s*\bVerify\b[^.]*\.\s*$', '', cleaned, flags=re.S)  # trailing "Verify …."
-    return cleaned.strip(), (cleaned.strip() != raw.strip())
+    cleaned = cleaned.strip()
+    removed = ''
+    if cleaned != raw.strip():
+        m = re.search(r'[†‡](.*)$', raw, flags=re.S)
+        removed = (m.group(1) if m else raw.strip()[len(cleaned):]).strip()
+    return cleaned, removed
 
 def parse_blocks(piece_dir):
     """Parse draft.md into (blocks, footnotes_ordered, stripped, residual).
@@ -99,6 +116,7 @@ def parse_blocks(piece_dir):
 
     footnotes = {}                                                   # n -> content HTML
     stripped = 0                                                     # editorial notes removed
+    unverified = []                                                  # (id, note) for verify-markers
     out = []
     for block in re.split(r'\n\s*\n', body):
         b = block.strip()
@@ -107,8 +125,11 @@ def parse_blocks(piece_dir):
         m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b, re.S)              # footnote definition
         if m:
             raw = ' '.join(m.group(2).split('\n'))
-            text, was_stripped = clean_footnote(raw)
-            stripped += 1 if was_stripped else 0
+            text, removed = clean_footnote(raw)
+            if removed:
+                stripped += 1
+                if UNVERIFIED_RE.search(removed):
+                    unverified.append((m.group(1), ' '.join(removed.split())[:90]))
             footnotes[m.group(1)] = inline(text, piece_dir)
             continue
         if b == '---':
@@ -132,11 +153,11 @@ def parse_blocks(piece_dir):
         return (0, int(n)) if n.isdigit() else (1, n)
     ordered = [[n, footnotes[n]] for n in sorted(footnotes, key=key)]
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
-    return out, ordered, stripped, residual
+    return out, ordered, stripped, residual, unverified
 
 def convert(piece_dir):
-    blocks, ordered, stripped, residual = parse_blocks(piece_dir)
-    return '\n'.join(blocks), ordered, stripped, residual
+    blocks, ordered, stripped, residual, unverified = parse_blocks(piece_dir)
+    return '\n'.join(blocks), ordered, stripped, residual, unverified
 
 def strip_to_reader(html_fragment):
     """Reduce a block/footnote HTML fragment to the plain reader-text that the
@@ -153,7 +174,7 @@ def render_reader(piece_dir):
     (body_texts, footnote_texts, residual). body_texts drops <hr>/empty blocks so
     it aligns 1:1 with the live doc's non-empty, non-footnote top nodes; footnote_texts
     is in the same numeric order the composer inserts them (= live doc order)."""
-    blocks, ordered, stripped, residual = parse_blocks(piece_dir)
+    blocks, ordered, stripped, residual, _unverified = parse_blocks(piece_dir)
     body = []
     for b in blocks:
         if b.strip() == '<hr>':
@@ -167,10 +188,11 @@ def render_reader(piece_dir):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     allow_verify = '--allow-verify' in sys.argv
+    allow_unverified = '--allow-unverified' in sys.argv
     piece_dir = args[0].rstrip('/')
     out_js = args[1] if len(args) > 1 else 'paste.js'
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
-    html, footnotes, stripped, residual = convert(piece_dir)
+    html, footnotes, stripped, residual, unverified = convert(piece_dir)
     js = (JS_TEMPLATE
           .replace('%TITLE%', json.dumps(man.get('title', '')))
           .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
@@ -185,6 +207,15 @@ def main():
         if not allow_verify:
             print("Refusing to write output. Re-run with --allow-verify to override.")
             sys.exit(2)
+    if unverified:
+        print(f"WARNING: {len(unverified)} footnote(s) carry an UNVERIFIED-CLAIM marker that "
+              f"would be stripped and published as fact:")
+        for n, note in unverified:
+            print(f"  [^{n}]  † {note}")
+        if not allow_unverified:
+            print("Refusing to write output. Verify the claims and clear the notes, or re-run "
+                  "with --allow-unverified if these are genuinely not verify-markers.")
+            sys.exit(3)
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} ({len(js)} bytes)")
 

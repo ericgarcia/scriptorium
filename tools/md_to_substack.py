@@ -86,6 +86,13 @@ def data_uri(piece_dir, rel):
 _IMGMAP = {}          # local image path -> already-uploaded Substack URL, per piece
 
 def img_src(piece_dir, rel):
+    # An absolute URL passes straight through. That covers an image hosted anywhere —
+    # including one you uploaded in the composer by hand and never stored locally — so a
+    # piece is free to keep no local copy at all. The trade is durability: a URL is a
+    # pointer at somebody else's server, and nothing in this repo can rebuild the post
+    # if it stops resolving.
+    if re.match(r'https?://', rel):
+        return rel
     """A piece keeps its images on disk under `images/`. Once a piece is live, its
     publish.yaml records the Substack URL each one was uploaded to; we then point at
     THAT rather than re-inlining the bytes, so a recompose reuses the asset already in

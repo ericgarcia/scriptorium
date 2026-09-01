@@ -44,6 +44,66 @@ is never silently rewritten. See [docs/STYLES.md](docs/STYLES.md).
 Starter styles ship here (public, generic). Your *personal* trained voices live
 only in your instance.
 
+## Requirements
+
+The writing loop itself — `draft`, `critique`, `style-audit`, `tune-style` — needs nothing but
+Claude Code and a git repo. **Publishing needs a real browser**, because Substack has no public
+write API: the `publish` and `substack-sync` skills work by driving the Substack editor.
+
+- **Claude Code**, signed in with `/login`. A session authenticated with an API key or a
+  `claude setup-token` long-lived token **cannot** use the browser extension, so Chrome
+  integration stays off even if you ask for it.
+- **A direct Anthropic plan** — Pro, Max, Team, or Enterprise. Not available through Bedrock,
+  Vertex, or Foundry; you would need a separate claude.ai account.
+- **[The Claude in Chrome extension](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn)**,
+  **v1.0.36 or higher**, in Chrome, Edge, or another Chromium browser (Brave, Arc, Vivaldi,
+  Opera). Not supported in WSL.
+- **macOS**, for the default compose transport only (`tools/md_to_clipboard.py` uses the
+  AppleScript pasteboard). Everything else is platform-neutral.
+
+### Why the extension is required, and not merely nice
+
+A compose has to move a whole essay — tens of thousands of characters of *your* prose — into the
+Substack editor. The old path baked the piece into a JS snippet, which meant **the agent retyped
+every byte of it**. That makes the agent's transcription the weakest link in the chain: one wrong
+character is indistinguishable from an intended edit, so nothing downstream can catch it, and the
+failure mode is publishing a typo in your own voice.
+
+The fix is to take the agent out of the transport. `md_to_clipboard.py` puts the composed HTML on
+the system pasteboard and a **real ⌘V** pastes it — the bytes go **disk → pasteboard → browser →
+editor**, never retyped. That needs a real browser: an in-app or embedded browser pane **cannot
+reach the system pasteboard** (`navigator.clipboard.read()` throws *Document is not focused*, and
+a synthetic ⌘V is a no-op — a programmatic `.focus()` does not satisfy the Clipboard API).
+
+### Installing the extension
+
+1. Install **[Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn)**
+   from the Chrome Web Store and sign in with your Claude account.
+2. Start Claude Code with Chrome connected:
+
+   ```bash
+   claude --chrome
+   ```
+
+   A one-time dialog explains how site permissions work. To skip the flag in future sessions, run
+   `/chrome` and choose **Enabled by default** — note this loads browser tools every session and
+   costs context, so leave it off if you publish rarely.
+3. Check the connection with `/chrome`. It is working when the panel shows **Status: Enabled** and
+   **Extension: Installed**.
+
+You can also let Claude Code prompt you: when a skill needs the browser and no extension is
+found, it offers a guided install once per session.
+
+**If it is not detected:** confirm the extension is enabled at `chrome://extensions`, make sure
+Chrome is actually running, then `/chrome` → **Reconnect extension**. The first install writes a
+native-messaging host file that Chrome only reads at startup, so **restart Chrome** if the first
+attempt fails. On a long session the extension's service worker can go idle — same fix,
+**Reconnect extension**.
+
+**Site permissions** are the extension's, not this framework's. Grant access to your publication's
+domain (e.g. `yourpub.substack.com`) in the extension's settings, and stay signed in there —
+automation cannot enter credentials.
+
 ## Adopt it
 
 See [docs/SETUP.md](docs/SETUP.md), or just run the scaffolding tool:

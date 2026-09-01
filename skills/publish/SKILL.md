@@ -31,6 +31,12 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   system clipboard and **the in-app browser pane cannot reach the pasteboard** (see Steps). A
   re-sync/republish is pure JS and runs on either surface. If only the pane is available, say so
   and use the fallback path — do not silently switch transports.
+- **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
+  *Requirements* in the framework README for install and troubleshooting. In short: extension
+  **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or
+  `setup-token` session cannot use the extension at all), and `claude --chrome`. Verify with
+  `/chrome` — **Status: Enabled**, **Extension: Installed**. If the user is missing it, **say so
+  and stop**; do not quietly fall back to retyping the essay.
 - Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
   never in this framework skill.
 

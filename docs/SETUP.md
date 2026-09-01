@@ -83,6 +83,43 @@ mkdir -p pieces/<name>
 cp -R framework/templates/piece/. pieces/<name>/
 ```
 
+### 6. Publishing — connect a real browser
+
+Only needed when you want to publish. **Substack has no public write API**, so `publish` and
+`substack-sync` work by driving the editor in a real browser, and the default compose transport
+pastes from the system clipboard so that no part of your prose is ever retyped by the agent. See
+**Requirements** in the [README](../README.md) for why that matters.
+
+```bash
+# 1. install the extension (Chrome Web Store), sign in, then:
+claude --chrome
+
+# 2. confirm the connection
+/chrome     # want: "Status: Enabled" and "Extension: Installed"
+```
+
+You need the **Claude in Chrome extension v1.0.36+**, a **direct Anthropic plan** (Pro, Max, Team
+or Enterprise), and a Claude Code session signed in with **`/login`** — an API-key or
+`setup-token` session cannot use the extension. `/chrome` → **Enabled by default** removes the
+flag, at the cost of loading browser tools every session.
+
+Then record your publication's specifics in the instance (never in the framework):
+
+```bash
+mkdir -p publishing
+$EDITOR publishing/substack.md   # byline, subdomain, publication name, bio
+```
+
+Each piece additionally needs a `publish.yaml` — `title`, `subtitle`, `footnotes`
+(native|endnotes|none), `send_email` (default false), and, once it is live, both `post_url` (the
+**editor** address, `/publish/post/<id>`) and `public_url` (the **reader** address, `/p/<slug>`).
+Those are two different URLs and both are needed: the editor one drives re-syncs, and the reader
+one is the only URL that may appear in another essay's body.
+
+**Not on macOS?** `tools/md_to_clipboard.py` uses the AppleScript pasteboard, so the clipboard
+transport is macOS-only today. The `publish` skill documents a JS-snippet fallback; use it
+knowingly — it reintroduces the transcription risk the clipboard exists to remove.
+
 ## Keeping the framework up to date
 
 ```bash

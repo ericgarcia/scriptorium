@@ -102,6 +102,16 @@ notes. The converter enforces the last; you enforce the first two.
 
 ## Republish — surgically re-sync a live post
 
+> **Prefer the `substack-sync` skill for any piece that is already live.** What follows
+> pushes draft → live and is **stateless**: it diffs the draft against the live post, which
+> cannot tell a draft-side edit from a Substack-side one, and so silently reverts anything
+> edited in Substack since the last push. That is not hypothetical — it was caught on
+> 2026-09-01 about to revert a reworded line in `Nothing to Get` and a subtitle in
+> `I Believe in You`. `substack-sync` is three-way against a stored baseline: it pulls
+> Substack's edits into `draft.md` first, reports conflicts instead of picking a side, and
+> then calls the push below. Use this section directly only for a piece with **no**
+> Substack-side edits possible — in practice, one you just composed.
+
 When a piece is **already published** and `draft.md` has since changed (a fixed quote, a
 pronoun-casing sweep, a reworded clause), don't recompose it from scratch — that would
 re-upload every image and wipe any Substack-side state. Instead stage a **minimal** edit that
@@ -127,9 +137,12 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    only the changed run inside each changed node, **preserving surrounding text and marks**
    (bold/italic/links) across the edit.
 4. **Read the report** it returns: `{stagedEdits, unchanged, applied[], footnoteChanges[],
-   reviewMarks[], failed[], structural}`. **`failed` must be empty**; `structural:true` means
-   stop and either recompose or edit by hand; `reviewMarks` flags any hunk that crossed a
-   formatting boundary or was a large fallback — eyeball those in the editor.
+   reviewMarks[], failed[], structural, reordered[], suspect[]}`. **`failed` must be empty**;
+   `structural:true` means stop and either recompose or edit by hand; `reviewMarks` flags any
+   hunk that crossed a formatting boundary or was a large fallback — eyeball those in the
+   editor. **`reordered`** means a target block's exact text was found at a *different* live
+   index: the two lists are misaligned, not edited — the count guard alone could not see this,
+   and a piece once aligned 30 footnotes against the wrong 30 live nodes while passing it.
 5. **Hand off:** staging the edits lights up **Continue**. Tell the user to review the diff and
    click **Continue → Publish** (choosing **not** to resend email) themselves. **Do not click
    Continue / Publish / Send.**

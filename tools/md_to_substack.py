@@ -98,11 +98,32 @@ def clean_footnote(raw):
         removed = (m.group(1) if m else raw.strip()[len(cleaned):]).strip()
     return cleaned, removed
 
+def render_block(b, piece_dir):
+    """Render ONE stripped markdown block to its body HTML. Factored out of parse_blocks
+    so a caller that has edited a block's source can re-render just that block and check
+    what it actually produces — which is how substack_sync verifies a pulled edit landed
+    as the text it meant, instead of trusting an offset map."""
+    if b == '---':
+        return '<hr>'
+    if b.startswith('### '):
+        return '<h3>' + inline(b[4:], piece_dir) + '</h3>'
+    if b.startswith('## '):
+        return '<h2>' + inline(b[3:], piece_dir) + '</h2>'
+    if b.startswith('!['):
+        return inline(b, piece_dir)
+    if b.startswith('> '):
+        # blockquote: strip the '> ' from every line, join, emit one <blockquote>.
+        # Without this the marker survives into the paragraph and is escaped to '&gt;'.
+        quoted = ' '.join(re.sub(r'^>\s?', '', ln) for ln in b.split('\n'))
+        return '<blockquote><p>' + inline(quoted, piece_dir) + '</p></blockquote>'
+    return '<p>' + inline(' '.join(b.split('\n')), piece_dir) + '</p>'
+
 def parse_blocks(piece_dir):
     """Parse draft.md into (blocks, footnotes_ordered, stripped, residual).
     `blocks` is the ordered list of body-block HTML strings (<p>/<h2>/<h3>/<hr>/
     <blockquote>/<figure>), each carrying [[FNn]] markers where a ref appeared.
-    `footnotes_ordered` is [[n, contentHTML], ...] with internal notes stripped.
+    `footnotes_ordered` is [[n, contentHTML], ...] in FIRST-REFERENCE order, with
+    internal notes stripped; `fn_issues` reports refs/definitions that don't pair up.
     This is the shared parser behind both convert() (fresh publish) and
     render_reader() (surgical republish)."""
     src = open(os.path.join(piece_dir, 'draft.md')).read()
@@ -115,9 +136,10 @@ def parse_blocks(piece_dir):
     body = '\n'.join(lines).strip()
 
     footnotes = {}                                                   # n -> content HTML
+    fn_src = {}                                                      # n -> raw markdown source
     stripped = 0                                                     # editorial notes removed
     unverified = []                                                  # (id, note) for verify-markers
-    out = []
+    out, out_src = [], []                                            # HTML block + its raw source
     for block in re.split(r'\n\s*\n', body):
         b = block.strip()
         if not b:
@@ -131,33 +153,79 @@ def parse_blocks(piece_dir):
                 if UNVERIFIED_RE.search(removed):
                     unverified.append((m.group(1), ' '.join(removed.split())[:90]))
             footnotes[m.group(1)] = inline(text, piece_dir)
+            fn_src[m.group(1)] = b
             continue
-        if b == '---':
-            out.append('<hr>')
-        elif b.startswith('### '):
-            out.append('<h3>' + inline(b[4:], piece_dir) + '</h3>')
-        elif b.startswith('## '):
-            out.append('<h2>' + inline(b[3:], piece_dir) + '</h2>')
-        elif b.startswith('!['):
-            out.append(inline(b, piece_dir))
-        elif b.startswith('> '):
-            # blockquote: strip the '> ' from every line, join, emit one <blockquote>.
-            # Without this the marker survives into the paragraph and is escaped to '&gt;'.
-            quoted = ' '.join(re.sub(r'^>\s?', '', ln) for ln in b.split('\n'))
-            out.append('<blockquote><p>' + inline(quoted, piece_dir) + '</p></blockquote>')
-        else:
-            out.append('<p>' + inline(' '.join(b.split('\n')), piece_dir) + '</p>')
+        out_src.append(b)
+        out.append(render_block(b, piece_dir))
 
-    # footnotes in numeric order where possible (Substack renumbers by position anyway)
-    def key(n):
-        return (0, int(n)) if n.isdigit() else (1, n)
-    ordered = [[n, footnotes[n]] for n in sorted(footnotes, key=key)]
+    # Footnotes in FIRST-REFERENCE order — the order the composer actually inserts them
+    # (it walks the body's markers in document order), and therefore the order the live
+    # doc holds them in.
+    #
+    # This was previously sorted by LABEL — numerics first, then alphabetically — on the
+    # reasoning that "Substack renumbers by position anyway." That is true for composing
+    # and false for the surgical re-sync, which aligns footnote nodes 1:1 BY INDEX. Any
+    # draft whose labels are named (`[^kjv]`) or no longer in citation order then paired
+    # every footnote against the wrong live node — and the count-only structural guard
+    # could not see it, because a permutation preserves the count. Real case: `In the
+    # Name` (2026-09-01) rendered footnote #0 as `John 10:3` against a live #0 that was
+    # the shelucho-shel-adam maxim; 30 == 30, zero aligned, and a re-sync would have
+    # overwritten all thirty notes of a live essay with mismatched text.
+    seen, ref_order, duplicated = set(), [], []
+    for blk in out:
+        for ref in re.finditer(r'\[\[FN(\w+)\]\]', blk):
+            n = ref.group(1)
+            if n in seen:
+                duplicated.append(n)                                 # 2nd ref => 2nd live node
+                continue
+            seen.add(n)
+            ref_order.append(n)
+    fn_issues = {
+        'undefined':    [n for n in ref_order if n not in footnotes],   # ref with no definition
+        'unreferenced': [n for n in footnotes if n not in seen],        # definition never cited
+        'duplicated':   sorted(set(duplicated)),                        # cited more than once
+    }
+    ordered = [[n, footnotes[n]] for n in ref_order if n in footnotes]
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
-    return out, ordered, stripped, residual, unverified
+    sources = {'body': out_src, 'fns': [fn_src[n] for n, _c in ordered]}
+    return out, ordered, stripped, residual, unverified, fn_issues, sources
 
 def convert(piece_dir):
-    blocks, ordered, stripped, residual, unverified = parse_blocks(piece_dir)
-    return '\n'.join(blocks), ordered, stripped, residual, unverified
+    blocks, ordered, stripped, residual, unverified, fn_issues, _src = parse_blocks(piece_dir)
+    return '\n'.join(blocks), ordered, stripped, residual, unverified, fn_issues
+
+# --- typography -------------------------------------------------------------
+# Substack's editor (ProseMirror smart-quote input rules) converts straight quotes
+# to curly ones as the body is pasted. draft.md is written with straight quotes, so
+# the composed live post and the draft's reader-text disagree on every apostrophe
+# and quotation mark forever after. Nothing normalized them, so a surgical re-sync
+# saw a diff in every quote-bearing block and would have rewritten each one — mass
+# typographic damage disguised as a one-word touch-up (found 2026-09-01).
+#
+# The diff domain therefore compares FLATTENED text (curly -> straight), while any
+# run actually inserted into the live doc is SMARTENED (straight -> curly) so it
+# matches the typography of the document it lands in.
+
+def flatten_quotes(s):
+    """Curly quotes -> straight. The comparison domain; never inserted."""
+    return (s.replace('\u2018', "'").replace('\u2019', "'")
+             .replace('\u201c', '"').replace('\u201d', '"'))
+
+def smarten_quotes(s):
+    """Straight quotes -> curly, by the usual boundary rule: a quote that follows
+    whitespace, an opening bracket or a dash opens; anything else closes."""
+    out, opening = [], set(' \t\n(【[{\u2014\u2013-\u201c\u2018')
+    for i, ch in enumerate(s):
+        if ch in '"\'':
+            prev = s[i - 1] if i else ' '
+            opens = prev in opening
+            if ch == '"':
+                out.append('\u201c' if opens else '\u201d')
+            else:
+                out.append('\u2018' if opens else '\u2019')
+        else:
+            out.append(ch)
+    return ''.join(out)
 
 def strip_to_reader(html_fragment):
     """Reduce a block/footnote HTML fragment to the plain reader-text that the
@@ -173,17 +241,21 @@ def render_reader(piece_dir):
     """(title-independent) reader-text view of the piece, for surgical republish:
     (body_texts, footnote_texts, residual). body_texts drops <hr>/empty blocks so
     it aligns 1:1 with the live doc's non-empty, non-footnote top nodes; footnote_texts
-    is in the same numeric order the composer inserts them (= live doc order)."""
-    blocks, ordered, stripped, residual, _unverified = parse_blocks(piece_dir)
-    body = []
-    for b in blocks:
+    is in first-reference order — the order the composer inserts them, which is the
+    order the live doc holds. `fn_issues` surfaces refs/definitions that don't pair
+    up, any of which would shift that alignment."""
+    blocks, ordered, stripped, residual, _unverified, fn_issues, sources = parse_blocks(piece_dir)
+    body, body_src = [], []
+    for b, bsrc in zip(blocks, sources['body']):
         if b.strip() == '<hr>':
             continue
         txt = strip_to_reader(b)
         if txt:
             body.append(txt)
+            body_src.append(bsrc)                                    # stays 1:1 with `body`
     fns = [strip_to_reader(c) for _n, c in ordered]
-    return body, fns, residual
+    render_reader.sources = {'body': body_src, 'fns': sources['fns']}
+    return body, fns, residual, fn_issues
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -192,7 +264,7 @@ def main():
     piece_dir = args[0].rstrip('/')
     out_js = args[1] if len(args) > 1 else 'paste.js'
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
-    html, footnotes, stripped, residual, unverified = convert(piece_dir)
+    html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
     js = (JS_TEMPLATE
           .replace('%TITLE%', json.dumps(man.get('title', '')))
           .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
@@ -207,6 +279,19 @@ def main():
         if not allow_verify:
             print("Refusing to write output. Re-run with --allow-verify to override.")
             sys.exit(2)
+    if fn_issues['undefined'] or fn_issues['duplicated']:
+        # Either one changes how many footnote nodes the composer creates, which
+        # desynchronizes every later index for a subsequent surgical re-sync.
+        if fn_issues['undefined']:
+            print(f"WARNING: footnote ref(s) with no definition, which publish as raw "
+                  f"markers: {fn_issues['undefined']}")
+        if fn_issues['duplicated']:
+            print(f"WARNING: footnote(s) cited more than once: {fn_issues['duplicated']}. "
+                  f"Each extra citation becomes its own live footnote node.")
+        sys.exit(4)
+    if fn_issues['unreferenced']:
+        print(f"NOTE: {len(fn_issues['unreferenced'])} footnote definition(s) are never cited "
+              f"and will not appear in the post: {fn_issues['unreferenced']}")
     if unverified:
         print(f"WARNING: {len(unverified)} footnote(s) carry an UNVERIFIED-CLAIM marker that "
               f"would be stripped and published as fact:")

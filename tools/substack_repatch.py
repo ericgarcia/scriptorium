@@ -34,7 +34,7 @@ the baseline, and only the delta to the current draft is applied.
 import sys, os, json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from md_to_substack import render_reader, read_manifest
+from md_to_substack import render_reader, read_manifest, flatten_quotes
 
 
 def main():
@@ -46,13 +46,19 @@ def main():
     out_js = args[1] if len(args) > 1 else 'repatch.js'
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
     post_url = man.get('post_url', '')
-    body, fns, residual = render_reader(piece_dir)
+    body, fns, residual, fn_issues = render_reader(piece_dir)
 
     if residual:
         print(f"WARNING: {len(residual)} footnote(s) still contain 'verify' after cleaning: "
               f"{residual}. Resolve the note (verify -> move behind a †, or delete) before republishing.")
         print("Refusing to write output.")
         sys.exit(2)
+
+    if fn_issues['undefined'] or fn_issues['duplicated']:
+        print(f"Refusing: footnote refs and definitions do not pair up "
+              f"({ {k: v for k, v in fn_issues.items() if v} }). Each of these shifts the "
+              f"footnote indexing the surgical diff aligns on.")
+        sys.exit(4)
 
     print(f"target body-blocks~{len(body)}  footnotes~{len(fns)}  "
           f"post_url~{post_url or '(none — set it in publish.yaml before republishing)'}")
@@ -89,10 +95,30 @@ REPATCH_JS = r"""(() => {
   const subtitleChanged = setField('textarea[placeholder="Add a subtitle…"]', SUBTITLE);
 
   // --- scrape live: ordered top nodes, split body vs footnote, keep positions + node refs ---
+  // Typography: Substack curls straight quotes as the body is pasted, so the live doc
+  // and the draft's reader-text disagree on every quote mark. Compare FLATTENED text
+  // (curly -> straight, a 1:1 substitution that preserves length, so offsets computed
+  // on it are valid against the real doc), and SMARTEN anything actually inserted so
+  // it matches the typography of the document it lands in.
+  const flat = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');
+  const OPENS = new Set([...' \t\n(\u3010[{\u2014\u2013-\u201c\u2018']);
+  const smarten = (s, prevCh) => {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i], prev = i ? s[i-1] : (prevCh || ' ');
+      if (ch === '"') out += OPENS.has(prev) ? '\u201c' : '\u201d';
+      else if (ch === "'") out += OPENS.has(prev) ? '\u2018' : '\u2019';
+      else out += ch;
+    }
+    return out;
+  };
+
   const liveBody = [], liveFns = [];
   ed.state.doc.forEach((node, pos) => {
-    if (node.type.name === 'footnote') liveFns.push({ pos, node, text: node.textContent });
-    else if (node.textContent.trim() !== '') liveBody.push({ pos, node, text: node.textContent });
+    const raw = node.textContent;
+    const rec = { pos, node, raw, text: flat(raw) };
+    if (node.type.name === 'footnote') liveFns.push(rec);
+    else if (raw.trim() !== '') liveBody.push(rec);
   });
 
   const report = {
@@ -106,6 +132,52 @@ REPATCH_JS = r"""(() => {
   if (liveBody.length !== BODY.length || liveFns.length !== FNS.length) {
     report.structural = true;
     report.note = 'block/footnote count differs — structural change, not a touch-up. Refusing to patch; use a full recompose or edit by hand.';
+    return JSON.stringify(report);
+  }
+
+  // GUARD: a permutation preserves the count, so the count check above cannot see one.
+  // Before 2026-09-01 that was the only structural check, and a piece whose footnotes
+  // were emitted in label order against a live doc in reference order passed it 30 == 30
+  // with all thirty mismatched — the re-sync would have overwritten every note of a live
+  // essay with another note's text. If a target block's exact text lives at a DIFFERENT
+  // live index, the two lists are misaligned, not edited: refuse and say so.
+  const findReorder = (targets, live, kind) => {
+    const at = new Map();
+    live.forEach((l, i) => { if (!at.has(l.text)) at.set(l.text, i); });
+    const out = [];
+    for (let i = 0; i < targets.length; i++) {
+      if (targets[i] === live[i].text) continue;
+      const j = at.get(targets[i]);
+      if (j !== undefined && j !== i) out.push({ kind, targetIdx: i, livesAtIdx: j });
+    }
+    return out;
+  };
+  // GUARD: and a pair that is neither equal nor plausibly the same node (a one-word fix
+  // leaves a long block ~99% intact) means the lists are misaligned some other way.
+  const similarity = (a, b) => {
+    if (!a.length && !b.length) return 1;
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let q = 0; while (q < a.length - p && q < b.length - p && a[a.length-1-q] === b[b.length-1-q]) q++;
+    return (p + q) / Math.max(a.length, b.length);
+  };
+  const findSuspect = (targets, live, kind) => {
+    const out = [];
+    for (let i = 0; i < targets.length; i++) {
+      if (targets[i] === live[i].text) continue;
+      const sim = similarity(live[i].text, targets[i]);
+      if (sim < 0.5) out.push({ kind, idx: i, similarity: +sim.toFixed(3),
+                                live: live[i].text.slice(0, 90), target: targets[i].slice(0, 90) });
+    }
+    return out;
+  };
+
+  report.reordered = [...findReorder(BODY, liveBody, 'body'), ...findReorder(FNS, liveFns, 'footnote')];
+  report.suspect   = [...findSuspect(BODY, liveBody, 'body'), ...findSuspect(FNS, liveFns, 'footnote')];
+  if (report.reordered.length || report.suspect.length) {
+    report.structural = true;
+    report.note = report.reordered.length
+      ? 'target text found at a DIFFERENT live index — the two lists are misaligned, not edited. Refusing to patch; nothing was changed.'
+      : 'a changed pair is too dissimilar to be the same node — likely misalignment. Refusing to patch; nothing was changed.';
     return JSON.stringify(report);
   }
 
@@ -163,7 +235,8 @@ REPATCH_JS = r"""(() => {
       if (targets[idx] === live[idx].text) { report.unchanged++; continue; }
       const hunks = diffHunks(live[idx].text, targets[idx]);
       if (!hunks.length) { report.unchanged++; continue; }
-      for (const h of hunks) tasks.push({ kind, idx, node: live[idx].node, nodePos: live[idx].pos, hunk: h });
+      for (const h of hunks) tasks.push({ kind, idx, node: live[idx].node, raw: live[idx].raw,
+                                          nodePos: live[idx].pos, hunk: h });
     }
   };
   plan(BODY, liveBody, 'body');
@@ -181,10 +254,12 @@ REPATCH_JS = r"""(() => {
       const endMarks = state.doc.resolve(Math.max(from, to)).marks();
       const uniform = marks.length === endMarks.length && marks.every(m => endMarks.some(e => e.eq(m)));
       let tr = state.tr;
-      if (t.hunk.text.length) tr = tr.replaceWith(from, to, state.schema.text(t.hunk.text, marks));
+      const prevCh = t.hunk.aStart > 0 ? t.raw[t.hunk.aStart - 1] : ' ';
+      const insert = smarten(t.hunk.text, prevCh);
+      if (insert.length) tr = tr.replaceWith(from, to, state.schema.text(insert, marks));
       else tr = tr.delete(from, to);
       ed.view.dispatch(tr);
-      const entry = { kind: t.kind, block: t.idx, insert: t.hunk.text || '(deleted)' };
+      const entry = { kind: t.kind, block: t.idx, insert: insert || '(deleted)' };
       report.applied.push(entry);
       if (t.kind === 'footnote') report.footnoteChanges.push(entry);
       if (!uniform || t.hunk.big) report.reviewMarks.push(entry);

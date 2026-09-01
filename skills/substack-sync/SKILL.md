@@ -66,6 +66,31 @@ Each browser step is one JS eval in the live post's editor.
    for a human instead of being written. It **refuses outright** if there are conflicts.
 5. **Push.** `python3 framework/tools/substack_repatch.py pieces/<name> push.js`, run once
    in the editor, then check the report (see *Reading the push report*).
+
+   > **Do not retype a large push script into the browser.** `substack_repatch.py` bakes the
+   > **entire rendered essay** into its snippet — 73KB for a 5,700-word piece — so driving it by
+   > hand means the agent reproducing every byte of the author's prose. On a **live, public**
+   > post that is the worst place to accept a transcription risk: one wrong character diffs as a
+   > real edit, the tool applies it faithfully, and the guards cannot object because to them a
+   > typo is just another edit.
+   >
+   > **When the script is small enough to read in full, run it as-is.** When it is not, and
+   > `plan` has already told you exactly which blocks moved, prefer a **minimal guarded edit**:
+   > pull the target text **programmatically** out of the generated script (never retype it),
+   > and apply only the changed span with every guard the tool uses, plus one it lacks —
+   >
+   > - refuse unless body and footnote counts match the draft exactly (structural guard);
+   > - refuse if the old text is absent, or occurs more than once (alignment guard);
+   > - refuse if the span's start and end marks differ (formatting guard — this one fires in
+   >   practice: a span crossing `<em>` would otherwise flatten the emphasis);
+   > - **re-read `doc.textBetween(from, to)` and refuse unless it equals the expected text**
+   >   (position guard — `substack_repatch.py` does not do this);
+   > - apply multiple edits **latest-position-first** so unapplied positions stay valid;
+   > - normalize curly/straight apostrophes for the *lookup*, and **re-smarten the replacement
+   >   to match the live document's own typography** so nothing downgrades a `’` to a `'`.
+   >
+   > Six live posts were re-synced this way on 2026-09-01; every one reported `marks: 0`, and a
+   > re-scan and re-plan read `converged / nothing to do` before sealing.
 6. **Hand off — the push is already public.** **There is no staging gate on a live post.** The
    edit reaches readers on autosave; **Continue** is usually **disabled** afterwards, because
    nothing is left unpublished. Do not report the sync as "staged, awaiting your click" — report

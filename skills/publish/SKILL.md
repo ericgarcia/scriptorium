@@ -27,6 +27,10 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
   editor** (`https://<pub>.substack.com/publish/post/<id>`). Either way the user is **logged
   in** — automation cannot enter credentials.
+- **Surface: a fresh compose needs REAL Chrome**, because the default body transport is the
+  system clipboard and **the in-app browser pane cannot reach the pasteboard** (see Steps). A
+  re-sync/republish is pure JS and runs on either surface. If only the pane is available, say so
+  and use the fallback path — do not silently switch transports.
 - Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
   never in this framework skill.
 
@@ -97,28 +101,66 @@ notes. The converter enforces the last; you enforce the first two.
    deleting the marker, and never reach for `--allow-verify` / `--allow-unverified` to silence a
    real one.
 
-## Steps
+## Steps — clipboard transport (the default; use this)
+
+> **Never retype the essay.** The older JS-snippet path bakes the whole piece into a string
+> literal, so driving it means the agent reproducing every byte of the author's prose into a
+> `javascript_exec` call — ~37KB for a 5,700-word essay. **That makes the agent's transcription
+> the weakest link in the chain:** one wrong character diffs as a real edit and can publish a
+> typo in the author's voice, and no downstream guard can see it, because to a guard a typo is
+> just another edit. The clipboard removes the agent from the transport: the bytes go
+> **disk → system pasteboard → Chrome → ProseMirror** and are never retyped.
+
+**Surface matters, and this is the part that is easy to get wrong.** Measured 2026-09-01:
+
+| surface | result |
+|---|---|
+| in-app browser pane + `navigator.clipboard.read()` | ❌ `NotAllowedError: Document is not focused` |
+| in-app browser pane + synthetic `cmd+v` | ❌ no-op, editor stays empty |
+| **real Chrome + real click + real `cmd+v`** | ✅ **works** — `h2`, `em`, `strong`, links, blockquotes all survive |
+
+So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A programmatic
+`.focus()` does **not** satisfy the Clipboard API — the click has to be a real one.
+
+1. **Load the clipboard:** `python3 framework/tools/md_to_clipboard.py pieces/<name> --fn-out <fn.js>`
+   Runs the same converter and therefore the **same refusals** (a stray "verify", nested
+   footnote refs, undefined/duplicated markers) — a different transport is never a lower bar.
+   Prints the block counts, the **SHA-256 of the HTML actually placed on the pasteboard**, and
+   the title/subtitle from the manifest. It writes the footnote snippet separately, because
+   **footnotes cannot travel by clipboard** — a paste cannot create native ones.
+2. **Open the composer in real Chrome** and set Title + Subtitle by JS (small, no prose in it),
+   then `clearContent(true)` so a retry can't append to a half-paste.
+3. **Body:** a **real click** into the body, then a **real `cmd+v`**. Formatting, links and
+   dividers arrive intact; footnote refs remain as `[[FNn]]` markers.
+4. **Footnotes:** run the `--fn-out` snippet (a few KB — small enough to run directly). It turns
+   every `[[FNn]]` marker into a **native** Substack footnote via Tiptap's `insertFootnote` and
+   fills each note's rich content. Returns `{inserted, missing}` — **`missing` must be empty.**
+5. **Post-check (JS):** title/subtitle set · block counts match · **0 empty paragraphs** ·
+   heading/divider/image counts · footnotes == manifest count · **0 `[[FN` markers left** ·
+   in-body sibling links present. Report the numbers; don't say "done" without them.
+6. **Fidelity check — do this, it is the whole point.** Hash every live block's flattened text,
+   digest the list, and compare against the same digest computed from `draft.md` via
+   `render_reader`. **The two digests must be identical.** A clipboard paste cannot introduce a
+   transcription error, so this is cheap and should pass first time; if it does *not*, something
+   else moved (a concurrent edit to the draft, a Substack-side input rule) and that is worth
+   knowing before a human publishes.
+7. **Hand off:** the draft is composed. Tell the user to review it in Substack and click
+   **Publish** themselves. **Do not click Publish / Continue / Send.**
+
+### Fallback — the JS-snippet path
+
+`md_to_substack.py` still exists and still works; use it only where the clipboard cannot be
+reached (not macOS, no real-Chrome surface, a headless run). If you fall back, **say so**, and
+be aware you are accepting the transcription risk the clipboard exists to remove — verify with
+step 6 without exception.
 
 1. **Convert:** `python3 framework/tools/md_to_substack.py pieces/<name> <out.js>`
-   Reads `draft.md` + `publish.yaml`, writes a self-contained JS snippet, and prints
-   paragraph/heading/divider/image/footnote counts **plus `editorial-notes-stripped~N`** —
-   sanity-check them against the piece. A non-zero exit + WARNING means an unresolved
-   verify-note remains (see Preflight 0b); fix it, don't override.
 2. **Focus** the composer body (click into it).
-3. **Call A — body:** run the whole snippet via the browser's JS eval. It sets Title +
-   Subtitle and pastes the entire formatted body in one synthetic ProseMirror paste
-   (paragraphs, headings, blockquotes, dividers, lists, bold/italic/links, images inlined as
-   `data:` URIs → Substack uploads them to its CDN). Footnote refs remain as `[[FNn]]` markers.
-4. **Call B — footnotes:** run `window.__sbInsertFootnotes()`. It turns every `[[FNn]]`
-   marker into a **native** Substack footnote (the editor's own Tiptap `insertFootnote`
-   command) and fills each note's rich content. It returns `{inserted, missing}` — **`missing`
-   must be empty.**
-5. **Post-check (JS):** title/subtitle set · paragraph count matches · **0 empty paragraphs**
-   · heading/divider/image counts · footnote anchors == blocks == manifest count · **0
-   `[[FN` markers left**. Report the numbers; don't say "done" without them.
-6. **Hand off:** the draft is composed. Tell the user to review it in Substack and click
-   **Publish** (and send an email if they want) themselves. **Do not click Publish / Continue
-   / Send.**
+3. **Call A — body:** run the whole snippet via the browser's JS eval (sets Title + Subtitle,
+   pastes the body as one synthetic ProseMirror paste; images inlined as `data:` URIs →
+   Substack uploads them to its CDN).
+4. **Call B — footnotes:** `window.__sbInsertFootnotes()`; `missing` must be empty.
+5-7. As above.
 
 ## Republish — surgically re-sync a live post
 
@@ -184,10 +226,22 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
 
 - Substack's editor is **Tiptap** over ProseMirror, reachable at
   `document.querySelector('.ProseMirror').editor` (`editor.commands`, `editor.chain()`).
-- **Body:** dispatch a synthetic `paste` `ClipboardEvent` carrying `text/html` on
-  `.ProseMirror`; Tiptap's paste converter builds the blocks. (Instant; avoids char-by-char
-  typing. ⌘V and keyboard modifiers are unreliable in the browser tool, so we dispatch the
-  event directly.)
+- **Body, the default:** put `text/html` on the **system pasteboard** and send a **real ⌘V** in
+  **real Chrome**. Tiptap's paste converter builds the blocks from the HTML flavor.
+  **Correction, 2026-09-01 — the old note here said "⌘V and keyboard modifiers are unreliable in
+  the browser tool," and that was true of the wrong noun.** It is true of the **in-app browser
+  pane**, where a synthetic ⌘V is a no-op and `navigator.clipboard.read()` throws
+  `NotAllowedError: Document is not focused` (a programmatic `.focus()` does not satisfy the
+  Clipboard API). It is **false of real Chrome**, where a real click plus a real ⌘V pastes
+  correctly with `h2`/`em`/`strong`/links/blockquotes intact. Reading that note as surface-neutral
+  is what kept this skill on the transcription path for months.
+  **The pasteboard needs the HTML flavor specifically:** `pbcopy` sets only
+  `public.utf8-plain-text`, which pastes as flat text and loses every heading and italic. Use
+  AppleScript's `«data HTML<hex>»` (what `md_to_clipboard.py` does), and pass the script on
+  **stdin** — a 32KB essay overruns the argv length limit.
+- **Body, fallback:** dispatch a synthetic `paste` `ClipboardEvent` carrying `text/html` on
+  `.ProseMirror`. Works on either surface, but requires the agent to reproduce the whole essay
+  into the eval — see the transcription warning above.
 - The paste is applied **asynchronously**, so the footnote pass MUST be a separate call
   (B) after the body is in the doc model.
 - **Images:** an `<img>` with a `data:` URI is uploaded to Substack's CDN on paste.
@@ -226,6 +280,11 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
 
 ## Guardrails
 
+- **Never retype the essay to get it into Substack.** If a step requires the agent to reproduce
+  the author's prose character by character, that step is wrong — reach for the clipboard
+  transport. The author's words should travel **disk → pasteboard → browser**, never through the
+  agent's fingers. This is not a performance preference: a transcription slip publishes a typo in
+  the author's voice, and every guard downstream reads it as an intended edit.
 - **Never click Publish/Continue/Send — the human publishes.** (Safety rule + editorial
   correctness.) But **do not mistake that for a safety net on a live post.** The old wording here
   claimed the opposite of the truth — that republish "only stages" and "holds doubly" on a live

@@ -68,8 +68,19 @@ def data_uri(piece_dir, rel):
     b64 = base64.b64encode(open(fp, 'rb').read()).decode()
     return f'data:{mime};base64,{b64}'
 
+# House convention censors a quoted swear as f\*\*k — backslash-escaped asterisks, so the
+# markdown shows the asterisks rather than opening emphasis. Nothing honoured the escape: the
+# backslashes travelled straight into the post (`F\*\*k you, dude.` reached readers of
+# `The Knowledge of Good and Evil`), and worse, the bare `**` inside them is a valid bold
+# delimiter, so the emphasis regex could pair one censored word with the next and bold the
+# sentence between them. Escaped punctuation is therefore parked behind a sentinel BEFORE the
+# emphasis passes run and restored after, which is the only ordering that is safe.
+_ESCAPES = {'*': '\x00A\x00', '_': '\x00U\x00', '[': '\x00L\x00', ']': '\x00R\x00'}
+
 def inline(text, piece_dir):
     text = esc(text)
+    for ch, token in _ESCAPES.items():                               # \* -> sentinel
+        text = text.replace('\\' + ch, token)
     text = re.sub(r'\[\^(\w+)\]', r'[[FN\1]]', text)                 # footnote refs -> markers
     def img(m):
         return f'<figure><img src="{data_uri(piece_dir, m.group(2))}" alt="{esc(m.group(1))}"></figure>'
@@ -79,6 +90,8 @@ def inline(text, piece_dir):
     text = re.sub(r'\[([^\[\]]+?)\]\(([^)]+?)\)', r'<a href="\2">\1</a>', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    for ch, token in _ESCAPES.items():                               # sentinel -> literal char
+        text = text.replace(token, ch)
     return text
 
 # An editorial note that matches this is an UNVERIFIED-CLAIM marker, not a
@@ -111,6 +124,23 @@ def render_block(b, piece_dir):
         return '<h2>' + inline(b[3:], piece_dir) + '</h2>'
     if b.startswith('!['):
         return inline(b, piece_dir)
+    if re.match(r'^[-*]\s', b):
+        # Bullet list. Nothing parsed these: the block fell through to <p> and the literal
+        # "- " markers travelled into the post, while the live doc (where the list is a real
+        # bulletList node whose textContent concatenates its items) could never match the
+        # draft's rendering. Continuation lines are indented and belong to the open item.
+        items, cur = [], None
+        for ln in b.split('\n'):
+            m2 = re.match(r'^[-*]\s+(.*)$', ln.strip())
+            if m2:
+                if cur is not None:
+                    items.append(cur)
+                cur = m2.group(1)
+            elif ln.strip() and cur is not None:
+                cur += ' ' + ln.strip()
+        if cur is not None:
+            items.append(cur)
+        return '<ul>' + ''.join('<li>' + inline(it, piece_dir) + '</li>' for it in items) + '</ul>'
     if b.startswith('> '):
         # blockquote: strip the '> ' from every line, join, emit one <blockquote>.
         # Without this the marker survives into the paragraph and is escaped to '&gt;'.

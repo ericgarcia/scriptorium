@@ -89,8 +89,17 @@ JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe
   // surfaces as a structural refusal, which is the safe direction to be wrong in.
   const SUBSTACK_FURNITURE = new Set(['subscribeWidget', 'subscribeWithCaption', 'button',
     'paywall', 'latestPosts', 'embeddedPublication', 'share', 'poll', 'digestPostEmbed']);
+  // Media nodes carry TEXT (a caption) but can never come from draft.md: a markdown image
+  // renders to <figure><img alt=...> whose alt lives in an attribute, so render_reader's body
+  // never contains it. Counting a captioned image as a body block therefore makes the live doc
+  // permanently one block longer than its own draft — `Flow` read 34 against 33 and looked
+  // structurally divergent when it was in sync, and every index after the image was shifted by
+  // one, which is the condition under which a "surgical" patch writes into the wrong paragraph.
+  const MEDIA = new Set(['captionedImage', 'image', 'video', 'nativeVideo', 'audio',
+    'embeddedPost', 'tweet', 'youtube2']);
   const isBodyNode = n => n.type.name !== 'footnote'
     && !SUBSTACK_FURNITURE.has(n.type.name)
+    && !MEDIA.has(n.type.name)
     && n.textContent.trim() !== '';
 
   const flat = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');

@@ -6,8 +6,8 @@ description: Read-only craft audit of one book chapter against the book's review
 # Chapter audit
 
 The quality gate for a single chapter. Read-only: it finds and reports, section by
-section; it does not edit. (For the POV-*pair* / accordion check across two layers of
-one event, use `pov-audit`. To rewrite from findings, go back to `chapter-draft`.)
+section; it does not edit. (For the POV-*pair* check across two chapters covering one
+event, use `pov-audit`. To rewrite from findings, go back to `chapter-draft`.)
 
 ## Always do this first
 

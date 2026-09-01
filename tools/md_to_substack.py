@@ -50,13 +50,28 @@ INTERNAL EDITORIAL NOTES (never publish):
 import sys, os, re, json, base64, mimetypes
 
 def read_manifest(path):
-    m = {}
+    """Flat key: value, plus ONE level of nesting so `images:` can carry a map of
+    local-path -> already-uploaded Substack URL. Anything deeper is ignored."""
+    m, block = {}, None
     if os.path.exists(path):
         for line in open(path):
             line = line.split('#', 1)[0].rstrip()
-            if ':' in line and not line.startswith((' ', '\t')):
+            if not line.strip():
+                continue
+            if line.startswith((' ', '\t')):                          # nested entry
+                if block is not None and ':' in line:
+                    k, v = line.strip().split(':', 1)
+                    m[block][k.strip()] = v.strip()
+                continue
+            if ':' in line:
                 k, v = line.split(':', 1)
-                m[k.strip()] = v.strip()
+                k, v = k.strip(), v.strip()
+                if v == '':                                          # opens a nested block
+                    block = k
+                    m[k] = {}
+                else:
+                    block = None
+                    m[k] = v
     return m
 
 def esc(s):
@@ -67,6 +82,19 @@ def data_uri(piece_dir, rel):
     mime = mimetypes.guess_type(fp)[0] or 'image/png'
     b64 = base64.b64encode(open(fp, 'rb').read()).decode()
     return f'data:{mime};base64,{b64}'
+
+_IMGMAP = {}          # local image path -> already-uploaded Substack URL, per piece
+
+def img_src(piece_dir, rel):
+    """A piece keeps its images on disk under `images/`. Once a piece is live, its
+    publish.yaml records the Substack URL each one was uploaded to; we then point at
+    THAT rather than re-inlining the bytes, so a recompose reuses the asset already in
+    the post instead of uploading a duplicate and orphaning the old one. A piece with
+    no recorded URL (a fresh compose) still inlines, which is what uploads it."""
+    url = _IMGMAP.get(rel)
+    if url:
+        return url
+    return data_uri(piece_dir, rel)
 
 # House convention censors a quoted swear as f\*\*k — backslash-escaped asterisks, so the
 # markdown shows the asterisks rather than opening emphasis. Nothing honoured the escape: the
@@ -83,7 +111,7 @@ def inline(text, piece_dir):
         text = text.replace('\\' + ch, token)
     text = re.sub(r'\[\^(\w+)\]', r'[[FN\1]]', text)                 # footnote refs -> markers
     def img(m):
-        return f'<figure><img src="{data_uri(piece_dir, m.group(2))}" alt="{esc(m.group(1))}"></figure>'
+        return f'<figure><img src="{img_src(piece_dir, m.group(2))}" alt="{esc(m.group(1))}"></figure>'
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', img, text)
     # link text may not contain brackets, so a nearby footnote marker ([[FNx]]) can't be
     # swallowed into the link when a link and a marker share a paragraph
@@ -173,6 +201,9 @@ def parse_blocks(piece_dir):
     internal notes stripped; `fn_issues` reports refs/definitions that don't pair up.
     This is the shared parser behind both convert() (fresh publish) and
     render_reader() (surgical republish)."""
+    global _IMGMAP
+    _man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    _IMGMAP = _man.get('images') if isinstance(_man.get('images'), dict) else {}
     src = open(os.path.join(piece_dir, 'draft.md')).read()
     src = re.sub(r'<!--.*?-->', '', src, flags=re.S)                 # strip HTML comments
     lines = src.split('\n')

@@ -18,3 +18,14 @@ send_email: false        # web-only by default; send the email later if you want
 #             reader URL, and the one in-body cross-links must use. Take the slug
 #             from the publication's archive and confirm it resolves; do not guess
 #             it from the title. A slug that merely looks right can 302 to a 404.
+
+# --- images -------------------------------------------------------------------
+# Pictures live in pieces/<name>/assets/ and are referenced from draft.md as
+# ![alt](assets/hero.png). Once the piece is live, record the Substack URL each
+# file was uploaded to; the converter then points at the URL instead of inlining
+# the bytes, so recomposing reuses the asset already in the post rather than
+# uploading a duplicate. Delete a URL to force a fresh upload from the local file.
+# Populate with: framework/tools/sync_post_images.py pieces/<name> --apply
+#
+# images:
+#   assets/hero.png: https://substack-post-media.s3.amazonaws.com/public/images/<id>_WxH.png

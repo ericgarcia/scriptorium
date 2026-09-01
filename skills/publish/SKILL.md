@@ -44,6 +44,26 @@ notes. The converter enforces the last; you enforce the first two.
    say-so, and note the skip in the log. (A trivial re-sync — a casing sweep, a one-word fix, a
    fixed typo — is exactly what republish mode is for and does **not** need a fresh critique.)
 
+0b-images. **Images live with the piece, not only on Substack.**
+   A piece keeps its pictures in `pieces/<name>/assets/`, referenced from `draft.md` the
+   ordinary markdown way — `![alt](assets/hero.png)` — and `publish.yaml` records, under an
+   `images:` block, which Substack URL each local file is already uploaded to.
+
+   **Why the URL is recorded:** for a piece that is already live the converter emits
+   `<img src="<that URL>">` instead of inlining the bytes, so a recompose **reuses the asset
+   already in the post** rather than uploading a duplicate and orphaning the old one. It also
+   keeps the snippet small — *For the Love of Dogs* converts to 9.7 KB this way instead of
+   ~14 MB. A piece with no recorded URL still inlines, which is what performs the first upload.
+   Delete a URL to force a fresh upload from the local file.
+
+   **An image added in the Substack composer exists only on Substack**, and `draft.md` will
+   not know about it, so a recompose would silently drop it. Pull it back down with
+   `python3 framework/tools/sync_post_images.py pieces/<name> --apply`, which stores every
+   image in the post under `assets/` and writes the `images:` block. It prefers **your original
+   upload** when it can find one (Substack stores PNGs byte-for-byte, so the md5 match is
+   proven rather than guessed), searching `~/Downloads` by default; failing that it keeps
+   Substack's copy. Run it dry first — it changes nothing without `--apply`.
+
 0b-links. **Status-check the in-body cross-links:**
    `python3 framework/tools/check_links.py pieces/<name>` — exits non-zero and names any link
    that does not resolve. A cross-link URL copied out of the scaffold is **unverified by

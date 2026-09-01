@@ -32,10 +32,9 @@ continuity, POV scheme, and motif system, not just a style.
 - **Honor the chapter's job, not whatever comes to mind.** Draft the notes' spine and
   the POV's GMC — the scene should be someone *wanting and colliding*, not events
   passing by.
-- **Medium-aware.** If the book's README sets an interactive / multi-POV (accordion)
-  medium, treat the chapter as a POV-*layer over a shared event*: render what *this*
-  POV perceives and misses, so a sibling POV of the same event *adds* rather than
-  re-narrates. Never write a scene that merely re-tells a scene the reader already had.
+- **Don't replay.** If another chapter already covered this event from a different POV,
+  this chapter must carry the story forward — render what *this* POV uniquely perceives
+  and does; never re-tell a scene the reader already had.
 - **Write to the craft bar** the book's `CLAUDE.md` sets (strict POV, show-not-tell,
   sensory grounding, varied metaphor openness, emotion from situation not statement).
   Don't wait for the audit to catch what the guide already forbids.
@@ -49,7 +48,7 @@ continuity, POV scheme, and motif system, not just a style.
 2. Update the chapter's status in `outline/structure.md` and the README if the act's
    status moved.
 3. Suggest the next gate: `chapter-audit` on what you drafted, and `pov-audit` once
-   its sibling POV-layer exists.
+   a second POV of the same event exists.
 
 ## Boundaries
 

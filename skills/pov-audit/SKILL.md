@@ -1,6 +1,6 @@
 ---
 name: pov-audit
-description: Read-only audit of two POV layers over the same event — does the second POV ADD, or just re-narrate? Use when the user says "pov audit", "do these two chapters earn their doubling", "check the alternating POV", or after a sibling POV-layer is drafted. Checks perceptual tension, dramatic irony, ambiguity, motif evolution, and emotional rhythm across the pair; flags pure re-narration. Especially load-bearing for an accordion / multi-POV medium. Reports; does not rewrite.
+description: Read-only audit of two POV chapters covering the same event — does the second POV ADD, or just re-narrate? Use when the user says "pov audit", "do these two chapters earn their doubling", "check the alternating POV", or after a second POV of a shared event is drafted. Checks perceptual tension, dramatic irony, ambiguity, motif evolution, and emotional rhythm across the pair; flags pure re-narration. Especially load-bearing in an alternating-POV novel, where a replayed event drags the pace. Reports; does not rewrite.
 ---
 
 # POV audit
@@ -11,12 +11,12 @@ what the reader already had, dragging the pace and raising "why are we here agai
 The pass: **two fundamentally different ways of experiencing the same reality**, so
 holding both, the reader sees a third thing neither character can.
 
-In an accordion / interactive medium this is doubly load-bearing: the POV-layers are
-the *interaction*, so each must pay for its expansion.
+In a linear novel this is load-bearing for pace: a second POV that only replays what the
+reader already has drags the whole book, so each must pay its way.
 
 ## Always do this first
 
-1. Read both POV layers (`book/<a>.md`, `book/<b>.md`) of the shared event.
+1. Read both POV chapters (`book/<a>.md`, `book/<b>.md`) that cover the shared event.
 2. Read the book's philosophy/thesis file and `CLAUDE.md` (motifs, the reason the book
    alternates POV at all).
 

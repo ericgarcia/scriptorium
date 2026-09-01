@@ -570,6 +570,72 @@ def cmd_push(piece_dir, plan_json, live_json, out_js):
         print(f"  {p_['kind']:8} live#{p_['liveIdx']}")
 
 
+def _render_at(piece_dir, rev, top):
+    """Render draft.md as it stood at `rev`, in a temp copy of the piece."""
+    rel = os.path.relpath(os.path.abspath(os.path.join(piece_dir, 'draft.md')), top)
+    blob = subprocess.run(['git', '-C', top, 'show', f'{rev}:{rel}'],
+                          capture_output=True, text=True, check=True).stdout
+    tmp = tempfile.mkdtemp()
+    try:
+        for f in os.listdir(piece_dir):
+            src = os.path.join(piece_dir, f)
+            if os.path.isfile(src):
+                shutil.copy2(src, tmp)
+        open(os.path.join(tmp, 'draft.md'), 'w').write(blob)
+        body, fns, _res, _iss = render_reader(tmp)
+        return [H(t) for t in body], [H(t) for t in fns]
+    finally:
+        shutil.rmtree(tmp)
+
+
+def cmd_detect(piece_dir, live_json):
+    """Find which revision the LIVE POST still matches — that one IS the baseline.
+
+    Do not reach for "the newest commit." A commit can carry an editorial pass that was
+    never published, and seeding from it inverts every row that pass touched: the tool
+    reports a PULL and dutifully reverts the change in draft.md, reporting success.
+
+    That is not hypothetical. `e37d5f3` bundled a corpus-wide deity-pronoun capitalization
+    sweep into an unrelated compose commit, and the sweep never reached Substack. Seeding
+    `The Way Home Is Down` from it wanted to revert ten capitals — caught, because this
+    comparison was run by hand. Seeding `They/Them` and `I Believe in You` from it was NOT
+    checked, and ten more capitals were quietly pulled out of two live essays before the
+    author noticed. Hence this command: the check is the tool's job, not the operator's
+    memory.
+    """
+    live = json.load(open(live_json))
+    top = subprocess.run(['git', '-C', piece_dir, 'rev-parse', '--show-toplevel'],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    rel = os.path.relpath(os.path.abspath(os.path.join(piece_dir, 'draft.md')), top)
+    revs = subprocess.run(['git', '-C', top, 'log', '--format=%h', '--', rel],
+                          capture_output=True, text=True, check=True).stdout.split()
+    if not revs:
+        print("no commits touch this draft — nothing to detect.")
+        sys.exit(1)
+    print(f"{'rev':10} {'body':>14} {'footnotes':>14}   subject")
+    best, best_score = None, -1
+    for rev in revs:
+        try:
+            bh, fh = _render_at(piece_dir, rev, top)
+        except Exception as e:
+            print(f"{rev:10} (render failed: {e})")
+            continue
+        bm = sum(1 for x, y in zip(bh, live['body']) if x == y)
+        fm = sum(1 for x, y in zip(fh, live['fns']) if x == y)
+        exact = (len(bh) == len(live['body']) and len(fh) == len(live['fns']))
+        score = bm + fm + (10000 if exact and bm == len(bh) else 0)
+        subj = subprocess.run(['git', '-C', top, 'log', '-1', '--format=%s', rev],
+                              capture_output=True, text=True).stdout.strip()[:54]
+        print(f"{rev:10} {bm:>6}/{len(bh):<7} {fm:>6}/{len(fh):<7}   {subj}")
+        if score > best_score:
+            best, best_score = rev, score
+    print(f"\nbest match: {best}")
+    print(f"  seed {piece_dir} --from-git {best}")
+    print("A revision matching the live post on EVERY body block is the state that was last\n"
+          "pushed. If the newest commit is not that revision, it carries work that never\n"
+          "shipped — seeding from it would revert that work instead of publishing it.")
+
+
 def cmd_resolve(piece_dir, live_json, args):
     """Record a HUMAN's decision on a conflicted row, by moving the baseline for that row.
 
@@ -687,7 +753,7 @@ def cmd_seal(piece_dir, live_json):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: substack_sync.py <scan|plan|fetch|pull|push|resolve|seed|seal> <piece-dir> [args]")
+        print("usage: substack_sync.py <scan|plan|fetch|pull|push|resolve|detect|seed|seal> <piece-dir> [args]")
         sys.exit(1)
     cmd, piece_dir = sys.argv[1], sys.argv[2].rstrip('/')
     rest = sys.argv[3:]
@@ -703,6 +769,8 @@ def main():
         cmd_resolve(piece_dir, rest[0], rest[1:])
     elif cmd == 'push':
         cmd_push(piece_dir, rest[0], rest[1], rest[2] if len(rest) > 2 else 'push.js')
+    elif cmd == 'detect':
+        cmd_detect(piece_dir, rest[0])
     elif cmd == 'seed':
         cmd_seed(piece_dir, rest[0], rest[1] if len(rest) > 1 else None)
     elif cmd == 'seal':

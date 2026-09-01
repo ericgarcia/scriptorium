@@ -75,16 +75,31 @@ Each browser step is one JS eval in the live post's editor.
 
 ## First run (a piece published before sync existed)
 
-`plan` refuses without a baseline, because it would have to guess. Seed one:
+`plan` refuses without a baseline, because it would have to guess. **Do not guess either.**
 
-- `seed pieces/<name> --from-git <rev>` — render `draft.md` as it stood at the commit the
-  piece was composed from. This is the honest one: that text **is** what was pushed. Find
-  the rev with `git log --oneline -- pieces/<name>/draft.md`.
-- `seed pieces/<name> --from-draft` — assert the draft is what is live.
-- `seed pieces/<name> --from-live live.json` — assert the live post is authoritative.
+1. Scan the live post first.
+2. `python3 framework/tools/substack_sync.py detect pieces/<name> live.json`
+   Renders `draft.md` at every commit that touched it and reports how many blocks each
+   revision still matches. **The revision matching the live post on every body block is the
+   state that was last pushed** — that is the baseline, whatever its date.
+3. `seed pieces/<name> --from-git <the rev detect names>`
 
-Prefer `--from-git`. The other two are assertions, and if the assertion is wrong the first
-sync will push or pull something nobody asked for.
+`--from-draft` and `--from-live` also exist, but they are *assertions*, and a wrong
+assertion makes the first sync push or pull something nobody asked for.
+
+**Never seed from "the newest commit" because it is newest.** A commit can carry an
+editorial pass that was never published, and seeding from it **inverts every row that pass
+touched**: the plan reports a PULL, and the sync dutifully reverts the author's own work in
+`draft.md` and reports success.
+
+This is the mistake that motivated `detect`. `e37d5f3` bundled a corpus-wide deity-pronoun
+capitalization sweep into an unrelated compose commit, and the sweep never reached Substack.
+On `The Way Home Is Down` the comparison was run by hand and caught it — ten capitals that
+would have been reverted. On `They/Them` and `I Believe in You` it was **not** run, and ten
+more capitals were quietly pulled out of two live essays before the author caught it. Against
+the live scan, `detect` scores the right revision 83/83 and the tempting newest one 80/83.
+
+The check is the tool's job, not the operator's memory. Run it.
 
 ## Reading the push report
 
@@ -110,6 +125,10 @@ structural, reordered[], suspect[]}`.
 - **Never pass a flag to force past a refusal.** The refusals here exist because each one
   has already been the failure mode once.
 - **Seal every completed sync.** The baseline is the whole mechanism.
+- **A pull that reverses an editorial pass is a red flag, not a result.** If a plan wants to
+  undo something the author clearly meant (capitalization, a house convention, a considered
+  rewrite), stop and re-run `detect` — the baseline is probably wrong, and the "Substack-side
+  edit" is really the live post being *behind*.
 - **The same preflight as `publish` applies**: footnote claims fact-checked, internal notes
   behind a `†`, and the critique gate for a substantive re-sync.
 

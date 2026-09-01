@@ -286,6 +286,14 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
 
 ## Guardrails
 
+- **Never leave two editors open on the same post.** The sync tooling compares `draft.md` against
+  **one** live post; it has no concept of two editors racing, and the newer save silently wins.
+  On 2026-09-01 the in-app pane and real Chrome both held the same post — the pane still carrying
+  the **empty pre-paste state** while Chrome held the finished essay — which put a 5,700-word
+  published piece one autosave away from being overwritten with 38 characters of leftover test
+  content, and swallowed edits the author made in the wrong window. **Before composing, navigate
+  away or close every surface except the one you are composing on**, and say which surface you are
+  using so the author edits the same one.
 - **Never retype the essay to get it into Substack.** If a step requires the agent to reproduce
   the author's prose character by character, that step is wrong — reach for the clipboard
   transport. The author's words should travel **disk → pasteboard → browser**, never through the

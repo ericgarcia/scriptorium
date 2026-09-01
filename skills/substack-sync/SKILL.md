@@ -101,6 +101,34 @@ the live scan, `detect` scores the right revision 83/83 and the tempting newest 
 
 The check is the tool's job, not the operator's memory. Run it.
 
+## Before a recompose: check the images
+
+A surgical push never touches an image. A **recompose** re-pastes the whole body, and any
+image the live post holds that `draft.md` does not reference is destroyed by that paste.
+
+Images are **URL-only** on this desk (2026-09-01): the repo stores no bytes, and a draft
+points at the asset already hosted on Substack. That keeps binaries out of git history, and
+it is safe **only** while every live image is actually referenced in the draft — so check,
+every time, before anything rebuilds a post:
+
+```
+python3 framework/tools/substack_sync.py images pieces/<name> images.js     # run it in the editor
+python3 framework/tools/substack_sync.py check-images pieces/<name> images.json
+```
+
+It exits non-zero and names any live image the draft does not know about. **Fix a gap by
+pasting that URL into `draft.md` where the image belongs — never by deleting the image from
+the post.**
+
+Two details it handles so you don't have to: the same picture appears twice in a scrape (the
+node's S3 `src` and the rendered `<img>`, which Substack wraps in a `substackcdn.com/image/
+fetch/…` transform), and the wrapper embeds the original URL-encoded — so it unwraps and
+dedupes before comparing. Without that it would report a perfectly safe post as unsafe.
+
+`The Highest Peak` is why this exists: a `captionedImage` in the body, no image markdown in
+the draft, and a recompose requested. It was one paste from losing the image with nothing on
+disk to rebuild it from.
+
 ## Reading the push report
 
 `{stagedEdits, unchanged, applied[], footnoteChanges[], reviewMarks[], failed[],

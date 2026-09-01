@@ -64,6 +64,7 @@ SCOPE LIMIT (deliberate)
 Never publishes, never clicks. Every phase leaves the decision with a person.
 """
 import sys, os, re, json, hashlib, subprocess, tempfile, shutil, difflib
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from md_to_substack import (render_reader, read_manifest, flatten_quotes,
@@ -588,6 +589,94 @@ def _render_at(piece_dir, rev, top):
         shutil.rmtree(tmp)
 
 
+IMAGES_JS = """(() => {
+  const root = document.querySelector('.ProseMirror');
+  if (!root || !root.editor) return JSON.stringify({ error: 'no editor — open the live post at /publish/post/<id>' });
+  // Collect every image the post holds, wherever it sits in the node tree. Attribute names
+  // vary by node type (captionedImage/image/nativeVideo thumbnails), so take any attr that
+  // looks like a URL rather than guessing one key.
+  const out = [];
+  const visit = (n) => {
+    const a = n.attrs || {};
+    for (const k of ['src', 'url', 'imageSrc', 'thumbnail']) {
+      if (typeof a[k] === 'string' && /^https?:\/\//.test(a[k])) {
+        out.push({ type: n.type.name, attr: k, src: a[k],
+                   alt: a.alt || '', caption: (a.caption && String(a.caption)) || '' });
+        break;
+      }
+    }
+    n.forEach ? n.forEach(visit) : null;
+  };
+  root.editor.state.doc.forEach(visit);
+  // DOM fallback: anything rendered as an <img> that the node walk missed.
+  for (const el of root.querySelectorAll('img')) {
+    if (el.src && /^https?:\/\//.test(el.src) && !out.some(o => o.src === el.src))
+      out.push({ type: 'dom-img', attr: 'src', src: el.src, alt: el.alt || '', caption: '' });
+  }
+  return JSON.stringify({ images: out });
+})()"""
+
+
+def canonical_image_url(u):
+    """Reduce a Substack image URL to the asset it actually points at.
+
+    The same picture surfaces twice in a scrape: once as the node's own `src` (the S3
+    object) and once as the rendered <img>, which Substack wraps in a CDN transform —
+    `substackcdn.com/image/fetch/$s_!x,w_1456,.../https%3A%2F%2F...s3...png`. They are one
+    image in two dresses. Comparing the dressed form against draft.md would report a live
+    image as unreferenced and fail a recompose that was perfectly safe, so unwrap the
+    embedded original and compare that.
+    """
+    m = re.search(r'/(https?%3A%2F%2F[^/]+)$', u, re.I) or re.search(r'/(https?://.+)$', u[8:], re.I)
+    if 'substackcdn.com/image/fetch/' in u and m:
+        return urllib.parse.unquote(m.group(1))
+    return u
+
+
+def cmd_check_images(piece_dir, images_json):
+    """Refuse a recompose that would destroy an image.
+
+    A recompose re-pastes the whole body from draft.md. Any image the LIVE post holds that
+    the draft does not reference is simply gone the moment that paste lands, and the desk
+    stores no bytes to rebuild it from — images are URL-only by policy (2026-09-01), which
+    keeps binaries out of git history at the cost of the repo being unable to reconstruct a
+    post on its own.
+
+    That policy is safe only while every live image is actually referenced in draft.md, and
+    nothing was checking. `The Highest Peak` was one paste away from proving it (2026-09-01):
+    a captionedImage in the body and no image markdown in the draft at all.
+
+    So this is the recompose preflight. It compares what the post HAS against what the draft
+    KNOWS ABOUT, and refuses on any gap. Fix a gap by pasting the image's URL into draft.md
+    where it belongs — never by deleting it from the post.
+    """
+    data = json.load(open(images_json))
+    if data.get('error'):
+        print(f"scrape failed: {data['error']}")
+        sys.exit(1)
+    draft = open(os.path.join(piece_dir, 'draft.md')).read()
+    seen, live = set(), []
+    for im in data.get('images', []):                                # dedupe on the real asset
+        c = canonical_image_url(im['src'])
+        if c in seen:
+            continue
+        seen.add(c)
+        live.append({**im, 'canonical': c})
+    missing = [im for im in live if im['canonical'] not in draft]
+    print(f"live images: {len(live)} (deduped)   referenced in draft.md: {len(live) - len(missing)}")
+    for im in live:
+        mark = 'MISSING' if im in missing else 'ok     '
+        print(f"  {mark} {im['type']:12} {im['canonical'][:76]}")
+    if missing:
+        print(f"\nREFUSING: {len(missing)} live image(s) are not referenced in draft.md.")
+        print("A recompose re-pastes the body and would destroy them, and the desk keeps no")
+        print("local copy to restore from. Paste each URL into draft.md where the image belongs")
+        print("(![alt](<url>)) and re-run. Do not resolve this by removing the image from the post.")
+        sys.exit(8)
+    print("\nOK — every live image is referenced in the draft. A recompose cannot lose one.")
+
+
+
 def cmd_detect(piece_dir, live_json):
     """Find which revision the LIVE POST still matches — that one IS the baseline.
 
@@ -753,7 +842,7 @@ def cmd_seal(piece_dir, live_json):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: substack_sync.py <scan|plan|fetch|pull|push|resolve|detect|seed|seal> <piece-dir> [args]")
+        print("usage: substack_sync.py <scan|plan|fetch|pull|push|resolve|detect|images|check-images|seed|seal> <piece-dir> [args]")
         sys.exit(1)
     cmd, piece_dir = sys.argv[1], sys.argv[2].rstrip('/')
     rest = sys.argv[3:]
@@ -769,6 +858,10 @@ def main():
         cmd_resolve(piece_dir, rest[0], rest[1:])
     elif cmd == 'push':
         cmd_push(piece_dir, rest[0], rest[1], rest[2] if len(rest) > 2 else 'push.js')
+    elif cmd == 'images':
+        cmd_images(piece_dir, rest[0] if rest else 'images.js')
+    elif cmd == 'check-images':
+        cmd_check_images(piece_dir, rest[0])
     elif cmd == 'detect':
         cmd_detect(piece_dir, rest[0])
     elif cmd == 'seed':

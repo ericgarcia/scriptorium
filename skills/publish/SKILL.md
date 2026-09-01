@@ -195,6 +195,22 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
   or wraps a paragraph). **`Continue` stays disabled until a real edit lands** — a good check
   that a no-op re-sync changed nothing.
 
+## Recompose: check the images first
+
+A recompose (a full re-paste, as opposed to the surgical re-sync above) **destroys any image
+the live post holds that `draft.md` does not reference.** Images are URL-only on this desk —
+the repo stores no bytes — so there is nothing to restore one from.
+
+Run the check before any recompose, and treat it as a gate rather than advice:
+
+```
+python3 framework/tools/substack_sync.py images pieces/<name> images.js      # run in the editor
+python3 framework/tools/substack_sync.py check-images pieces/<name> images.json
+```
+
+Non-zero exit names every live image the draft does not know about. Fix a gap by pasting the
+URL into `draft.md` where the image belongs — **never** by deleting the image from the post.
+
 ## Guardrails
 
 - **Draft-only.** Never click Publish/Continue/Send — the human publishes. (Safety rule +
@@ -206,6 +222,8 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
   the tool **refuses** (`structural:true`, zero edits); recompose the piece or edit by hand
   instead of nuking-and-repaving a live essay. Never pass a flag to force past a refusal.
 - **Framework stays generic.** No publication specifics, no secrets, no personal writing here.
+- **Never recompose without the image check.** A re-paste silently drops any live image the
+  draft does not reference, and nothing in the repo can rebuild it.
 - **Verified + clean before it ships.** Preflight is not optional: footnote claims are
   fact-checked, and internal notes are stripped (the converter refuses output otherwise).
   Misquoting a real person or leaking a "Verify X" note into a public draft is the failure

@@ -50,3 +50,15 @@ the loop — write freely, revise later, let git remember old versions.
   to a fact in the book's `facts.md`. If a vivid specific would help but isn't in
   the ledger, write a `[bracket]` for the author to fill; never invent it. The
   machine renders; it does not live.
+  - **The rule reaches anything checkable, not only people and animals.** A product
+    and its interface, a place, an institution, a date, a price — if a reader could
+    verify it in five seconds, it is witness and not scenery. Treat it like a
+    quotation: get it from the ledger or from the author, or leave a `[bracket]`.
+    Inventing plausible detail about a real thing is the same fault as inventing it
+    about a real person, and it is easier to commit because the thing has no
+    feelings to bruise.
+  - **The check is weakest exactly where the prose is strongest.** An invented
+    specific arrives wearing the same clothes as a well-chosen one, and the pressure
+    to supply one peaks in an opening, a close, and any passage being rewritten to
+    fix an earlier invention. Run the ledger check hardest on the lines you are
+    proudest of.

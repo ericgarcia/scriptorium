@@ -125,7 +125,13 @@ def inline(text, piece_dir):
 # An editorial note that matches this is an UNVERIFIED-CLAIM marker, not a
 # harmless aside. Stripping one silently is the failure this guard exists to
 # stop, so it is checked against the text that was REMOVED, not what survived.
-UNVERIFIED_RE = re.compile(r'\b(verify|todo|tk|check|confirm|pin|source|cite)\b', re.I)
+# Imperative/bare forms only. PAST TENSE MEANS THE WORK IS DONE: a note reading
+# "Checked against the luma page 2026-08-26" is a record of verification, not a request
+# for it, and blocking on it would refuse a piece that is already correct (flow, 2026-09-01).
+UNVERIFIED_RE = re.compile(
+    r'\b(verify|verifying|todo|to-do|tk|fixme|xxx)\b'
+    r'|\bcheck\b(?!ed|ing)|\bconfirm\b(?!ed|ing)|\bpin\b(?!ned)'
+    r'|\bneeds?\s+(?:a\s+)?(?:check|source|cite|citation|verification)\b', re.I)
 
 def clean_footnote(raw):
     """Drop internal editorial notes from a footnote's text.

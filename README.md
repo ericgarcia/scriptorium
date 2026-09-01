@@ -58,8 +58,7 @@ write API: the `publish` and `substack-sync` skills work by driving the Substack
 - **[The Claude in Chrome extension](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn)**,
   **v1.0.36 or higher**, in Chrome, Edge, or another Chromium browser (Brave, Arc, Vivaldi,
   Opera). Not supported in WSL.
-- **macOS**, for the default compose transport only (`tools/md_to_clipboard.py` uses the
-  AppleScript pasteboard). Everything else is platform-neutral.
+- **macOS**, for the default compose transport only — see *Platform support* below.
 
 ### Why the extension is required, and not merely nice
 
@@ -103,6 +102,43 @@ attempt fails. On a long session the extension's service worker can go idle — 
 **Site permissions** are the extension's, not this framework's. Grant access to your publication's
 domain (e.g. `yourpub.substack.com`) in the extension's settings, and stay signed in there —
 automation cannot enter credentials.
+
+## Platform support — macOS only today, and contributions are welcome
+
+**This was built on macOS and only the macOS path has ever been run.** Being explicit about that
+is more useful than a vague claim of portability.
+
+**Exactly one thing is macOS-specific:** `tools/md_to_clipboard.py`, which puts the composed HTML
+on the system pasteboard. It shells out to AppleScript (`osascript`). Everything else — the
+writing loop, the converter, the sync and repatch tools, the browser driving — is plain Python and
+platform-neutral, and the `publish` skill documents a JS-snippet fallback that works anywhere
+(at the cost of the transcription risk the clipboard exists to remove).
+
+**Windows and Linux support is a genuinely small, well-scoped contribution, and it is wanted.**
+The whole surface is one function:
+
+```python
+def set_clipboard_html(html: str) -> None:   # tools/md_to_clipboard.py
+```
+
+The only hard requirement is that the HTML lands under the **HTML clipboard flavor**, not as
+plain text. Plain text is the trap: it pastes, it looks like it worked, and every heading,
+blockquote, italic and link is silently gone. Sketches, untested:
+
+- **Linux (X11):** `xclip -selection clipboard -t text/html`
+- **Linux (Wayland):** `wl-copy --type text/html`
+- **Windows:** `CF_HTML` — note this one is not a straight write. The format needs its own
+  header block with byte offsets (`StartHTML`/`EndHTML`/`StartFragment`/`EndFragment`) computed
+  over the payload, so `Set-Clipboard` alone will not do it.
+
+If you take this on, please verify the same way the macOS path is verified: compose a real piece,
+then compare a digest of the live document's per-block text against the same digest computed from
+`draft.md`. **They should be identical.** That check is what makes the transport trustworthy, and
+it is the bar any new platform should clear before it becomes a default.
+
+Issues and pull requests welcome. The same goes for other publishing targets — the skills are
+written against Substack because that is what this desk publishes to, not because the model is
+Substack-shaped.
 
 ## Adopt it
 

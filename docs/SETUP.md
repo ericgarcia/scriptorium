@@ -117,8 +117,16 @@ Those are two different URLs and both are needed: the editor one drives re-syncs
 one is the only URL that may appear in another essay's body.
 
 **Not on macOS?** `tools/md_to_clipboard.py` uses the AppleScript pasteboard, so the clipboard
-transport is macOS-only today. The `publish` skill documents a JS-snippet fallback; use it
-knowingly — it reintroduces the transcription risk the clipboard exists to remove.
+transport is **macOS-only today** — that is the one platform-specific piece of the framework, and
+it is the only path that has ever been run. Use the JS-snippet fallback the `publish` skill
+documents, knowing it reintroduces the transcription risk the clipboard exists to remove, and
+verify the composed post against the draft either way.
+
+**Porting it is a small, well-scoped contribution and it is wanted** — one function,
+`set_clipboard_html()`. See *Platform support* in the [README](../README.md) for the sketches and
+for the one requirement that matters: the payload has to land under the HTML clipboard **flavor**.
+Plain text is the trap — it pastes, it looks like it worked, and every heading, blockquote, italic
+and link is silently gone.
 
 ## Keeping the framework up to date
 

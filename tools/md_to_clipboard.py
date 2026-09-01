@@ -34,6 +34,15 @@ transport, never a way around the gates.
 Footnotes cannot travel by clipboard: a paste cannot create native Substack footnotes.
 `--fn-out` writes the small footnote-insertion snippet (a few KB, keyed on the [[FNn]]
 markers the paste leaves behind), which is small enough to run directly.
+
+PLATFORM
+--------
+macOS only today, and `set_clipboard_html` below is the entire platform-specific surface --
+everything else in this repo is platform-neutral. Windows and Linux support is wanted and is a
+small, well-scoped contribution; see "Platform support" in the README for sketches and for the
+one hard requirement: the payload must land under the HTML clipboard *flavor*. Plain text is the
+trap -- it pastes, it looks like it worked, and every heading, blockquote, italic and link is
+silently gone.
 """
 
 import sys, os, json, hashlib, subprocess
@@ -65,7 +74,22 @@ def set_clipboard_html(html: str) -> None:
     «data HTML<hex>» sets the real HTML flavor, which is what the paste handler reads.
     """
     if sys.platform != 'darwin':
-        sys.exit('md_to_clipboard: macOS only (uses the AppleScript pasteboard).')
+        sys.exit(
+            'md_to_clipboard: macOS only -- this is the one platform-specific piece of the\n'
+            'framework, and it has only ever been run on macOS.\n\n'
+            'Right now, use the JS-snippet fallback documented in skills/publish/SKILL.md.\n'
+            'Know that it is a real downgrade: it requires the agent to reproduce the whole\n'
+            'essay into a browser eval, which is the transcription risk this tool exists to\n'
+            'remove. Verify the composed post against the draft either way.\n\n'
+            'Porting is small and welcome -- set_clipboard_html() is the whole surface. The\n'
+            'payload must land under the HTML clipboard FLAVOR, not as plain text; plain text\n'
+            'pastes cleanly and silently drops every heading, blockquote, italic and link.\n'
+            '  Linux/X11:     xclip -selection clipboard -t text/html\n'
+            '  Linux/Wayland: wl-copy --type text/html\n'
+            '  Windows:       CF_HTML, which needs its own header with byte offsets\n'
+            '                 (StartHTML/EndHTML/StartFragment/EndFragment) -- Set-Clipboard\n'
+            '                 alone will not do it.\n'
+            'See "Platform support" in the framework README.')
     hexed = html.encode('utf-8').hex()
     # Passed via stdin, not argv: a 32KB essay overruns the command-line length limit.
     proc = subprocess.run(['osascript', '-'], input='set the clipboard to «data HTML%s»' % hexed,

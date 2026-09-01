@@ -114,9 +114,26 @@ def render_block(b, piece_dir):
     if b.startswith('> '):
         # blockquote: strip the '> ' from every line, join, emit one <blockquote>.
         # Without this the marker survives into the paragraph and is escaped to '&gt;'.
-        quoted = ' '.join(re.sub(r'^>\s?', '', ln) for ln in b.split('\n'))
-        return '<blockquote><p>' + inline(quoted, piece_dir) + '</p></blockquote>'
+        # A merged source (see parse_blocks) holds several quoted paragraphs separated by a
+        # blank line; each becomes its own <p> INSIDE the one blockquote.
+        paras = [q for q in re.split(r'\n\s*\n', b) if q.strip()]
+        inner = ''.join(
+            '<p>' + inline(' '.join(re.sub(r'^>\s?', '', ln) for ln in q.split('\n')),
+                           piece_dir) + '</p>'
+            for q in paras)
+        return '<blockquote>' + inner + '</blockquote>'
     return '<p>' + inline(' '.join(b.split('\n')), piece_dir) + '</p>'
+
+def render_footnote_block(b, piece_dir):
+    """Render ONE `[^n]: ...` definition block the way parse_blocks does — label stripped,
+    lines joined, internal notes cleaned. A footnote is NOT a paragraph, and rendering one
+    through render_block leaves its `[^n]:` label in the text, which silently fails any
+    round-trip check made against it."""
+    m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b.strip(), re.S)
+    if not m:
+        return None
+    text, _removed = clean_footnote(' '.join(m.group(2).split('\n')))
+    return inline(text, piece_dir)
 
 def parse_blocks(piece_dir):
     """Parse draft.md into (blocks, footnotes_ordered, stripped, residual).
@@ -155,6 +172,17 @@ def parse_blocks(piece_dir):
             footnotes[m.group(1)] = inline(text, piece_dir)
             fn_src[m.group(1)] = b
             continue
+        # ADJACENT BLOCKQUOTES MERGE. ProseMirror joins two neighbouring blockquotes into one
+        # node on paste, so a draft with two consecutive `> ` blocks composes to ONE live
+        # blockquote holding two paragraphs. Emitting them as two blocks here made the draft
+        # permanently one block longer than its own post — `In the Name` read 111 against a
+        # live 110 and could never be re-synced, because the surgical patcher aligns top nodes
+        # 1:1 and rightly refuses a count mismatch. The converter now models what Substack
+        # actually produces rather than what the markdown looks like.
+        if b.startswith('> ') and out_src and out_src[-1].startswith('> '):
+            out_src[-1] = out_src[-1] + '\n\n' + b
+            out[-1] = render_block(out_src[-1], piece_dir)
+            continue
         out_src.append(b)
         out.append(render_block(b, piece_dir))
 
@@ -180,10 +208,19 @@ def parse_blocks(piece_dir):
                 continue
             seen.add(n)
             ref_order.append(n)
+    # A footnote referenced from INSIDE another footnote cannot work: the composer's
+    # insertFootnote pass walks the BODY's markers only, so the marker in the note is never
+    # converted — it publishes as a literal `[^25]` — while this converter's reader-text strips
+    # it, leaving a dangling `cf. )` on the draft side. Both wrong, differently, and neither
+    # visible to any existing guard. `The Way Home Is Down` carried exactly that to readers from
+    # the day it published (found 2026-09-01).
+    nested = sorted({m.group(1) for n, c in footnotes.items()
+                     for m in re.finditer(r'\[\[FN(\w+)\]\]', c)})
     fn_issues = {
         'undefined':    [n for n in ref_order if n not in footnotes],   # ref with no definition
         'unreferenced': [n for n in footnotes if n not in seen],        # definition never cited
         'duplicated':   sorted(set(duplicated)),                        # cited more than once
+        'nested':       nested,                                         # ref inside a footnote
     }
     ordered = [[n, footnotes[n]] for n in ref_order if n in footnotes]
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
@@ -279,6 +316,10 @@ def main():
         if not allow_verify:
             print("Refusing to write output. Re-run with --allow-verify to override.")
             sys.exit(2)
+    if fn_issues['nested']:
+        print(f"WARNING: footnote reference(s) inside a footnote: {fn_issues['nested']}. These "
+              f"cannot become footnotes — they publish as a literal marker. Reword the note.")
+        sys.exit(5)
     if fn_issues['undefined'] or fn_issues['duplicated']:
         # Either one changes how many footnote nodes the composer creates, which
         # desynchronizes every later index for a subsequent surgical re-sync.

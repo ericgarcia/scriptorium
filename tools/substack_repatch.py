@@ -54,7 +54,7 @@ def main():
         print("Refusing to write output.")
         sys.exit(2)
 
-    if fn_issues['undefined'] or fn_issues['duplicated']:
+    if fn_issues['undefined'] or fn_issues['duplicated'] or fn_issues['nested']:
         print(f"Refusing: footnote refs and definitions do not pair up "
               f"({ {k: v for k, v in fn_issues.items() if v} }). Each of these shifts the "
               f"footnote indexing the surgical diff aligns on.")
@@ -68,6 +68,7 @@ def main():
               "that post_url in publish.yaml so future runs are unambiguous.")
 
     js = (REPATCH_JS
+          .replace('%HELPERS%', JS_HELPERS)
           .replace('%TITLE%', json.dumps(man.get('title', '')))
           .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
           .replace('%BODY%', json.dumps(body))
@@ -76,12 +77,89 @@ def main():
     print(f"wrote {out_js} ({len(js)} bytes)")
 
 
+# JS helpers shared by the full-document patcher below and by substack_sync's
+# minimal push, so the two can never drift on typography, diffing or offsets.
+JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe prompt it injects into
+  // published posts, and its relatives. They carry text, they are NOT authored content, and
+  // they exist in no draft.md — so counting them as body blocks makes a piece look
+  // structurally divergent forever and shifts every index after the first one. `They/Them`
+  // carried two subscribeWidgets (one after the opening beat, one at the tail) and so read as
+  // live=85 vs draft=83, which the count guard could only report as "refusing to patch."
+  // Anything unrecognized is deliberately NOT excluded: an unknown block changes the count and
+  // surfaces as a structural refusal, which is the safe direction to be wrong in.
+  const SUBSTACK_FURNITURE = new Set(['subscribeWidget', 'subscribeWithCaption', 'button',
+    'paywall', 'latestPosts', 'embeddedPublication', 'share', 'poll', 'digestPostEmbed']);
+  const isBodyNode = n => n.type.name !== 'footnote'
+    && !SUBSTACK_FURNITURE.has(n.type.name)
+    && n.textContent.trim() !== '';
+
+  const flat = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');
+  const OPENS = new Set([...' \t\n(\u3010[{\u2014\u2013-\u201c\u2018']);
+  const smarten = (s, prevCh) => {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i], prev = i ? s[i-1] : (prevCh || ' ');
+      if (ch === '"') out += OPENS.has(prev) ? '\u201c' : '\u201d';
+      else if (ch === "'") out += OPENS.has(prev) ? '\u2018' : '\u2019';
+      else out += ch;
+    }
+    return out;
+  };
+
+  // minimal char-level diff of one block into hunks [{aStart,aEnd,text}], grouping each
+  // contiguous run of edits between matched text into ONE hunk. Two separate edits in a
+  // paragraph stay two hunks, so each is applied with its own marks — a casing flip inside
+  // an italic run keeps the italic, a plain-text fix stays plain.
+  const diffHunks = (a, b) => {
+    if (a === b) return [];
+    const n = a.length, m = b.length;
+    let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
+    let s = 0; while (s < n - p && s < m - p && a[n-1-s] === b[m-1-s]) s++;
+    const ac = a.slice(p, n - s), bc = b.slice(p, m - s);
+    const A = ac.length, B = bc.length;
+    // guard the DP: fall back to one span for pathologically large cores
+    if (A * B > 4000000 || A > 60000 || B > 60000) return [{ aStart: p, aEnd: n - s, text: bc, big: true }];
+    const dp = Array.from({ length: A + 1 }, () => new Uint16Array(B + 1));
+    for (let i = A - 1; i >= 0; i--) for (let j = B - 1; j >= 0; j--)
+      dp[i][j] = ac[i] === bc[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    const hunks = []; let i = 0, j = 0, ds = null, de = null, ins = '';
+    const flush = () => { if (ds !== null || ins.length) hunks.push({ aStart: p + (ds !== null ? ds : i), aEnd: p + (de !== null ? de : i), text: ins }); ds = de = null; ins = ''; };
+    while (i < A && j < B) {
+      if (ac[i] === bc[j]) { flush(); i++; j++; }
+      else if (dp[i+1][j] >= dp[i][j+1]) { if (ds === null) ds = i; de = i + 1; i++; }
+      else { if (ds === null) { ds = i; de = i; } ins += bc[j]; j++; }
+    }
+    if (i < A) { if (ds === null) ds = i; de = A; }
+    if (j < B) ins += bc.slice(j);
+    flush();
+    return hunks;
+  };
+
+  // map a character offset within a top node's textContent to an absolute doc position,
+  // walking real text descendants so it is correct whether the node is a bare textblock
+  // (paragraph/heading) or wraps a paragraph (footnote).
+  const offsetToPos = (node, nodeStartPos, charOffset) => {
+    let acc = 0, out = null;
+    node.descendants((child, relPos) => {
+      if (out !== null) return false;
+      if (child.isText) {
+        const len = child.text.length;
+        if (charOffset <= acc + len) { out = nodeStartPos + 1 + relPos + (charOffset - acc); return false; }
+        acc += len;
+      }
+      return true;
+    });
+    if (out === null) out = nodeStartPos + node.nodeSize - 1;
+    return out;
+  };"""
+
 # The engine. Runs in the live post's editor. Stages edits only; never publishes.
 REPATCH_JS = r"""(() => {
   const TITLE = %TITLE%, SUBTITLE = %SUBTITLE%, BODY = %BODY%, FNS = %FNS%;
   const root = document.querySelector('.ProseMirror');
   if (!root || !root.editor) return JSON.stringify({ error: 'no editor found — open the live post at /publish/post/<id>' });
   const ed = root.editor;
+%HELPERS%
 
   // --- title / subtitle: set only if changed (a no-op set would still dirty the doc) ---
   const setField = (sel, v) => {
@@ -100,25 +178,14 @@ REPATCH_JS = r"""(() => {
   // (curly -> straight, a 1:1 substitution that preserves length, so offsets computed
   // on it are valid against the real doc), and SMARTEN anything actually inserted so
   // it matches the typography of the document it lands in.
-  const flat = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');
-  const OPENS = new Set([...' \t\n(\u3010[{\u2014\u2013-\u201c\u2018']);
-  const smarten = (s, prevCh) => {
-    let out = '';
-    for (let i = 0; i < s.length; i++) {
-      const ch = s[i], prev = i ? s[i-1] : (prevCh || ' ');
-      if (ch === '"') out += OPENS.has(prev) ? '\u201c' : '\u201d';
-      else if (ch === "'") out += OPENS.has(prev) ? '\u2018' : '\u2019';
-      else out += ch;
-    }
-    return out;
-  };
+  // (typography helpers come from JS_HELPERS)
 
   const liveBody = [], liveFns = [];
   ed.state.doc.forEach((node, pos) => {
     const raw = node.textContent;
     const rec = { pos, node, raw, text: flat(raw) };
     if (node.type.name === 'footnote') liveFns.push(rec);
-    else if (raw.trim() !== '') liveBody.push(rec);
+    else if (isBodyNode(node)) liveBody.push(rec);
   });
 
   const report = {
@@ -181,52 +248,7 @@ REPATCH_JS = r"""(() => {
     return JSON.stringify(report);
   }
 
-  // minimal char-level diff of one block into hunks [{aStart,aEnd,text}], grouping each
-  // contiguous run of edits between matched text into ONE hunk. Two separate edits in a
-  // paragraph stay two hunks, so each is applied with its own marks — a casing flip inside
-  // an italic run keeps the italic, a plain-text fix stays plain.
-  const diffHunks = (a, b) => {
-    if (a === b) return [];
-    const n = a.length, m = b.length;
-    let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
-    let s = 0; while (s < n - p && s < m - p && a[n-1-s] === b[m-1-s]) s++;
-    const ac = a.slice(p, n - s), bc = b.slice(p, m - s);
-    const A = ac.length, B = bc.length;
-    // guard the DP: fall back to one span for pathologically large cores
-    if (A * B > 4000000 || A > 60000 || B > 60000) return [{ aStart: p, aEnd: n - s, text: bc, big: true }];
-    const dp = Array.from({ length: A + 1 }, () => new Uint16Array(B + 1));
-    for (let i = A - 1; i >= 0; i--) for (let j = B - 1; j >= 0; j--)
-      dp[i][j] = ac[i] === bc[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
-    const hunks = []; let i = 0, j = 0, ds = null, de = null, ins = '';
-    const flush = () => { if (ds !== null || ins.length) hunks.push({ aStart: p + (ds !== null ? ds : i), aEnd: p + (de !== null ? de : i), text: ins }); ds = de = null; ins = ''; };
-    while (i < A && j < B) {
-      if (ac[i] === bc[j]) { flush(); i++; j++; }
-      else if (dp[i+1][j] >= dp[i][j+1]) { if (ds === null) ds = i; de = i + 1; i++; }
-      else { if (ds === null) { ds = i; de = i; } ins += bc[j]; j++; }
-    }
-    if (i < A) { if (ds === null) ds = i; de = A; }
-    if (j < B) ins += bc.slice(j);
-    flush();
-    return hunks;
-  };
-
-  // map a character offset within a top node's textContent to an absolute doc position,
-  // walking real text descendants so it is correct whether the node is a bare textblock
-  // (paragraph/heading) or wraps a paragraph (footnote).
-  const offsetToPos = (node, nodeStartPos, charOffset) => {
-    let acc = 0, out = null;
-    node.descendants((child, relPos) => {
-      if (out !== null) return false;
-      if (child.isText) {
-        const len = child.text.length;
-        if (charOffset <= acc + len) { out = nodeStartPos + 1 + relPos + (charOffset - acc); return false; }
-        acc += len;
-      }
-      return true;
-    });
-    if (out === null) out = nodeStartPos + node.nodeSize - 1;
-    return out;
-  };
+  // (diff + offset helpers come from JS_HELPERS)
 
   // one task per hunk, across body then footnotes
   const tasks = [];

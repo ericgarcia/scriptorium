@@ -67,7 +67,8 @@ import sys, os, re, json, hashlib, subprocess, tempfile, shutil, difflib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from md_to_substack import (render_reader, read_manifest, flatten_quotes,
-                            render_block, strip_to_reader)
+                            render_block, render_footnote_block, strip_to_reader)
+from substack_repatch import JS_HELPERS
 
 BASELINE = 'sync-baseline.json'
 
@@ -201,7 +202,7 @@ def reader_to_source_map(block_src, reader_text):
     return m
 
 
-def edit_block_source(block_src, old_reader, new_reader, piece_dir):
+def edit_block_source(block_src, old_reader, new_reader, piece_dir, kind='body'):
     """Rewrite one block's markdown so its reader-text becomes `new_reader`, changing only
     the runs that differ and leaving emphasis, links and footnote markers alone.
 
@@ -224,7 +225,11 @@ def edit_block_source(block_src, old_reader, new_reader, piece_dir):
         if a is None or b is None or a > b:
             return None, 'offsets could not be mapped into the markdown'
         out = out[:a] + repl + out[b:]
-    got = flatten_quotes(strip_to_reader(render_block(out, piece_dir)))
+    rendered = (render_footnote_block(out, piece_dir) if kind == 'footnote'
+                else render_block(out, piece_dir))
+    if rendered is None:
+        return None, 'block no longer parses as a footnote definition'
+    got = flatten_quotes(strip_to_reader(rendered))
     want = flatten_quotes(new_reader)
     if got != want:
         return None, 'edited block did not re-render to the expected text'
@@ -240,16 +245,15 @@ def _opcodes(a, b):
 SCAN_JS = """await (async () => {
   const root = document.querySelector('.ProseMirror');
   if (!root || !root.editor) return JSON.stringify({ error: 'no editor — open the live post at /publish/post/<id>' });
-  const flat = s => s.replace(/[\\u2018\\u2019]/g, "'").replace(/[\\u201c\\u201d]/g, '"');
+%HELPERS%
   const sha = async s => {
     const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
     return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
   };
   const body = [], fns = [];
   root.editor.state.doc.forEach(n => {
-    const t = n.textContent;
-    if (n.type.name === 'footnote') fns.push(t);
-    else if (t.trim() !== '') body.push(t);
+    if (n.type.name === 'footnote') fns.push(n.textContent);
+    else if (isBodyNode(n)) body.push(n.textContent);
   });
   const hash = async a => Promise.all(a.map(t => sha(flat(t))));
   const T = document.querySelector('textarea[placeholder="Title"]');
@@ -266,11 +270,11 @@ FETCH_JS = """(() => {
   const WANT_BODY = %BODY_IDX%, WANT_FNS = %FN_IDX%;
   const root = document.querySelector('.ProseMirror');
   if (!root || !root.editor) return JSON.stringify({ error: 'no editor found' });
+%HELPERS%
   const body = [], fns = [];
   root.editor.state.doc.forEach(n => {
-    const t = n.textContent;
-    if (n.type.name === 'footnote') fns.push(t);
-    else if (t.trim() !== '') body.push(t);
+    if (n.type.name === 'footnote') fns.push(n.textContent);
+    else if (isBodyNode(n)) body.push(n.textContent);
   });
   const pick = (a, idx) => Object.fromEntries(idx.map(i => [i, a[i]]));
   return JSON.stringify({ body: pick(body, WANT_BODY), fns: pick(fns, WANT_FNS) });
@@ -280,7 +284,7 @@ FETCH_JS = """(() => {
 # ---------------------------------------------------------------- commands
 
 def cmd_scan(piece_dir, out_js):
-    open(out_js, 'w').write(SCAN_JS)
+    open(out_js, 'w').write(SCAN_JS.replace('%HELPERS%', JS_HELPERS))
     d = draft_state(piece_dir)
     print(f"wrote {out_js}")
     print(f"draft: body={len(d['body'])} fns={len(d['fns'])}  post_url~{d['post_url'] or '(none)'}")
@@ -298,7 +302,7 @@ def cmd_plan(piece_dir, live_json, out_plan):
         print(f"Refusing: {len(d['residual'])} footnote(s) still contain 'verify': {d['residual']}")
         sys.exit(2)
     iss = {k: v for k, v in d['fn_issues'].items() if v}
-    if d['fn_issues']['undefined'] or d['fn_issues']['duplicated']:
+    if d['fn_issues']['undefined'] or d['fn_issues']['duplicated'] or d['fn_issues']['nested']:
         print(f"Refusing: footnote refs/definitions do not pair up ({iss}).")
         sys.exit(4)
 
@@ -370,7 +374,8 @@ def cmd_fetch(piece_dir, plan_json, out_js):
     need = [r for r in plan['rows'] if r['state'] in ('pull', 'conflict')]
     bidx = sorted({r['liveIdx'] for r in need if r['kind'] == 'body'})
     fidx = sorted({r['liveIdx'] for r in need if r['kind'] == 'footnote'})
-    js = FETCH_JS.replace('%BODY_IDX%', json.dumps(bidx)).replace('%FN_IDX%', json.dumps(fidx))
+    js = (FETCH_JS.replace('%HELPERS%', JS_HELPERS)
+                  .replace('%BODY_IDX%', json.dumps(bidx)).replace('%FN_IDX%', json.dumps(fidx)))
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} — fetches {len(bidx)} body + {len(fidx)} footnote block(s) of live text")
 
@@ -418,7 +423,8 @@ def cmd_pull(piece_dir, plan_json, livetext_json):
             manual.append((r, 'block source is not uniquely locatable in draft.md'))
             continue
         # keep draft.md straight-quoted: the curly quotes are Substack's rendering, not content
-        new_src, note = edit_block_source(block_src, old_reader, flatten_quotes(new), piece_dir)
+        new_src, note = edit_block_source(block_src, old_reader, flatten_quotes(new),
+                                          piece_dir, r['kind'])
         if new_src is None:
             manual.append((r, note))
             continue
@@ -441,6 +447,173 @@ def cmd_pull(piece_dir, plan_json, livetext_json):
         for r, msg in manual:
             print(f"  {r['kind']:8} draft#{r['draftIdx']}  {msg}")
         sys.exit(6)
+
+
+
+# The minimal push. Where substack_repatch ships the WHOLE document and rediscovers what
+# differs, sync already knows — the plan says exactly which blocks moved and in which
+# direction — so this carries only those blocks. A 6,000-word essay with a one-word fix
+# becomes a few hundred bytes instead of ~24 KB.
+#
+# It also buys a real guarantee the full-document patcher cannot give: each row carries the
+# hash the block had AT SCAN TIME, and every row is checked BEFORE anything is applied. If
+# the post changed in between — someone editing in Substack while this ran — the whole push
+# aborts having staged nothing, instead of writing over an edit it never saw.
+PUSH_JS = """await (async () => {
+  const PATCH = %PATCH%, TITLE = %TITLE%, SUBTITLE = %SUBTITLE%;
+  const SET_TITLE = %SET_TITLE%, SET_SUB = %SET_SUB%;
+  const root = document.querySelector('.ProseMirror');
+  if (!root || !root.editor) return JSON.stringify({ error: 'no editor — open the live post at /publish/post/<id>' });
+  const ed = root.editor;
+%HELPERS%
+  const sha = async s => {
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  };
+  const body = [], fns = [];
+  ed.state.doc.forEach((node, pos) => {
+    const raw = node.textContent;
+    const rec = { pos, node, raw, text: flat(raw) };
+    if (node.type.name === 'footnote') fns.push(rec);
+    else if (isBodyNode(node)) body.push(rec);
+  });
+  const list = k => (k === 'footnote' ? fns : body);
+  const report = { stale: [], applied: [], failed: [], reviewMarks: [],
+                   titleChanged: false, subtitleChanged: false, aborted: false };
+
+  // pre-image check across EVERY row before a single edit is applied
+  for (const r of PATCH) {
+    const L = list(r.kind)[r.liveIdx];
+    if (!L) { report.stale.push({ kind: r.kind, liveIdx: r.liveIdx, why: 'no block at that index' }); continue; }
+    if (await sha(L.text) !== r.expect)
+      report.stale.push({ kind: r.kind, liveIdx: r.liveIdx,
+                          why: 'live text changed since the scan', live: L.text.slice(0, 90) });
+  }
+  if (report.stale.length) {
+    report.aborted = true;
+    report.note = 'live post moved since the scan — nothing was staged. Re-run scan/plan.';
+    return JSON.stringify(report);
+  }
+
+  const tasks = [];
+  for (const r of PATCH) {
+    const L = list(r.kind)[r.liveIdx];
+    for (const h of diffHunks(L.text, flat(r.text))) tasks.push({ r, L, hunk: h });
+  }
+  tasks.sort((a, b) => (b.L.pos - a.L.pos) || (b.hunk.aStart - a.hunk.aStart));
+  for (const t of tasks) {
+    try {
+      const from = offsetToPos(t.L.node, t.L.pos, t.hunk.aStart);
+      const to = offsetToPos(t.L.node, t.L.pos, t.hunk.aEnd);
+      const st = ed.state;
+      const marks = st.doc.resolve(from).marks();
+      const endMarks = st.doc.resolve(Math.max(from, to)).marks();
+      const uniform = marks.length === endMarks.length && marks.every(m => endMarks.some(e => e.eq(m)));
+      const prevCh = t.hunk.aStart > 0 ? t.L.raw[t.hunk.aStart - 1] : ' ';
+      const ins = smarten(t.hunk.text, prevCh);
+      let tr = st.tr;
+      if (ins.length) tr = tr.replaceWith(from, to, st.schema.text(ins, marks));
+      else tr = tr.delete(from, to);
+      ed.view.dispatch(tr);
+      const e = { kind: t.r.kind, liveIdx: t.r.liveIdx, insert: ins || '(deleted)' };
+      report.applied.push(e);
+      if (!uniform || t.hunk.big) report.reviewMarks.push(e);
+    } catch (err) {
+      report.failed.push({ kind: t.r.kind, liveIdx: t.r.liveIdx, error: String(err) });
+    }
+  }
+  const setField = (sel, v) => {
+    const el = document.querySelector(sel);
+    if (!el || el.value === v) return false;
+    const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+    d.set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  };
+  if (SET_TITLE) report.titleChanged = setField('textarea[placeholder="Title"]', TITLE);
+  if (SET_SUB) report.subtitleChanged = setField('textarea[placeholder="Add a subtitle\\u2026"]', SUBTITLE);
+  report.stagedEdits = report.applied.length;
+  return JSON.stringify(report);
+})()"""
+
+
+def cmd_push(piece_dir, plan_json, live_json, out_js):
+    plan = json.load(open(plan_json))
+    live = json.load(open(live_json))
+    d = draft_state(piece_dir)
+    if any(r['state'] == 'conflict' for r in plan['rows']):
+        print("REFUSING: the plan has conflicts. Resolve them first (see `pull`).")
+        sys.exit(5)
+    patch = []
+    for r in plan['rows']:
+        if r['state'] != 'push':
+            continue
+        kind = r['kind']
+        texts = d['fns'] if kind == 'footnote' else d['body']
+        expect = (live['fns'] if kind == 'footnote' else live['body'])[r['liveIdx']]
+        patch.append({'kind': kind, 'liveIdx': r['liveIdx'],
+                      'expect': expect, 'text': texts[r['draftIdx']]})
+    set_title = plan['title']['state'] == 'push'
+    set_sub = plan['subtitle']['state'] == 'push'
+    if not patch and not set_title and not set_sub:
+        print("nothing to push.")
+        return
+    js = (PUSH_JS.replace('%HELPERS%', JS_HELPERS)
+                 .replace('%PATCH%', json.dumps(patch))
+                 .replace('%TITLE%', json.dumps(d['title']))
+                 .replace('%SUBTITLE%', json.dumps(d['subtitle']))
+                 .replace('%SET_TITLE%', 'true' if set_title else 'false')
+                 .replace('%SET_SUB%', 'true' if set_sub else 'false'))
+    open(out_js, 'w').write(js)
+    print(f"wrote {out_js} ({len(js)} bytes) — {len(patch)} block(s)"
+          + (", title" if set_title else "") + (", subtitle" if set_sub else ""))
+    for p_ in patch:
+        print(f"  {p_['kind']:8} live#{p_['liveIdx']}")
+
+
+def cmd_resolve(piece_dir, live_json, args):
+    """Record a HUMAN's decision on a conflicted row, by moving the baseline for that row.
+
+    A conflict means both sides moved and disagree, and no rule can settle it — which is why
+    `pull` and `push` both refuse to touch one. Resolving is therefore not a flag that forces
+    past a guard; it is the decision the guard exists to ask for, written down.
+
+    --take-draft <kind>:<idx>  the draft is right: baseline := live, so the row becomes a PUSH
+    --take-live  <kind>:<idx>  live is right:      baseline := draft, so the row becomes a PULL
+
+    Take-draft after editing the draft by hand is the normal shape: incorporate whatever live
+    had that you want, put the finished text in draft.md, then say so here.
+    """
+    live = json.load(open(live_json))
+    base = load_baseline(piece_dir)
+    if base is None:
+        print("no baseline to resolve against.")
+        sys.exit(3)
+    d = draft_state(piece_dir)
+    draft_h = {'body': [H(t) for t in d['body']], 'footnote': [H(t) for t in d['fns']]}
+    live_h = {'body': live['body'], 'footnote': live['fns']}
+    key = {'body': 'body', 'footnote': 'fns'}
+    done = []
+    i = 0
+    while i < len(args):
+        mode = args[i]
+        if mode not in ('--take-draft', '--take-live'):
+            print(f"unknown option {mode!r}")
+            sys.exit(1)
+        kind, _, idx = args[i + 1].partition(':')
+        idx = int(idx)
+        if kind not in ('body', 'footnote'):
+            print(f"kind must be body or footnote, got {kind!r}")
+            sys.exit(1)
+        base[key[kind]][idx] = (live_h[kind][idx] if mode == '--take-draft'
+                                else draft_h[kind][idx])
+        done.append(f"{mode[7:]:5} {kind}#{idx}")
+        i += 2
+    base['note'] = base.get('note', '') + f" | resolved by hand: {', '.join(done)}"
+    json.dump(base, open(os.path.join(piece_dir, BASELINE), 'w'), indent=1)
+    print(f"resolved {len(done)} row(s) in {os.path.join(piece_dir, BASELINE)}:")
+    for x in done:
+        print(f"  {x}")
+
 
 
 def cmd_seed(piece_dir, mode, arg):
@@ -471,10 +644,22 @@ def cmd_seed(piece_dir, mode, arg):
             body, fns, _res, _iss = render_reader(tmp)
         finally:
             shutil.rmtree(tmp)
-        man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+        # publish.yaml AS AT THAT REV too: the title/subtitle pushed then are the baseline,
+        # and reading today's manifest would bake a later hand-edit into the baseline and so
+        # hide the very pull it exists to detect.
+        relman = os.path.relpath(os.path.abspath(os.path.join(piece_dir, 'publish.yaml')), top)
+        old_man = subprocess.run(['git', '-C', top, 'show', f'{arg}:{relman}'],
+                                 capture_output=True, text=True)
+        if old_man.returncode == 0:
+            mtmp = tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False)
+            mtmp.write(old_man.stdout); mtmp.close()
+            man = read_manifest(mtmp.name)
+            os.unlink(mtmp.name)
+        else:
+            man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
         title, subtitle = man.get('title', ''), man.get('subtitle', '')
         body_h, fns_h = [H(t) for t in body], [H(t) for t in fns]
-        note = f'seeded from draft.md at {arg}'
+        note = f'seeded from draft.md + publish.yaml at {arg}'
     else:
         print("seed needs --from-git <rev> | --from-draft | --from-live <live.json>")
         sys.exit(1)
@@ -502,7 +687,7 @@ def cmd_seal(piece_dir, live_json):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: substack_sync.py <scan|plan|fetch|pull|seed|seal> <piece-dir> [args]")
+        print("usage: substack_sync.py <scan|plan|fetch|pull|push|resolve|seed|seal> <piece-dir> [args]")
         sys.exit(1)
     cmd, piece_dir = sys.argv[1], sys.argv[2].rstrip('/')
     rest = sys.argv[3:]
@@ -514,6 +699,10 @@ def main():
         cmd_fetch(piece_dir, rest[0], rest[1] if len(rest) > 1 else 'fetch.js')
     elif cmd == 'pull':
         cmd_pull(piece_dir, rest[0], rest[1])
+    elif cmd == 'resolve':
+        cmd_resolve(piece_dir, rest[0], rest[1:])
+    elif cmd == 'push':
+        cmd_push(piece_dir, rest[0], rest[1], rest[2] if len(rest) > 2 else 'push.js')
     elif cmd == 'seed':
         cmd_seed(piece_dir, rest[0], rest[1] if len(rest) > 1 else None)
     elif cmd == 'seal':

@@ -1,6 +1,6 @@
 ---
 name: substack-sync
-description: Two-way sync between a piece's draft.md and its already-live Substack post, with conflict detection. Use when the user says "sync X", "re-sync X", "pull my Substack edits back", "the live post is behind", "update the published post", or wants a live post and its draft brought back into agreement. Classifies every block three ways against a stored baseline — push (draft moved), pull (Substack moved), conflict (both moved) — pulls Substack-side edits into draft.md, then stages the push. Only a human clicks Continue/Update.
+description: Two-way sync between a piece's draft.md and its already-live Substack post, with conflict detection. Use when the user says "sync X", "re-sync X", "pull my Substack edits back", "the live post is behind", "update the published post", or wants a live post and its draft brought back into agreement. Classifies every block three ways against a stored baseline — push (draft moved), pull (Substack moved), conflict (both moved) — pulls Substack-side edits into draft.md, then pushes. On an already-published post the push is LIVE the moment it lands — there is no staging gate; only email stays behind a human click.
 ---
 
 # Substack sync (two-way, with conflicts)
@@ -66,8 +66,11 @@ Each browser step is one JS eval in the live post's editor.
    for a human instead of being written. It **refuses outright** if there are conflicts.
 5. **Push.** `python3 framework/tools/substack_repatch.py pieces/<name> push.js`, run once
    in the editor, then check the report (see *Reading the push report*).
-6. **Hand off.** Staging lights up **Continue**. The human reviews the diff and clicks
-   **Continue → Publish**, choosing **not** to resend email. **Never click it.**
+6. **Hand off — the push is already public.** **There is no staging gate on a live post.** The
+   edit reaches readers on autosave; **Continue** is usually **disabled** afterwards, because
+   nothing is left unpublished. Do not report the sync as "staged, awaiting your click" — report
+   it as **done**, and hand over the list of what changed so a human can read it on the public
+   page. Never click **Continue / Publish / Send** yourself: that control is what **sends email**.
 7. **Seal.** Re-run *scan*, then
    `python3 framework/tools/substack_sync.py seal pieces/<name> live-after.json`
    It refuses unless draft and live now agree, and records the new baseline. **Do not skip
@@ -143,8 +146,15 @@ structural, reordered[], suspect[]}`.
 
 ## Guardrails
 
-- **Never click Publish / Continue / Update / Send.** The skill stages; a human ships. This
-  holds doubly here: the target is a **live, public** post.
+- **Never click Publish / Continue / Update / Send** — that control **sends email**. But the old
+  claim here, *"the skill stages; a human ships — this holds doubly here,"* was **backwards, and
+  it was most wrong exactly where it sounded most careful.** The target being a live post is what
+  **removes** the gate, not what strengthens it: **on an already-published post the push is the
+  publication.** Readers see it on autosave.
+  **Therefore the checks that matter all run _before_ the write:** the pre-image hash per block,
+  the conflict refusal, the structural refusal. There is no after. Anything wrong that lands is
+  **already public**, and the fix is another public edit — so re-read *Reading the push report*
+  and mean it.
 - **Conflicts stop the run.** Do not pick a side. Show the user both versions and let them
   choose.
 - **Structural divergence is not auto-merged.** A block added, removed or reordered on

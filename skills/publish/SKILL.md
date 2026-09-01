@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — staging only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. Produces a DRAFT / staged edit only; the human reviews and clicks Publish/Update. Never auto-publishes or sends email.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes. A RE-SYNC of an already-published post is LIVE the moment it is written — Substack has no staging step there, so verify before writing, not after. Never clicks Publish/Continue/Send, and never sends email.
 ---
 
 # Publish (to Substack)
@@ -122,6 +122,12 @@ notes. The converter enforces the last; you enforce the first two.
 
 ## Republish — surgically re-sync a live post
 
+> **⚠️ Republish is not a draft operation. It edits the public page.** Substack applies an
+> edit to an already-published post on autosave, so every change this section makes is visible to
+> readers immediately — there is no staged revision waiting for a human, and **Continue** is
+> normally **disabled** afterwards because nothing is left to publish. The name is a
+> misnomer inherited from the fresh-compose flow. Read "republish" as **"edit the live post."**
+>
 > **Prefer the `substack-sync` skill for any piece that is already live.** What follows
 > pushes draft → live and is **stateless**: it diffs the draft against the live post, which
 > cannot tell a draft-side edit from a Substack-side one, and so silently reverts anything
@@ -163,9 +169,16 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    editor. **`reordered`** means a target block's exact text was found at a *different* live
    index: the two lists are misaligned, not edited — the count guard alone could not see this,
    and a piece once aligned 30 footnotes against the wrong 30 live nodes while passing it.
-5. **Hand off:** staging the edits lights up **Continue**. Tell the user to review the diff and
-   click **Continue → Publish** (choosing **not** to resend email) themselves. **Do not click
-   Continue / Publish / Send.**
+5. **Hand off — and understand what already happened.** **On an already-published post there is
+   no hand-off to give: the edit is already live.** Substack writes an edit to a *published* post
+   through to the public page on autosave; **Continue** governs the *first* publish and the email,
+   not later edits, and on a published post it is typically **disabled** because there is nothing
+   unpublished left to ship. Observed 2026-09-01: eight live posts read the new text on their
+   public URLs, and `Continue` was `disabled` on returning to the editor. So do not tell the user
+   a staged edit is waiting for their click — **tell them it is live**, and give them the list of
+   what changed so they can check it. Still never click **Continue / Publish / Send** yourself: on
+   an *unpublished* draft that click is the real publication, and on any post it is the control
+   that can **send email**.
 
 ## How it works (re-probe here if Substack changes)
 
@@ -213,10 +226,16 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
 
 ## Guardrails
 
-- **Draft-only.** Never click Publish/Continue/Send — the human publishes. (Safety rule +
-  editorial correctness.) **This holds doubly for republish:** it stages edits on a **live,
-  public** post; the skill only stages, the human clicks **Continue → Publish** and chooses
-  **not to resend email**.
+- **Never click Publish/Continue/Send — the human publishes.** (Safety rule + editorial
+  correctness.) But **do not mistake that for a safety net on a live post.** The old wording here
+  claimed the opposite of the truth — that republish "only stages" and "holds doubly" on a live
+  post. **It does not. On an already-published post, writing to the editor *is* publishing:** the
+  text reaches readers on autosave, with no click and no further gate. The human-in-the-loop
+  protection is real for an **unpublished** draft and **absent** for a live one.
+  **What this changes in practice:** treat every republish edit as **already public the moment it
+  lands**. Verify *before* writing, not after — the pre-image hash check is the only gate there
+  is. What the no-click rule still buys you on a live post is narrow but real: **no email is
+  sent.** A body edit does not notify subscribers; **Continue → Publish can.**
 - **Republish is surgical, and touch-ups only.** It changes the smallest span that differs and
   nothing else. If the diff is structural — a block or footnote added, removed, or reordered —
   the tool **refuses** (`structural:true`, zero edits); recompose the piece or edit by hand

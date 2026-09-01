@@ -45,7 +45,7 @@ better than a paragraph of adjectives. These can be your own writing or a target
 voice you're emulating; either way they live in your **instance**, never in the
 public framework, if they're personal.
 
-### corrections.md — append-only feedback
+### corrections.md — the working constitution
 
 Every time you change a draft's wording for a reason worth keeping, log it:
 
@@ -55,8 +55,56 @@ Every time you change a draft's wording for a reason worth keeping, log it:
 - Cut the opening rhetorical question; it reads as filler here.
 ```
 
-Append-only, like every log in this system. A correction you can quietly revise
-isn't evidence of how the voice actually behaves.
+**Add by appending. Never revise an entry in place.** A correction you can quietly
+rewrite isn't evidence of how the voice actually behaves.
+
+#### But prune it, in its own commit
+
+`corrections.md` is doing two jobs that pull opposite ways. It is a **ledger** of
+what feedback was given and why — which wants to accumulate — and it is **steering
+context** loaded by `draft` and `critique` — which wants to contain only rules that
+are currently in force. Let it only accumulate and the second job starts failing:
+a drafting pass greps the file for the rule, finds a superseded entry that still
+reads as live, and follows it. That is not hypothetical. A casing rule reversed
+six hours after it was written went on to produce wrong output in two separate
+essays over the following days, and the second failure was *predicted in the file
+itself* and happened anyway.
+
+**Git is the ledger.** Deletion under version control is dated, attributed,
+diffable and recoverable — it is not the quiet revision the append-only rule exists
+to forbid. So prune, under three conditions:
+
+1. **Pruning is its own commit**, whose message names what came out and what
+   superseded it. This is what keeps the removal loud. A deletion buried inside a
+   content commit is findable only by someone who already knows to look.
+2. **Absorb the surviving rationale first.** A superseded rule's *why* usually
+   outlives its *what*. When the casing rule was overturned, its reasoning — that
+   honesty outranks house style when citing a text — was still correct; only its
+   conclusion changed, because disclosure had resolved the conflict. Carry the
+   reasoning into the entry that supersedes it, then delete.
+3. **Two things get pruned, and they are different.** *Conflicting* entries — where
+   following the old text now produces a wrong result — are removed outright.
+   *Recurring* entries — the same rule failing a fourth time in a fourth essay —
+   are **consolidated** into one current entry that keeps the instance count and
+   the examples that still teach something. The count is not decoration: a rule
+   with four recurrences and one fix that held is the strongest case you can make
+   at `tune-style`, and collapsing the family without keeping the tally throws that
+   argument away.
+
+Keep a one-line note at the top of the file saying superseded entries are pruned
+and the full history is in git, so a later reader isn't puzzled by where the file
+starts.
+
+#### The piece logs are different — those stay strictly append-only
+
+`pieces/<name>/log/` is a lab notebook: what was written on a given day, what was
+tried, what was rejected and why. It is evidence of process, and it is what lets
+you reconstruct months later why a piece shipped the way it did. Never prune it,
+never edit a past entry. If an entry turns out to be wrong, **append a correction
+underneath it** and say so plainly.
+
+A working constitution and a lab notebook are different animals. The rule is
+"never quietly revise" for both; only the constitution gets pruned.
 
 ## Multiple voices per publication
 

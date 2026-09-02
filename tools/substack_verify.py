@@ -32,7 +32,9 @@ from md_to_substack import read_manifest, render_reader          # noqa: E402
 from substack_sync import H                                      # noqa: E402
 
 UA = 'writing-desk-verify/1.0 (+repo consistency check)'
-TIMEOUT = 30
+TIMEOUT = 15          # per request; a page that takes longer is not going to arrive
+ATTEMPTS = 2
+BUDGET = 300          # whole-run ceiling, seconds
 
 VOID  = {'img','br','hr','input','source','meta','link','col','area','base','wbr','embed','track'}
 BLOCK = {'p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','pre'}
@@ -122,7 +124,7 @@ def live_blocks(body_html):
     return [t for _, t in out], p.fns
 
 
-def fetch_public(url, fresh=False, attempts=3):
+def fetch_public(url, fresh=False, attempts=ATTEMPTS):
     if fresh:
         url += ('&' if '?' in url else '?') + f'_cb={int(time.time())}'
     headers = {'User-Agent': UA}
@@ -134,6 +136,10 @@ def fetch_public(url, fresh=False, attempts=3):
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
                 return r.read().decode('utf-8', 'replace')
+        except urllib.error.HTTPError as e:
+            # An HTTP status is a definitive answer from the server. Retrying a 403 or
+            # a 404 just spends time to be told the same thing again.
+            raise
         except Exception as e:                                    # noqa: BLE001
             last = e
             if i + 1 < attempts:
@@ -168,6 +174,8 @@ def published_pieces(repo):
 def verify(name, piece_dir, url, fresh):
     try:
         post = extract_post(fetch_public(url, fresh))
+    except urllib.error.HTTPError as e:
+        return ('UNREACHABLE', f'HTTP {e.code} {e.reason}', {})
     except Exception as e:                                        # noqa: BLE001
         return ('UNREACHABLE', f'{type(e).__name__}: {str(e)[:60]}', {})
     if not post:
@@ -200,6 +208,8 @@ def main():
     ap.add_argument('pieces', nargs='*', help='piece dirs (default: every published piece)')
     ap.add_argument('--fresh', action='store_true', help='bypass the CDN cache')
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(HERE)))
+    ap.add_argument('--budget', type=int, default=BUDGET,
+                    help='stop after this many seconds rather than grinding (0 = no limit)')
     a = ap.parse_args()
 
     if a.pieces:
@@ -221,7 +231,15 @@ def main():
           + ("  [cache-busted]" if a.fresh else ""))
     w = max(len(t[0]) for t in targets)
     drift, unreachable, ok, emailed = [], [], 0, []
-    for name, d, url in targets:
+    started, gave_up = time.time(), None
+    for n, (name, d, url) in enumerate(targets):
+        # Two ways to stop early, both so a blocked run reports quickly instead of
+        # spending half an hour proving the same thing 23 times.
+        if a.budget and time.time() - started > a.budget:
+            gave_up = f'time budget of {a.budget}s exhausted'; break
+        if n >= 3 and ok == 0 and len(drift) == 0 and len(unreachable) == n:
+            gave_up = 'the first 3 pages were all unreachable — treating this as blocked'
+            break
         status, detail, facts = verify(name, d, url, a.fresh)
         line = f"  {name:<{w}}  {status:<12}"
         if facts.get('blocks'): line += f" {facts['blocks']:>10} body {facts['fns']:>8} fn"
@@ -235,6 +253,9 @@ def main():
             unreachable.append(f'{name}: {detail}')
         time.sleep(0.3)                                # be a polite client
 
+    if gave_up:
+        print(f"\nstopped early: {gave_up}")
+        print(f"  {len(targets) - len(unreachable) - ok - len(drift)} piece(s) not attempted")
     print(f"\n{ok} match, {len(drift)} drifted, {len(unreachable)} unreachable")
     for u in unreachable: print(f"  unreachable  {u}")
     for d in drift:       print(f"  DRIFTED      {d}")

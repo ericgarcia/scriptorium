@@ -649,6 +649,24 @@ def canonical_image_url(u):
     return u
 
 
+def cmd_images(piece_dir, out_js):
+    """Emit the scraper half of the recompose image gate.
+
+    `check-images` compares what the LIVE post holds against what draft.md references, and it
+    needs a scrape to compare against. This writes that snippet. It shipped without this half
+    (2026-09-01): the dispatch named `cmd_images`, nothing defined it, and `images` crashed with
+    a NameError — which meant the gate could not be run at all, on the very day the gate was
+    added to stop a recompose destroying a live image.
+    """
+    open(out_js, 'w').write(IMAGES_JS)
+    draft = open(os.path.join(piece_dir, 'draft.md')).read()
+    refs = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', draft)
+    print(f"wrote {out_js}")
+    print(f"draft.md references {len(refs)} image(s)")
+    print("Run it in the post's editor, save the JSON it returns, then:")
+    print(f"  python3 framework/tools/substack_sync.py check-images {piece_dir} <images.json>")
+
+
 def cmd_check_images(piece_dir, images_json):
     """Refuse a recompose that would destroy an image.
 

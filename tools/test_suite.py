@@ -73,6 +73,30 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: CLI dispatch
+def unit_cli_dispatch():
+    """Every command the CLI accepts must resolve to a function that exists.
+
+    This is here because on 2026-09-01 `substack_sync.py images` crashed with
+    `NameError: name 'cmd_images' is not defined` — the dispatch branch shipped without its
+    handler. It was the scraper half of the recompose image gate, so the gate added that day to
+    stop a recompose destroying a live image could not be run at all. Nothing caught it, because
+    nothing was checking that the CLI's own table was complete.
+    """
+    print("\n-- CLI dispatch is complete --------------------------------------")
+    src = open(os.path.join(HERE, 'substack_sync.py')).read()
+    branches = set(re.findall(r"cmd == '([a-z-]+)'", src))
+    called = set(re.findall(r'\b(cmd_[a-z_]+)\(', src))
+    defined = set(re.findall(r'^def (cmd_[a-z_]+)', src, re.M))
+    check('every dispatched handler is defined', not (called - defined),
+          f'undefined: {sorted(called - defined)}')
+    check('every documented command has a branch', branches,
+          f'found {len(branches)} branches')
+    missing_branch = sorted(b for b in branches
+                            if f"cmd_{b.replace('-', '_')}(" not in src)
+    check('every branch names a handler', not missing_branch, f'{missing_branch}')
+
+
 # ---------------------------------------------------------------- unit: three-way
 def unit_three_way():
     print("\n-- three-way classification --------------------------------------")
@@ -277,6 +301,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='desk-suite-') as tmp:
         print(f"scratch: {tmp}  (removed on exit)")
         unit_normalization()
+        unit_cli_dispatch()
         unit_three_way()
         unit_converter(tmp)
         unit_footnote_order(tmp)

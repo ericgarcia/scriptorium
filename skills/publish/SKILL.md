@@ -43,7 +43,43 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 ## Preflight — critique gate, verify & strip editorial notes (DO THIS FIRST)
 
 A published draft must be **critiqued**, carry **verified** claims, and carry **zero** internal
-notes. The converter enforces the last; you enforce the first two.
+notes. The converter enforces the last; `check_verified.py` enforces the second; you enforce the
+first.
+
+0. **Verification gate — run it, and do not argue with it.**
+
+   ```
+   python3 framework/tools/check_verified.py pieces/<name>        # fresh compose: blocks
+   python3 framework/tools/check_verified.py --resync pieces/<name>   # surgical fix: warns
+   ```
+
+   **Why this is step zero and not a footnote.** *The Knowledge of Good and Evil* went live on
+   2026-08-25 carrying ~20 verbatim quotations of a named living person — on abuse, addiction and
+   belief — taken from a machine-generated transcript and never checked against the audio. The
+   desk had written the doubt down **three times**, in `notes.md`, in the `log/`, and under a
+   README heading that still read *Anchors to verify before print*. **The compose ran anyway,
+   because every existing guard read the draft and nothing read the notes about the draft** — and
+   the scaffold is exactly where a careful writer puts a doubt they have not resolved yet.
+
+   The tool **fails closed**: no clearance recorded anywhere means blocked. There is deliberately
+   **no `--force`**. To clear a piece you write the clearance into `publish.yaml`, where it is
+   reviewable and survives:
+
+   ```yaml
+   verified:
+     date: 2026-09-02
+     by: Eric
+     covers: >-
+       All 42 interview quotes checked against the audio; scripture loci and wording against the KJV.
+   ```
+
+   **`--resync` allows a surgical fix to an already-live post** — it introduces no new claim, and a
+   gate that also blocked the corrections would mean the corpus could not be repaired until every
+   ledger in it was closed, which is how a gate gets switched off for good. It still prints the open
+   doubts. **A re-sync is not a clearance.**
+
+   **What it cannot do:** it checks whether anyone *said* they checked. It cannot tell you a citation
+   is correct. A green result is not a warrant.
 
 0a. **Critique gate — a piece is critiqued before it publishes.** Publishing is the end of the
    quality loop, not a shortcut around it. Before composing a **fresh** draft (or a

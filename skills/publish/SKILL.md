@@ -269,6 +269,38 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    an *unpublished* draft that click is the real publication, and on any post it is the control
    that can **send email**.
 
+## After a human clicks Publish — mark the file as published
+
+A piece keeps its text in `draft.md` for its whole life. The filename does **not** change
+on publication: nine tools identify a piece by that name, and a second name would mean a
+call site that missed the rename does not fail — it silently drops the piece from the
+corpus checks. The **header** carries the state instead.
+
+Once the post is live, record the facts and rewrite the header:
+
+```
+# in publish.yaml
+public_url:   https://elmuffin.substack.com/p/<slug>
+published_at: YYYY-MM-DD        # the live post's own post_date, not the day you noticed
+
+python3 framework/tools/piece_header.py --apply <slug>
+```
+
+That replaces the `*Draft — …*` scaffold line with
+
+> *Published 2026-08-27 · [Nothing to Get](…) —*
+> *this file is the source of record for the live post.*
+> *Edits here are not live until pushed (`substack_sync push`),*
+> *and `substack_verify --fresh` confirms they landed.*
+
+and drops a now-false `*(working title)*` from the H1 when the piece shipped under that
+exact title. The rest of the scaffold note — voice, arc, consent boundaries, scripture
+conventions — is preserved verbatim; only the word "Draft" goes.
+
+All of it sits above the first `---`, which the converter discards, so it can never reach
+a reader. It is checked by the suite (`corpus_headers`) precisely because invisible things
+rot unnoticed.
+
 ## Confirm it reached readers (`substack_verify`)
 
 "Saved" is not "shipped," and a baseline is a local file — a piece can match its

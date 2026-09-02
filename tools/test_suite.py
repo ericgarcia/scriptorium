@@ -30,6 +30,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
   corpus  every piece renders; no undefined / duplicated / nested footnote refs; no
           unverified † notes left in any draft
   unit    the reader-side extractor, against canned markup (still no network)
+  corpus  every live piece's header says it is live, not a draft
   corpus  every published piece matches its sealed baseline
   engine  the JS patcher's own suite (A–E) against every piece, via a stubbed editor
 """
@@ -72,6 +73,7 @@ from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
 from substack_sync import (H, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline)
 from substack_verify import live_blocks, extract_post
+from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links
 
 PASS, FAIL, SKIP = [], [], []
@@ -406,6 +408,37 @@ def corpus_integrity():
           not faults, '; '.join(faults[:4]))
 
 
+def corpus_headers():
+    """A published piece's draft.md must say it is published.
+
+    The file keeps the name draft.md for its whole life -- renaming would give nine tools
+    a second name to know about, and a call site that missed it would not error, it would
+    silently drop the piece from every corpus check. So the header carries the state, and
+    this check keeps the header honest: it is front matter, invisible to readers, and
+    therefore exactly the kind of thing that rots unnoticed without a test.
+    """
+    print("\n-- corpus: live pieces say they are live --------------------------")
+    pieces_dir = PIECES
+    if not os.path.isdir(pieces_dir):
+        skip('headers', f'no corpus at {pieces_dir}'); return
+    stale, n = [], 0
+    for p in sorted(os.listdir(pieces_dir)):
+        d = os.path.join(pieces_dir, p)
+        if not os.path.isfile(os.path.join(d, 'draft.md')):
+            continue
+        man = read_manifest(os.path.join(d, 'publish.yaml'))
+        if not man.get('public_url'):
+            continue
+        if not man.get('published_at'):
+            stale.append(f'{p} (live but no published_at)'); continue
+        n += 1
+        new, _note = header_rewrite(open(os.path.join(d, 'draft.md')).read(), man)
+        if new is not None:
+            stale.append(p)
+    check(f'all {n} live pieces carry a current published header',
+          not stale, '; '.join(stale[:4]) + '  (fix: piece_header.py --apply)')
+
+
 def corpus_baselines():
     print("\n-- corpus: published pieces match their baselines -----------------")
     pieces_dir = PIECES
@@ -512,6 +545,7 @@ def main():
         unit_images()
         unit_live_extraction()
         corpus_integrity()
+        corpus_headers()
         corpus_baselines()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")

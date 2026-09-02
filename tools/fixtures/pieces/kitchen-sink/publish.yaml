@@ -6,3 +6,4 @@ footnotes: native
 send_email: false
 post_url: https://example.invalid/publish/post/0
 public_url: https://example.invalid/p/kitchen-sink
+published_at: 2026-01-01   # fixture

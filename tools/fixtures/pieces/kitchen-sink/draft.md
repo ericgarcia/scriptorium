@@ -1,5 +1,10 @@
 # The Kitchen Sink *(fixture)*
 
+*Published 2026-01-01 · [The Kitchen Sink](https://example.invalid/p/kitchen-sink) —
+this file is the source of record for the live post.
+Edits here are not live until pushed (`substack_sync push`),
+and `substack_verify --fresh` confirms they landed.*
+
 *Fixture — not writing. Every construct below has caused a converter bug at least once.
 Change this file only together with its sealed baseline.*
 

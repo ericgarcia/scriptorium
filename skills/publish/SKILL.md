@@ -269,6 +269,33 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    an *unpublished* draft that click is the real publication, and on any post it is the control
    that can **send email**.
 
+## Confirm it reached readers (`substack_verify`)
+
+"Saved" is not "shipped," and a baseline is a local file — a piece can match its
+baseline perfectly while the live post says something else. After any write to a live
+post, check the page a reader actually gets:
+
+```
+python3 framework/tools/substack_verify.py --fresh pieces/<name>
+```
+
+It fetches the public URL over plain HTTP (no browser, no credentials, no writes),
+pulls the post out of the page's `window._preloads`, renders the local draft, and
+compares block for block and footnote for footnote. `--fresh` cache-busts — measured to
+turn `cf-cache-status: HIT` into `MISS` — so a stale CDN copy cannot fake either a pass
+or a failure.
+
+Exit 0 match, 1 drift, 2 nothing could be read. **2 is not a pass**: a run that verified
+no pages reports failure, because "I could not look" and "it matches" must never wear
+the same face.
+
+Run with no arguments to sweep every published piece.
+
+> Do not put this in CI on a GitHub-hosted runner. Measured 2026-09-02: Substack returns
+> **403 to Azure IP ranges** on every path — page, API, and RSS, with any user agent. It
+> is an IP block, so there is no header that fixes it. Run it locally, or from a
+> self-hosted runner.
+
 ## How it works (re-probe here if Substack changes)
 
 - Substack's editor is **Tiptap** over ProseMirror, reachable at

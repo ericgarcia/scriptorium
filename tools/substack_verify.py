@@ -23,7 +23,7 @@ Exit: 0 all checked pieces match | 1 drift | 2 nothing could be checked.
 Reaching zero pieces is a FAILURE, not a pass. A run that checked nothing must never be
 able to report success — that is the whole failure mode this tool exists to catch.
 """
-import sys, os, re, json, time, argparse, urllib.request, urllib.error
+import sys, os, re, json, time, argparse, subprocess, urllib.request, urllib.error
 from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -155,12 +155,40 @@ def extract_post(page_html):
     return json.loads(json.loads(m.group(1))).get('post')
 
 
-def published_pieces(repo):
+def pieces_touched_by(repo, rev_range):
+    """Piece slugs whose directory a commit range touched.
+
+    Scoping the check to what changed is the difference between a verifier you run and
+    one you mean to run: the full sweep is 23 network round-trips, and most commits
+    touch one piece.
+
+    An empty range is NOT an error and NOT a silent pass -- the caller reports that
+    nothing published was touched, so "no pieces to check" can never be mistaken for
+    "everything matches".
+    """
+    try:
+        out = subprocess.run(['git', '-C', repo, 'diff', '--name-only', rev_range],
+                             capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            return None, out.stderr.strip().splitlines()[-1] if out.stderr else 'git failed'
+    except Exception as e:                                        # noqa: BLE001
+        return None, f'{type(e).__name__}: {e}'
+    slugs = []
+    for path in out.stdout.splitlines():
+        parts = path.split('/')
+        if len(parts) >= 2 and parts[0] == 'pieces' and parts[1] not in slugs:
+            slugs.append(parts[1])
+    return slugs, None
+
+
+def published_pieces(repo, only=None):
     out = []
     pieces = os.path.join(repo, 'pieces')
     if not os.path.isdir(pieces):
         return out
     for name in sorted(os.listdir(pieces)):
+        if only is not None and name not in only:
+            continue
         d = os.path.join(pieces, name)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
@@ -208,11 +236,30 @@ def main():
     ap.add_argument('pieces', nargs='*', help='piece dirs (default: every published piece)')
     ap.add_argument('--fresh', action='store_true', help='bypass the CDN cache')
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(HERE)))
+    ap.add_argument('--changed', nargs='?', const='HEAD~1..HEAD', metavar='RANGE',
+                    help='only pieces this commit range touched (default HEAD~1..HEAD; '
+                         'for a pre-push hook, origin/main..HEAD)')
     ap.add_argument('--budget', type=int, default=BUDGET,
                     help='stop after this many seconds rather than grinding (0 = no limit)')
     a = ap.parse_args()
 
-    if a.pieces:
+    if a.changed:
+        slugs, err = pieces_touched_by(a.repo, a.changed)
+        if err:
+            print(f"could not resolve {a.changed}: {err}")
+            return 2
+        if not slugs:
+            print(f"{a.changed} touched no piece — nothing to verify")
+            return 0
+        targets = published_pieces(a.repo, only=set(slugs))
+        unpublished = [s_ for s_ in slugs if s_ not in {t[0] for t in targets}]
+        print(f"{a.changed} touched {len(slugs)} piece(s): {', '.join(slugs)}")
+        for u in unpublished:
+            print(f"  skip  {u}  (not published — nothing live to compare against)")
+        if not targets:
+            print("none of them are published — nothing to verify")
+            return 0
+    elif a.pieces:
         targets = []
         for d in a.pieces:
             d = d.rstrip('/')

@@ -236,12 +236,40 @@ def main():
     ap.add_argument('pieces', nargs='*', help='piece dirs (default: every published piece)')
     ap.add_argument('--fresh', action='store_true', help='bypass the CDN cache')
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(HERE)))
+    ap.add_argument('--list', action='store_true',
+                    help='list what is live (and therefore in scope) without fetching')
     ap.add_argument('--changed', nargs='?', const='HEAD~1..HEAD', metavar='RANGE',
                     help='only pieces this commit range touched (default HEAD~1..HEAD; '
                          'for a pre-push hook, origin/main..HEAD)')
     ap.add_argument('--budget', type=int, default=BUDGET,
                     help='stop after this many seconds rather than grinding (0 = no limit)')
     a = ap.parse_args()
+
+    if a.list:
+        # "Which pieces must match Substack?" should be one command, not an inference
+        # from a filename. public_url is the authoritative answer and the only one.
+        pieces = os.path.join(a.repo, 'pieces')
+        rows = []
+        for name in sorted(os.listdir(pieces)):
+            d = os.path.join(pieces, name)
+            if not os.path.isfile(os.path.join(d, 'draft.md')):
+                continue
+            man = read_manifest(os.path.join(d, 'publish.yaml'))
+            if man.get('public_url'):
+                state = 'LIVE'
+            elif man.get('post_url'):
+                state = 'composed'
+            else:
+                state = 'draft'
+            rows.append((name, state, man.get('public_url', '')))
+        w = max(len(r[0]) for r in rows) if rows else 0
+        for name, state, url in rows:
+            print(f"  {name:<{w}}  {state:<9} {url}")
+        live = sum(1 for r in rows if r[1] == 'LIVE')
+        print(f"\n{live} live (in scope for verification), "
+              f"{sum(1 for r in rows if r[1]=='composed')} composed, "
+              f"{sum(1 for r in rows if r[1]=='draft')} draft")
+        return 0
 
     if a.changed:
         slugs, err = pieces_touched_by(a.repo, a.changed)

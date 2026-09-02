@@ -23,9 +23,12 @@ USAGE
   so a checker blind to it is blind exactly where the convention lives.
 
 EXIT
-  0  every link resolved 2xx
+  0  every link resolved 2xx and every one will publish as a link
   1  usage / no draft
   4  at least one link did not resolve — the message names it
+  5  every link resolved, but at least one is written in a form the converter
+     publishes as plain text (an autolink or a bare url). The checker must never
+     be more permissive than the pipeline it guards.
 """
 import sys, os, re, urllib.request, urllib.error
 
@@ -39,6 +42,44 @@ AUTO_RE = re.compile(r'<(https?://[^>\s]+)>')          # <url> — autolink; how
 BARE_RE = re.compile(r'(?<![(<\[])\b(https?://[^\s<>()\[\]]+)')   # url on its own
 TRAILING = '.,;:!?\'"*_'                               # prose punctuation glued to a bare url
 UA = {'User-Agent': 'writing-desk-link-check/1.0'}
+
+
+def publishable(text):
+    """The part of a draft that actually reaches a reader.
+
+    md_to_substack drops everything up to and including the first line that is exactly
+    `---` — the scaffold header. A URL up there is never published, so it cannot be
+    written in the wrong render form.
+    """
+    lines = text.split('\n')
+    for i, ln in enumerate(lines):
+        if ln.strip() == '---':
+            return '\n'.join(lines[i + 1:])
+    return text
+
+
+def unrenderable(text):
+    """URLs the converter will publish as visible text instead of a link.
+
+    It renders `[text](url)` and nothing else: an autolink is HTML-escaped to a literal
+    `&lt;url&gt;`, and a bare url is left where it sits. Both reach the reader as naked
+    URL text.
+
+    This checker learned to SEE those two forms on 2026-09-02, which made it strictly
+    MORE PERMISSIVE THAN THE PIPELINE — it validated three sibling citations written as
+    autolinks, reported them live, and they would have published as angle-bracketed
+    strings. A form that passes the checker and dies in the converter is worse than one
+    the checker cannot see, because the pass is taken as evidence.
+    """
+    body = publishable(text)
+    inline = set(LINK_RE.findall(body))
+    out = []
+    for rx, form in ((AUTO_RE, 'autolink <url>'), (BARE_RE, 'bare url')):
+        for u in rx.findall(body):
+            u = u.rstrip(TRAILING)
+            if u and u not in inline:
+                out.append((u, form))
+    return out
 
 
 def extract(text):
@@ -114,6 +155,17 @@ def main():
             bad.append((u, note))
 
     print(f"checked {len(urls)} link(s), {len(bad)} dead")
+
+    raw = open(draft).read()
+    wrong = [(u, f) for u, f in unrenderable(raw) if '--all' in sys.argv or not host or host in u]
+    if wrong:
+        print(f"\n{len(wrong)} link(s) resolve but will PUBLISH AS PLAIN TEXT, not as links —")
+        print("the converter renders [text](url) and nothing else:")
+        for u, form in wrong:
+            print(f"  {form:16s}  {u}")
+        print("Rewrite each as [*Title*](url), which is what the rest of the corpus uses.")
+    if wrong and not bad:
+        sys.exit(5)
     if bad:
         print("\nA dead cross-link must be fixed before composing — find the live slug in the "
               "publication's archive, correct it here AND in every scaffold file that repeats it "

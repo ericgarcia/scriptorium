@@ -74,7 +74,7 @@ from substack_sync import (H, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline)
 from substack_verify import live_blocks, extract_post
 from piece_header import rewrite as header_rewrite
-from check_links import extract as extract_links
+from check_links import extract as extract_links, unrenderable as unrenderable_links
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -131,6 +131,26 @@ def unit_link_extraction():
     check('emphasis markers are stripped from a bare url',
           extract_links(f'see *{U}*') == {U})
     check('no url yields nothing', extract_links('nothing here') == set())
+
+    # ...and seeing a form is not the same as the pipeline being able to RENDER it. The
+    # converter emits [text](url) and nothing else, so a checker that merely resolves an
+    # autolink is more permissive than the thing it guards — which is how three sibling
+    # citations passed a green check and would have published as angle-bracketed strings.
+    hdr = '# t\n\n*head <https://example.com/h>*\n\n---\n\n'
+    U = 'https://example.com/p/a'
+    forms = lambda t: {u: f for u, f in unrenderable_links(t)}
+    check('an autolink in the body is flagged as unrenderable',
+          forms(hdr + f'x <{U}> y').get(U) == 'autolink <url>')
+    check('a bare url in the body is flagged',
+          forms(hdr + f'x {U} y').get(U) == 'bare url',
+          'measured live: Substack does not autolink one, it publishes as plain text')
+    check('an inline [text](url) is NOT flagged', not forms(hdr + f'x [A]({U}) y'))
+    check('a url written both ways is NOT flagged',
+          not forms(hdr + f'[A]({U}) and <{U}>'),
+          'the inline form is present, so it renders')
+    check('a url in the scaffold header is NOT flagged',
+          not any(u == 'https://example.com/h' for u, _f in unrenderable_links(hdr + 'body')),
+          'the header is dropped before publication and never reaches a reader')
 
 
 # ---------------------------------------------------------------- unit: CLI dispatch

@@ -131,16 +131,42 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
 1. **Load the clipboard:** `python3 framework/tools/md_to_clipboard.py pieces/<name> --fn-out <fn.js>`
    Runs the same converter and therefore the **same refusals** (a stray "verify", nested
    footnote refs, undefined/duplicated markers) — a different transport is never a lower bar.
-   Prints the block counts, the **SHA-256 of the HTML actually placed on the pasteboard**, and
+   Prints the block counts, the **SHA-256 of the HTML read back off the pasteboard**, and
    the title/subtitle from the manifest. It writes the footnote snippet separately, because
    **footnotes cannot travel by clipboard** — a paste cannot create native ones.
+
+   **The pasteboard is global mutable state and another process can take it.** Until
+   2026-09-02 this tool checked only that the string "HTML" appeared in `clipboard info` and
+   then printed the hash of the string it had *intended* to place — neither of which is
+   evidence about the clipboard. **It reported a clean write while the pasteboard actually
+   held a footnote snippet from a different piece, left by a concurrent session**, and that
+   snippet was pasted into a fresh post and caught only by the post-check. The tool now reads
+   the bytes back and refuses on a mismatch. **Re-check immediately before the paste**, because
+   loading and pasting are separate steps with a wide gap between them:
+   `python3 framework/tools/md_to_clipboard.py pieces/<name> --verify`
 2. **Open the composer in real Chrome** and set Title + Subtitle by JS (small, no prose in it),
    then `clearContent(true)` so a retry can't append to a half-paste.
-3. **Body:** a **real click** into the body, then a **real `cmd+v`**. Formatting, links and
-   dividers arrive intact; footnote refs remain as `[[FNn]]` markers.
-4. **Footnotes:** run the `--fn-out` snippet (a few KB — small enough to run directly). It turns
-   every `[[FNn]]` marker into a **native** Substack footnote via Tiptap's `insertFootnote` and
-   fills each note's rich content. Returns `{inserted, missing}` — **`missing` must be empty.**
+3. **Body:** run `--verify`, then a **real click** into the body, then a **real `cmd+v`**.
+   Formatting, links and dividers arrive intact; footnote refs remain as `[[FNn]]` markers.
+   **Substack applies smart-quote input rules on paste** (`'`→`’`, `"`→`“ ”`), so the live text
+   will differ from the draft at every apostrophe — that is expected, it is what the whole
+   corpus published with, and step 6's digest must account for it rather than treat it as
+   corruption.
+4. **Footnotes:** run the `--fn-out` snippet. It turns every `[[FNn]]` marker into a **native**
+   Substack footnote via Tiptap's `insertFootnote` and fills each note's rich content. Returns
+   `{inserted, missing}` — **`missing` must be empty.** Markers are keyed on the footnote's
+   **name**, not a number (`[[FNbeelzebul]]`), so grep for `\[\[FN[a-z0-9]+\]\]`.
+
+   **Getting the snippet into the page, measured 2026-09-02.** It carries the author's footnote
+   prose, so retyping it into an eval is the same transcription risk the clipboard exists to
+   remove — and two obvious alternatives do **not** work on this surface: both
+   `navigator.clipboard.readText()` and a `fetch()` to a CORS-enabled `http://127.0.0.1`
+   **hang and time out the CDP call at 45s**, with the renderer alive and responsive afterwards
+   and no permission prompt on screen. **What does work:** base64 the footnote data, paste it as
+   text at the end of the doc (base64's charset is immune to the smart-quote input rules that
+   would corrupt raw JSON), read it back out of the DOM with `atob`, delete the carrier node,
+   then insert. **Insert in batches of ~8–9** — thirty-five in one call also exceeds the 45s
+   timeout. Prove the transfer with a checksum computed on both sides before inserting anything.
 5. **Post-check (JS):** title/subtitle set · block counts match · **0 empty paragraphs** ·
    heading/divider/image counts · footnotes == manifest count · **0 `[[FN` markers left** ·
    in-body sibling links present. Report the numbers; don't say "done" without them.

@@ -26,8 +26,11 @@ USAGE
 -----
     python3 framework/tools/md_to_clipboard.py <piece-dir> [--fn-out notes.js]
 
-Prints the same counts as `md_to_substack.py`, plus the SHA-256 of the HTML actually
-placed on the pasteboard so the paste can be verified afterward. Runs the identical
+Prints the same counts as `md_to_substack.py`, plus the SHA-256 of the HTML **read back off
+the pasteboard** — evidence about the clipboard, not a hash of what this script hoped to put
+there. `--verify` re-checks that the pasteboard still holds this piece and nothing else; run it
+immediately before the ⌘V, because the pasteboard is global mutable state and the gap between
+loading and pasting is wide enough for another process to win it. Runs the identical
 preflight refusals (a stray "verify" note, nested footnote refs) — this is a different
 transport, never a way around the gates.
 
@@ -96,9 +99,66 @@ def set_clipboard_html(html: str) -> None:
                           text=True, capture_output=True)
     if proc.returncode != 0:
         sys.exit('md_to_clipboard: osascript failed: %s' % proc.stderr.strip())
-    info = subprocess.run(['osascript', '-e', 'clipboard info'], text=True, capture_output=True).stdout
-    if 'HTML' not in info:
-        sys.exit('md_to_clipboard: clipboard did not take the HTML flavor (got: %s)' % info.strip())
+    got = read_clipboard_html()
+    if got is None:
+        sys.exit('md_to_clipboard: the pasteboard has no HTML flavor after the write.\n'
+                 'Nothing was placed. Do not paste — you would paste whatever was there before.')
+    if got != html:
+        sys.exit('md_to_clipboard: WROTE %d chars, PASTEBOARD HOLDS %d — the write did not take.\n'
+                 '  intended sha256=%s\n  actual   sha256=%s\n'
+                 'Another process almost certainly owns the pasteboard (a concurrent session, a\n'
+                 'clipboard manager). Do NOT paste. Re-run once the pasteboard is yours.'
+                 % (len(html), len(got),
+                    hashlib.sha256(html.encode()).hexdigest()[:16],
+                    hashlib.sha256(got.encode()).hexdigest()[:16]))
+
+
+def read_clipboard_html():
+    """Return the HTML flavor currently on the pasteboard, or None if there isn't one.
+
+    This is the half that was missing until 2026-09-02. The old check asked whether the
+    string "HTML" appeared in `clipboard info` and then reported the SHA-256 of the string
+    it had *intended* to place. Neither is evidence about the pasteboard, and the gap is not
+    theoretical: on 2026-09-02 the tool reported a clean write while the pasteboard actually
+    held a footnote snippet from a DIFFERENT piece, left by a concurrent session. It pasted
+    into a fresh Substack post and was caught only by a post-check. A hash of your own
+    intent proves nothing; read the bytes back.
+    """
+    proc = subprocess.run(['osascript', '-e', 'the clipboard as «class HTML»'],
+                          text=True, capture_output=True)
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.strip()
+    if not out.startswith('«data HTML') or not out.endswith('»'):
+        return None
+    try:
+        return bytes.fromhex(out[len('«data HTML'):-1]).decode('utf-8')
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def verify_only(piece_dir):
+    """Re-check that the pasteboard still holds THIS piece's body, immediately before pasting.
+
+    Loading the clipboard and pasting are separate steps with a human-scale gap between them,
+    and the pasteboard is global mutable state that any other process can take. On 2026-09-02
+    a concurrent session's `pbcopy` won that race. Run this immediately before the ⌘V.
+    """
+    _html, _fns, _st, residual, _unv, fn_issues = convert(piece_dir)
+    if residual or fn_issues['nested'] or fn_issues['undefined'] or fn_issues['duplicated']:
+        sys.exit('md_to_clipboard --verify: the piece no longer converts cleanly; re-run without '
+                 '--verify to see the refusal.')
+    got = read_clipboard_html()
+    if got is None:
+        sys.exit('STALE: the pasteboard has no HTML flavor. Do NOT paste — re-run to reload it.')
+    if got != _html:
+        sys.exit('STALE: the pasteboard does not hold this piece.\n'
+                 '  expected %d chars sha256=%s\n  found    %d chars sha256=%s\n'
+                 'Something took the pasteboard since it was loaded. Do NOT paste; re-run to reload.'
+                 % (len(_html), hashlib.sha256(_html.encode()).hexdigest()[:16],
+                    len(got), hashlib.sha256(got.encode()).hexdigest()[:16]))
+    print('OK: pasteboard holds %s — %d chars sha256=%s. Safe to paste.'
+          % (piece_dir, len(got), hashlib.sha256(got.encode()).hexdigest()[:16]))
 
 
 def main():
@@ -106,6 +166,8 @@ def main():
     if not args:
         sys.exit(__doc__)
     piece_dir = args[0].rstrip('/')
+    if '--verify' in sys.argv:
+        return verify_only(piece_dir)
     fn_out = None
     if '--fn-out' in sys.argv:
         fn_out = sys.argv[sys.argv.index('--fn-out') + 1]
@@ -131,8 +193,9 @@ def main():
           'editorial-notes-stripped~%d'
           % (html.count('<p>'), html.count('<h2>') + html.count('<h3>'),
              html.count('<hr>'), html.count('<img'), len(footnotes), stripped))
-    print('clipboard: %d chars of text/html  sha256=%s'
-          % (len(html), hashlib.sha256(html.encode()).hexdigest()[:16]))
+    on_board = read_clipboard_html()   # re-read; this is evidence, the variable above is intent
+    print('clipboard: %d chars of text/html  sha256=%s  (read back off the pasteboard)'
+          % (len(on_board), hashlib.sha256(on_board.encode()).hexdigest()[:16]))
     print('title:    %s' % json.dumps(man.get('title', '')))
     print('subtitle: %s' % json.dumps(man.get('subtitle', '')))
     if unverified:
@@ -146,7 +209,8 @@ def main():
     print()
     print('Next, in REAL Chrome (not the in-app pane — it cannot reach the pasteboard):')
     print('  1. open the composer and set title/subtitle')
-    print('  2. REAL click into the body, then a REAL cmd+v')
+    print('  2. re-check the pasteboard, then REAL click into the body and a REAL cmd+v:')
+    print('       python3 framework/tools/md_to_clipboard.py %s --verify' % piece_dir)
     print('  3. run the --fn-out snippet to convert [[FNn]] markers to native footnotes')
     print('  4. verify: block count + per-block hashes against the draft')
 

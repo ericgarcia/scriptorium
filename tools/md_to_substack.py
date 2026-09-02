@@ -270,7 +270,11 @@ def parse_blocks(piece_dir):
         # An UNindented paragraph straight after a footnote definition is ambiguous: this house
         # puts definitions mid-document with body prose after them, so it cannot be claimed as a
         # continuation. It is also exactly how a continuation gets written by mistake, so say so.
-        if last_fn:
+        # ...but only a PARAGRAPH is a plausible mistaken continuation. A divider, a heading, a
+        # quote, a list or an image can never be one, and they are the ordinary thing to find
+        # after a block of definitions in this house — warning on those fires on nearly every
+        # piece, and a warning that always fires is read as noise and then not read at all.
+        if last_fn and not re.match(r'^(---|#|>|[-*+]\s|!\[|\|)', b):
             fn_orphans.append((last_fn, ' '.join(b.split())[:70]))
         last_fn = None
         # ADJACENT BLOCKQUOTES MERGE. ProseMirror joins two neighbouring blockquotes into one

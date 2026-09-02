@@ -241,6 +241,19 @@ def unit_footnote_continuation(tmp):
           any(n == 'b' for n, _t in issues.get('orphaned', [])),
           'silence is how a continuation gets written wrong and never noticed')
 
+    # ...but a divider or heading after a definition is the ORDINARY shape here, and warning on
+    # it fired on 11 of 27 pieces — a warning that always fires stops being read.
+    d2 = os.path.join(tmp, 'fnquiet')
+    os.makedirs(d2, exist_ok=True)
+    with open(os.path.join(d2, 'draft.md'), 'w') as f:
+        f.write('t\n\n---\n\n## I\n\nnote.[^a]\n\n[^a]: the note.\n\n---\n\n## II\n\ntail.\n')
+    with open(os.path.join(d2, 'publish.yaml'), 'w') as f:
+        f.write('title: t\nsubtitle: s\n')
+    _b2, _o2, _s2, _r2, _u2, issues2, _x2 = parse_blocks(d2)
+    check('a divider or heading after a definition does NOT warn',
+          not issues2.get('orphaned'),
+          f"would fire on the ordinary shape: {issues2.get('orphaned')}")
+
 
 def unit_footnote_order(tmp):
     print("\n-- footnote ordering ---------------------------------------------")

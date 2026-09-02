@@ -209,6 +209,39 @@ def unit_converter(tmp):
           len(merged) == 1 and merged[0] == 'onetwo', str(body))
 
 
+def unit_footnote_continuation(tmp):
+    """A footnote's continuation paragraph must stay in the footnote.
+
+    Before 2026-09-02 it did not: the block splitter made it a separate block, it failed
+    the `[^id]:` match, and it published as an ordinary BODY paragraph in place. Content
+    relocated rather than dropped, which is worse — the output reads as deliberate, the
+    paragraph count merely goes up by one, and nothing refuses.
+    """
+    print("\n-- footnote continuation -----------------------------------------")
+    d = os.path.join(tmp, 'fncont')
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'draft.md'), 'w') as f:
+        f.write('t\n\n---\n\n## I\n\nnote here.[^a] and here.[^b]\n\n'
+                '[^a]: first of A.\n\n    indented second of A CONT_KEPT.\n\n'
+                '[^b]: first of B.\n\nunindented after B CONT_LOOSE.\n')
+    with open(os.path.join(d, 'publish.yaml'), 'w') as f:
+        f.write('title: t\nsubtitle: s\n')
+    blocks, ordered, _stripped, _res, _unv, issues, _src = parse_blocks(d)
+    fns = dict(ordered)
+    body = ' '.join(blocks)
+    check('an indented continuation stays in its footnote',
+          'CONT_KEPT' in fns.get('a', ''), repr(fns.get('a')))
+    check('an indented continuation does NOT leak into the body',
+          'CONT_KEPT' not in body,
+          'the 2026-09-02 bug: it published in place, as body text')
+    check('an unindented paragraph after a definition stays body text',
+          'CONT_LOOSE' in body,
+          'it cannot be claimed as a continuation — definitions sit mid-document here')
+    check('and that ambiguous case is reported, not silent',
+          any(n == 'b' for n, _t in issues.get('orphaned', [])),
+          'silence is how a continuation gets written wrong and never noticed')
+
+
 def unit_footnote_order(tmp):
     print("\n-- footnote ordering ---------------------------------------------")
     d = os.path.join(tmp, 'fnorder')
@@ -460,6 +493,7 @@ def main():
         unit_cli_dispatch()
         unit_three_way()
         unit_converter(tmp)
+        unit_footnote_continuation(tmp)
         unit_footnote_order(tmp)
         unit_pull_verification()
         unit_images()

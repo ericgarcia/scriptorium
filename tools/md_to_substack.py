@@ -229,11 +229,31 @@ def parse_blocks(piece_dir):
     footnotes = {}                                                   # n -> content HTML
     fn_src = {}                                                      # n -> raw markdown source
     stripped = 0                                                     # editorial notes removed
+    fn_orphans = []                                                  # (id, text) paragraph after a footnote def, unindented
     unverified = []                                                  # (id, note) for verify-markers
     out, out_src = [], []                                            # HTML block + its raw source
-    for block in re.split(r'\n\s*\n', body):
+    # SPLIT ON BLANK LINES ONLY. The old separator was `\n\s*\n`, whose `\s*` could eat the
+    # NEXT block's leading indentation — which is the one signal that marks a footnote's
+    # continuation paragraph.
+    last_fn = None                                                   # id of the immediately preceding footnote definition
+    for block in re.split(r'\n[ \t]*\n', body):
         b = block.strip()
         if not b:
+            continue
+        # A FOOTNOTE'S CONTINUATION PARAGRAPH. Markdown continues a footnote with an indented
+        # block. Before 2026-09-02 this fell through to the body path and published as an
+        # ordinary paragraph, in place — content silently RELOCATED, not dropped, so the output
+        # looked deliberate and nothing refused. Joined with a space, exactly as a multi-LINE
+        # footnote already is.
+        if last_fn and re.match(r'^(?: {4,}|\t)\S', block):
+            text, removed = clean_footnote(' '.join(b.split()))
+            if removed:
+                stripped += 1
+                if UNVERIFIED_RE.search(removed):
+                    unverified.append((last_fn, ' '.join(removed.split())[:90]))
+            if text:
+                footnotes[last_fn] = (footnotes[last_fn] + ' ' + inline(text, piece_dir)).strip()
+                fn_src[last_fn] += '\n\n' + block
             continue
         m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b, re.S)              # footnote definition
         if m:
@@ -245,7 +265,14 @@ def parse_blocks(piece_dir):
                     unverified.append((m.group(1), ' '.join(removed.split())[:90]))
             footnotes[m.group(1)] = inline(text, piece_dir)
             fn_src[m.group(1)] = b
+            last_fn = m.group(1)
             continue
+        # An UNindented paragraph straight after a footnote definition is ambiguous: this house
+        # puts definitions mid-document with body prose after them, so it cannot be claimed as a
+        # continuation. It is also exactly how a continuation gets written by mistake, so say so.
+        if last_fn:
+            fn_orphans.append((last_fn, ' '.join(b.split())[:70]))
+        last_fn = None
         # ADJACENT BLOCKQUOTES MERGE. ProseMirror joins two neighbouring blockquotes into one
         # node on paste, so a draft with two consecutive `> ` blocks composes to ONE live
         # blockquote holding two paragraphs. Emitting them as two blocks here made the draft
@@ -295,6 +322,7 @@ def parse_blocks(piece_dir):
         'unreferenced': [n for n in footnotes if n not in seen],        # definition never cited
         'duplicated':   sorted(set(duplicated)),                        # cited more than once
         'nested':       nested,                                         # ref inside a footnote
+        'orphaned':     fn_orphans,                                     # unindented para after a footnote def
     }
     ordered = [[n, footnotes[n]] for n in ref_order if n in footnotes]
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
@@ -390,6 +418,13 @@ def main():
         if not allow_verify:
             print("Refusing to write output. Re-run with --allow-verify to override.")
             sys.exit(2)
+    if fn_issues.get('orphaned'):
+        print("WARNING: a paragraph follows a footnote definition without being indented, so it "
+              "publishes as BODY TEXT, in place — not as part of the note:")
+        for n, txt in fn_issues['orphaned']:
+            print(f"           after [^{n}]: {txt}…")
+        print("           If it was meant to continue the footnote, indent it four spaces. If it "
+              "is body prose, this is fine and nothing needs changing.")
     if fn_issues['nested']:
         print(f"WARNING: footnote reference(s) inside a footnote: {fn_issues['nested']}. These "
               f"cannot become footnotes — they publish as a literal marker. Reword the note.")

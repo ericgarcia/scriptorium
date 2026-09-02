@@ -92,10 +92,17 @@ check('A one changed block is patched',
   `staged=${a.report.stagedEdits} unchanged=${a.report.unchanged} failed=${a.report.failed.length}`);
 
 // --- B: a permutation is refused, and stages nothing ------------------------
-const b = run(BODY.map(curl), FNS.map(curl).slice().reverse(), TITLE, SUBTITLE);
-check('B reordered footnotes refuse',
-  b.report.structural && b.report.reordered.length > 0 && b.dispatches === 0,
-  `reordered=${b.report.reordered.length} dispatches=${b.dispatches}`);
+// Reversing fewer than two footnotes is the identity, so there is no permutation to detect and
+// the case is INAPPLICABLE, not passing. Reported as a skip: a green tick for a check that
+// could not have run is the kind of coverage that lies. (`Flow` has one footnote.)
+if (FNS.length < 2) {
+  console.log(`skip  B reordered footnotes refuse   (needs >=2 footnotes, piece has ${FNS.length})`);
+} else {
+  const b = run(BODY.map(curl), FNS.map(curl).slice().reverse(), TITLE, SUBTITLE);
+  check('B reordered footnotes refuse',
+    b.report.structural && b.report.reordered.length > 0 && b.dispatches === 0,
+    `reordered=${b.report.reordered.length} dispatches=${b.dispatches}`);
+}
 
 // --- C: curly-vs-straight quotes are not a content difference ---------------
 const c = run(BODY.map(curl), FNS.map(curl), TITLE, SUBTITLE);

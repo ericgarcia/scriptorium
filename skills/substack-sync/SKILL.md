@@ -178,6 +178,20 @@ structural, reordered[], suspect[]}`.
   - **`suspect`** — a changed pair too dissimilar to be the same node.
 - `reviewMarks` — a hunk that crossed a formatting boundary. Eyeball those in the editor.
 
+## Before you change any of this
+
+```
+python3 framework/tools/test_suite.py
+```
+
+35 checks: normalization, three-way classification, the converter, footnote ordering, pull
+verification, images, plus a corpus sweep (every piece renders; every published piece matches
+its baseline) and the JS patcher's own A–E suite against all 27 pieces via a stubbed editor.
+
+It deletes nothing, makes no network calls, drives no browser, and writes only inside a
+temporary directory — so it can never touch a live post. It replaced a bash loop that contained
+`rm -f $S/*` with `$S` unquoted, which was one empty variable away from `rm -f /*`.
+
 ## Guardrails
 
 - **Never click Publish / Continue / Update / Send** — that control **sends email**. But the old

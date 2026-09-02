@@ -1,0 +1,22 @@
+{
+ "note": "fixture golden file \u2014 sealed by test_suite.py --reseal-fixtures",
+ "title": "02c9b79413f0c8a9",
+ "subtitle": "0e8a5e5e9ebe6fcf",
+ "body": [
+  "17fe0e482d569b84",
+  "36edc08bc28b5504",
+  "93f882d695fa9804",
+  "cf2c7243082b4046",
+  "a4fb94bd0adcb9df",
+  "5975b757bcc0e493",
+  "853622832966f2fb",
+  "7a95d2bc2d521e19",
+  "17804e030820b6c5",
+  "dc67481a54bcd8ba"
+ ],
+ "fns": [
+  "07545248d26b2113",
+  "ec0744cb100a6346",
+  "617ce51a348421d5"
+ ]
+}

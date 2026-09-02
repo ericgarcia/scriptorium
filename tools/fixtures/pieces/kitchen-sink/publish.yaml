@@ -1,0 +1,8 @@
+# Fixture manifest. The URLs are unreachable placeholders by design —
+# the suite makes no network calls and must never be able to.
+title: The Kitchen Sink
+subtitle: A fixture that exercises every construct that has broken the converter.
+footnotes: native
+send_email: false
+post_url: https://example.invalid/publish/post/0
+public_url: https://example.invalid/p/kitchen-sink

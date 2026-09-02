@@ -1,0 +1,6 @@
+# Fixture manifest — deliberately NO public_url (composed, never published).
+title: Plain Draft
+subtitle: A composed draft that was never published.
+footnotes: native
+send_email: false
+post_url: https://example.invalid/publish/post/1

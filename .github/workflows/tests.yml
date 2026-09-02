@@ -1,0 +1,63 @@
+name: tests
+
+# The framework's own regression suite. It runs against the FIXTURE corpus in
+# tools/fixtures/pieces/, because the real corpus lives in a private instance repo —
+# and the code these tests guard (the converter, the ProseMirror patcher) lives here,
+# so this is where they have to run.
+#
+# The suite makes no network calls and drives no browser. It therefore checks that a
+# draft matches its sealed baseline; it CANNOT check a draft against a live Substack
+# post. That comparison needs an authenticated browser session and stays a human-run
+# `substack_sync scan`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No pip install, no npm install: the tools are stdlib Python plus node's `fs`.
+      - name: Show versions
+        run: python3 --version && node --version
+
+      # The suite exists because its predecessor was a bash loop containing
+      # `rm -f $S/*` with $S unquoted. Keep it honest in CI, not just in review.
+      - name: The suite must not delete, fetch, or shell out
+        run: |
+          if grep -nE "rm -rf|shutil\.rmtree|os\.unlink|os\.remove|shell=True|urllib\.request\.urlopen|requests\." tools/test_suite.py; then
+            echo "::error::test_suite.py gained a deletion, network, or shell call"
+            exit 1
+          fi
+          echo "clean: no deletion, no network, no shell"
+
+      - name: Regression suite
+        run: python3 tools/test_suite.py
+
+      # A golden file you can reseal by accident is not golden.
+      - name: Fixture baselines are sealed, not drifting
+        run: |
+          git diff --exit-code -- tools/fixtures || {
+            echo "::error::fixtures changed during the run — the suite must be read-only"
+            exit 1
+          }

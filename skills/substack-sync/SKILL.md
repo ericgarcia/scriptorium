@@ -188,6 +188,10 @@ python3 framework/tools/test_suite.py
 verification, images, plus a corpus sweep (every piece renders; every published piece matches
 its baseline) and the JS patcher's own A–E suite against all 27 pieces via a stubbed editor.
 
+CI runs it on every push and PR in both repos — against the shipped fixtures in the
+framework repo, against the real corpus here. Neither can check a draft against the LIVE
+post: that needs an authenticated browser and stays a human-run `scan`.
+
 It deletes nothing, makes no network calls, drives no browser, and writes only inside a
 temporary directory — so it can never touch a live post. It replaced a bash loop that contained
 `rm -f $S/*` with `$S` unquoted, which was one empty variable away from `rm -f /*`.

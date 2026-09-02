@@ -35,8 +35,35 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
 import os, re, sys, json, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
+FRAMEWORK = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+
+
+def _resolve_corpus():
+    """Find the pieces.  Two layouts run this suite and the difference matters.
+
+        instance   writing-desk/framework/tools/  ->  writing-desk/pieces/
+        framework  scriptorium/tools/             ->  tools/fixtures/pieces/
+
+    In a standalone framework checkout `tools/` sits at the REPO ROOT, so the
+    instance path resolves to the parent of the checkout — outside it entirely.
+    So don't compute the corpus, look for it: take the instance pieces only when
+    they are actually on disk, and otherwise fall back to the fixtures that ship
+    with the framework.  The fixture corpus exists so that the engine and
+    converter checks still RUN in the framework repo, where the code they guard
+    lives.  Skipping them there would leave the patcher's regression tests
+    running only in a private repo that happens to hold drafts.
+    """
+    env = os.environ.get('DESK_PIECES')
+    if env:
+        return os.path.abspath(env), 'explicit ($DESK_PIECES)'
+    instance = os.path.join(os.path.dirname(FRAMEWORK), 'pieces')
+    if os.path.isdir(instance):
+        return instance, 'instance'
+    return os.path.join(HERE, 'fixtures', 'pieces'), 'fixture'
+
+
+PIECES, CORPUS_KIND = _resolve_corpus()
 
 from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
@@ -221,7 +248,9 @@ def unit_images():
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
-    pieces_dir = os.path.join(REPO, 'pieces')
+    pieces_dir = PIECES
+    if not os.path.isdir(pieces_dir):
+        skip('corpus render', f'no corpus at {pieces_dir}'); return
     faults, n = [], 0
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
@@ -246,7 +275,9 @@ def corpus_integrity():
 
 def corpus_baselines():
     print("\n-- corpus: published pieces match their baselines -----------------")
-    pieces_dir = os.path.join(REPO, 'pieces')
+    pieces_dir = PIECES
+    if not os.path.isdir(pieces_dir):
+        skip('corpus baselines', f'no corpus at {pieces_dir}'); return
     pub, behind = 0, []
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
@@ -268,7 +299,9 @@ def corpus_baselines():
 # ---------------------------------------------------------------- engine (stubbed browser)
 def engine_suite(tmp):
     print("\n-- engine: JS patcher against a stubbed editor --------------------")
-    pieces_dir = os.path.join(REPO, 'pieces')
+    pieces_dir = PIECES
+    if not os.path.isdir(pieces_dir):
+        skip('engine suite', f'no corpus at {pieces_dir}'); return
     repatch = os.path.join(HERE, 'substack_repatch.py')
     runner = os.path.join(HERE, 'test_substack_repatch.js')
     if subprocess.run(['node', '--version'], capture_output=True).returncode != 0:
@@ -296,8 +329,43 @@ def engine_suite(tmp):
         print(f"        ({skipped} inapplicable check(s) skipped across the corpus)")
 
 
+def reseal_fixtures():
+    """Rewrite the fixture golden baselines from the converter's current output.
+
+    This is the ONE writing operation in this file, it is opt-in, and it refuses to
+    touch anything but the shipped fixtures — a golden file you can reseal by accident
+    is not golden, and resealing the real corpus from here would silently move a
+    published piece's sync baseline without ever looking at the live post.
+    """
+    from substack_sync import write_baseline
+    fixtures = os.path.join(HERE, 'fixtures', 'pieces')
+    if os.path.abspath(PIECES) != os.path.abspath(fixtures):
+        print(f"refusing: --reseal-fixtures only reseals {fixtures}, but the corpus "
+              f"is {CORPUS_KIND} ({PIECES})")
+        return 1
+    n = 0
+    for name in sorted(os.listdir(fixtures)):
+        d = os.path.join(fixtures, name)
+        if not os.path.isfile(os.path.join(d, 'draft.md')):
+            continue
+        man = read_manifest(os.path.join(d, 'publish.yaml'))
+        if not man.get('public_url'):
+            continue
+        body, fns, _r, _i = render_reader(d)
+        write_baseline(d, man.get('title', ''), man.get('subtitle', ''),
+                       [H(t) for t in body], [H(t) for t in fns],
+                       'fixture golden file — sealed by test_suite.py --reseal-fixtures')
+        print(f"  sealed  {name}  ({len(body)} body, {len(fns)} fns)")
+        n += 1
+    print(f"{n} fixture baseline(s) resealed")
+    return 0
+
+
 def main():
+    if '--reseal-fixtures' in sys.argv:
+        return reseal_fixtures()
     print("regression suite — no deletion, no network, no browser, repo read-only")
+    print(f"corpus: {CORPUS_KIND}  ({PIECES})")
     with tempfile.TemporaryDirectory(prefix='desk-suite-') as tmp:
         print(f"scratch: {tmp}  (removed on exit)")
         unit_normalization()

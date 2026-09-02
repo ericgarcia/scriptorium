@@ -91,7 +91,16 @@ Each browser step is one JS eval in the live post's editor.
    >
    > Six live posts were re-synced this way on 2026-09-01; every one reported `marks: 0`, and a
    > re-scan and re-plan read `converged / nothing to do` before sealing.
-6. **Hand off — the push is already public.** **There is no staging gate on a live post.** The
+6. **Hand off — confirm on the public page, do not infer.** **Measured 2026-09-01:** a guarded
+   body edit on a live post left the editor showing *Saved* while the **public page still served
+   the old text**, until **Update → Update now** was clicked (cache-busted check;
+   `cf-cache-status: DYNAMIC`, so not a caching artifact). Earlier notes here asserted the
+   opposite. **So check the cache-busted reader URL and report what you actually saw** — either
+   *live and confirmed*, or *staged, awaiting Update*. **"Saved" is not "shipped."** The old
+   wording follows and is kept for the part that is still true — that you must verify before
+   writing, and that the write itself is not undoable.
+
+   **Original note — the push is already public.** **There is no staging gate on a live post.** The
    edit reaches readers on autosave; **Continue** is usually **disabled** afterwards, because
    nothing is left unpublished. Do not report the sync as "staged, awaiting your click" — report
    it as **done**, and hand over the list of what changed so a human can read it on the public

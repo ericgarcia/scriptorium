@@ -170,11 +170,26 @@ step 6 without exception.
 
 ## Republish — surgically re-sync a live post
 
-> **⚠️ Republish is not a draft operation. It edits the public page.** Substack applies an
-> edit to an already-published post on autosave, so every change this section makes is visible to
-> readers immediately — there is no staged revision waiting for a human, and **Continue** is
-> normally **disabled** afterwards because nothing is left to publish. The name is a
-> misnomer inherited from the fresh-compose flow. Read "republish" as **"edit the live post."**
+> **⚠️ Republish edits a public post. Treat the write as irreversible; do NOT assume it has
+> shipped.** These are two different things and both matter.
+>
+> **Measured 2026-09-01, twice, on `The Sheep in the Basement` and `In the Name`:** guarded body
+> edits were applied to the live editor, the header showed **Saved** — and the **public page still
+> served the old text**. Not a CDN artifact: the check was cache-busted and came back
+> `cf-cache-status: DYNAMIC` with no `age` header. **Update** was present and **enabled**; only
+> after **Update → Update now** did the public page change. So on that date a live-post body edit
+> **staged** rather than published, which is the opposite of what this box previously asserted
+> (*"visible to readers immediately… Continue is normally disabled afterwards"*, from `bea8e5a`).
+>
+> **Do not replace one belief with the other.** The earlier note was written from a real
+> observation too; Substack's behaviour may differ by post type or may simply have changed.
+> **The rule that survives either way: never infer the outcome — check the public page.**
+> - **Verify BEFORE writing.** If autosave *does* publish, the pre-image hash check is the only
+>   gate that exists. This costs nothing when it turns out not to be needed.
+> - **Verify AFTER, against the reader URL**, cache-busted. That is the only evidence that the
+>   change reached readers.
+> - **Never report a re-sync as done on the strength of "Saved."** Either it is confirmed on the
+>   public page, or it is *staged and awaiting Update* — say which.
 >
 > **Prefer the `substack-sync` skill for any piece that is already live.** What follows
 > pushes draft → live and is **stateless**: it diffs the draft against the live post, which
@@ -305,10 +320,14 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   post. **It does not. On an already-published post, writing to the editor *is* publishing:** the
   text reaches readers on autosave, with no click and no further gate. The human-in-the-loop
   protection is real for an **unpublished** draft and **absent** for a live one.
-  **What this changes in practice:** treat every republish edit as **already public the moment it
-  lands**. Verify *before* writing, not after — the pre-image hash check is the only gate there
-  is. What the no-click rule still buys you on a live post is narrow but real: **no email is
-  sent.** A body edit does not notify subscribers; **Continue → Publish can.**
+  **What this changes in practice:** verify **both sides** of the write. *Before*, because if
+  autosave publishes, the pre-image hash check is the only gate there is. *After*, against the
+  **cache-busted reader URL**, because a live edit may instead sit **staged** behind an enabled
+  **Update** — measured 2026-09-01 on two posts, where the editor said *Saved* while readers still
+  got the old text. **"Saved" is not "shipped."** What the no-click rule buys on a live post is
+  narrow but real: **no email is sent.** A body edit does not notify subscribers; **Continue →
+  Publish / Update now** can — check the confirm dialog for an email option before confirming (on
+  an already-published post it has not offered one).
 - **Republish is surgical, and touch-ups only.** It changes the smallest span that differs and
   nothing else. If the diff is structural — a block or footnote added, removed, or reordered —
   the tool **refuses** (`structural:true`, zero edits); recompose the piece or edit by hand

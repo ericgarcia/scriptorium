@@ -148,17 +148,29 @@ JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe
   // walking real text descendants so it is correct whether the node is a bare textblock
   // (paragraph/heading) or wraps a paragraph (footnote).
   const offsetToPos = (node, nodeStartPos, charOffset) => {
+    // Map a char offset in the node's reader-text to a document position.
+    //
+    // The comparison is STRICT (`<`, not `<=`) and that is the whole point. An offset landing
+    // exactly on a text-node boundary must resolve to the START OF THE NEXT TEXT RUN, not to
+    // the end of the current one — because between two text runs there can be an inline node,
+    // and the "end of the current run" is that node's position. With `<=`, a delete whose
+    // boundary fell there removed the inline node instead of the character.
+    //
+    // Found the hard way on `Both Ends of the Leash` (2026-09-01): the paragraph reads
+    // "...delivering it.[anchor 10] [anchor 11] The behavior...", and deleting one space
+    // deleted footnote 11 off a LIVE post. Undo restored it; the public page never lost it.
+    // Any inline node is exposed to this — a footnote anchor is simply the one this desk has.
     let acc = 0, out = null;
     node.descendants((child, relPos) => {
       if (out !== null) return false;
       if (child.isText) {
         const len = child.text.length;
-        if (charOffset <= acc + len) { out = nodeStartPos + 1 + relPos + (charOffset - acc); return false; }
+        if (charOffset < acc + len) { out = nodeStartPos + 1 + relPos + (charOffset - acc); return false; }
         acc += len;
       }
       return true;
     });
-    if (out === null) out = nodeStartPos + node.nodeSize - 1;
+    if (out === null) out = nodeStartPos + node.nodeSize - 1;   // offset at the very end
     return out;
   };"""
 

@@ -29,6 +29,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           other refusal is asserted speculatively
   corpus  every piece renders; no undefined / duplicated / nested footnote refs; no
           unverified † notes left in any draft
+  unit    the reader-side extractor, against canned markup (still no network)
   corpus  every published piece matches its sealed baseline
   engine  the JS patcher's own suite (A–E) against every piece, via a stubbed editor
 """
@@ -70,6 +71,7 @@ from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             read_manifest, parse_blocks)
 from substack_sync import (H, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline)
+from substack_verify import live_blocks, extract_post
 from check_links import extract as extract_links
 
 PASS, FAIL, SKIP = [], [], []
@@ -274,6 +276,62 @@ def unit_images():
     check('a bare asset URL is unchanged', canonical_image_url(s3) == s3)
 
 
+# ---------------------------------------------------------------- unit: live extraction
+def unit_live_extraction():
+    """The reader-side extractor, offline.
+
+    substack_verify fetches live pages; these checks feed it canned markup instead, so
+    the suite keeps its no-network promise while still guarding the parser. Every case
+    below is a shape that produced a FALSE DRIFT against the real corpus before it was
+    fixed -- a verifier that cries wolf is worse than none, because the first thing
+    anyone does with a noisy check is stop reading it.
+    """
+    print("\n-- live-page extraction (offline) --------------------------------")
+
+    # A list is ONE block. Substack nests <li><p>..</p></li>; if the inner </p> closes
+    # the buffer, one list becomes N blocks and every piece with a list reports drift.
+    b, f = live_blocks('<ul><li><p>alpha</p></li><li><p>beta</p></li></ul>')
+    check('a bullet list extracts as a single block', b == ['alphabeta'], repr(b))
+
+    # Same bug, different tag -- and adjacent quotes merge, as the draft renderer merges them.
+    b, _ = live_blocks('<blockquote><p>one</p></blockquote><blockquote><p>two</p></blockquote>')
+    check('adjacent blockquotes merge into one block', b == ['onetwo'], repr(b))
+
+    b, _ = live_blocks('<p>plain</p><blockquote><p>q</p></blockquote><p>after</p>')
+    check('a lone blockquote does not swallow the paragraph after it',
+          b == ['plain', 'q', 'after'], repr(b))
+
+    # Furniture Substack injects into the body: not prose, must not count as drift.
+    b, _ = live_blocks('<p>real</p><div class="subscription-widget-wrap-editor">'
+                       '<div class="subscription-widget"><div class="preamble">'
+                       '<p class="cta-caption">Thanks for reading! Subscribe.</p>'
+                       '</div></div></div><p>also real</p>')
+    check('a subscribe widget is not counted as body', b == ['real', 'also real'], repr(b))
+
+    b, _ = live_blocks('<div class="captioned-image-container"><figure>'
+                       '<img src="x"><figcaption>a caption</figcaption></figure></div><p>text</p>')
+    check('an image and its caption are not body', b == ['text'], repr(b))
+
+    # Void tags inside a skipped subtree once wedged the parser open forever: <img>,
+    # <source> and <hr> have no end tag, so a depth counter that increments on them
+    # never comes back down and the whole rest of the post vanishes.
+    b, _ = live_blocks('<div class="captioned-image-container"><picture>'
+                       '<source srcset="a"><img src="b"></picture></div><hr><p>survives</p>')
+    check('void tags in skipped subtrees do not wedge the parser', b == ['survives'], repr(b))
+
+    # The superscript marker is not prose; the footnote body is not body.
+    b, f = live_blocks('<p>Sentence<a class="footnote-anchor" href="#footnote-1">1</a> ends.</p>'
+                       '<div class="footnote"><a class="footnote-number">1</a>'
+                       '<div class="footnote-content"><p>The note.</p></div></div>')
+    check('a footnote anchor leaves no digit in the prose', b == ['Sentence ends.'], repr(b))
+    check('footnote content is captured separately', f == ['The note.'], repr(f))
+
+    # A page that shipped no post (login wall, layout change) must read as "could not
+    # check", never as an empty post that trivially matches nothing.
+    check('a page with no _preloads yields no post',
+          extract_post('<html><body>nothing here</body></html>') is None)
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -405,6 +463,7 @@ def main():
         unit_footnote_order(tmp)
         unit_pull_verification()
         unit_images()
+        unit_live_extraction()
         corpus_integrity()
         corpus_baselines()
         engine_suite(tmp)

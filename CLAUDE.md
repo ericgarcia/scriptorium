@@ -7,7 +7,9 @@ and adjust it.
 
 ## The loop
 
-- `DASHBOARD.md` is the top of the desk — one block per piece in flight.
+- `DASHBOARD.md` is the top of the desk — one block per piece in flight. It is
+  **generated** from `DASHBOARD.d/`; edit the fragment, not the file (see
+  *Working alongside other sessions*).
 - Each `pieces/<name>/README.md` holds that piece's stage, target style, and the
   single next move.
 - Detail lives in `pieces/<name>/outline.md`, `draft.md`, `notes.md`, and
@@ -35,6 +37,42 @@ A style is structured context that steers a draft — never model weights.
 - **The constitution changes only during a `tune-style` pass.** Don't rewrite
   `style.md` mid-draft. Accumulate corrections, then distill them deliberately —
   one change at a time — the way a rule is amended, not patched.
+
+## Working alongside other sessions
+
+Several Claude sessions run against this desk at once — **six on 2026-09-02**. Most of the desk
+is already safe under that, and safe by design: `pieces/<slug>/` has exactly one owner, and logs
+and `corrections.md` are append-only. Nothing of that kind was ever damaged. **All the damage
+landed on shared singletons**, so those are the things with rules.
+
+- **Never edit `DASHBOARD.md` by hand.** It is **generated** from `DASHBOARD.d/<NNN>-<slug>.md`,
+  one fragment per piece. Edit *your piece's fragment*, then run
+  `python3 framework/tools/dashboard.py sync`. Two sessions updating two pieces now write two
+  different files and cannot collide. *(Before this, the same block was silently overwritten
+  three times in one afternoon: every session read the whole file, changed its own block, and
+  wrote the whole file back.)* `sync` **ingests hand-edits before it renders**, so if you or
+  another session edits the generated file anyway, the work is pulled back into the fragment
+  rather than lost — but the fragment is the place to write.
+- **Take the lease before a long edit to a piece**, and say what you are doing:
+  `python3 framework/tools/lease.py acquire <slug> --what "drafting §V"`, and `release` when
+  done. It is **advisory** — it stops nobody, and it is not pretending to. What it buys is that a
+  session about to touch a piece finds out in one call that another one already is, and who.
+  `lease.py list` shows everything held. A lease whose process is gone reads as stale and can be
+  broken; **breaking is recorded in the new lease**, never silent.
+- **Cross-reference by slug; check the titles.** Titles move late and often — two pieces were
+  retitled mid-session on 2026-09-02 while other files went on naming them the old way, and every
+  link still resolved, so nothing could see it. `python3 framework/tools/check_refs.py` compares
+  the corpus against itself and reports any slug labelled with two different titles, using each
+  README's H1 to say which side is right. **`log/` and `corrections.md` are exempt** — they are
+  append-only records of what was true when written, and an old title there is history, not rot.
+- **Never hard-code a localhost port.** Use `framework/tools/session_port.py`, which derives one
+  from the session and **fails loudly** when it is taken. A fixed port plus a swallowed bind error
+  once served one session's code to another session's browser. And **identify fetched bytes at the
+  point of use** — hash what came back over the wire, not the file you meant to serve.
+- **The system pasteboard is global.** Between loading it and pasting, any other session can take
+  it. Run `md_to_clipboard.py --verify` immediately before the paste.
+- **Scope your commits by path.** Commit the piece you worked on and its style edits; do not
+  sweep in another session's in-flight work.
 
 ## Principles
 

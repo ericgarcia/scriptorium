@@ -18,6 +18,10 @@ USAGE
   publication (inferred from publish.yaml's post_url/public_url), which is the set
   the convention governs. --all checks every external link instead.
 
+  All three markdown forms are read: [text](url), <url>, and a bare url. The
+  autolink form is the one the house uses to cite a live sibling inside a footnote,
+  so a checker blind to it is blind exactly where the convention lives.
+
 EXIT
   0  every link resolved 2xx
   1  usage / no draft
@@ -25,8 +29,32 @@ EXIT
 """
 import sys, os, re, urllib.request, urllib.error
 
-LINK_RE = re.compile(r'\]\((https?://[^)\s]+)\)')
+# Three ways a URL reaches a draft, and the checker must see all three. It saw only
+# the first until 2026-09-02, when a footnote citing a published sibling as an
+# autolink went unchecked in a piece that had "passed" this tool — the same class of
+# miss the tool exists to prevent, one syntax over.
+LINK_RE = re.compile(r'\]\((https?://[^)\s]+)\)')      # [text](url) — inline
+AUTO_RE = re.compile(r'<(https?://[^>\s]+)>')          # <url> — autolink; how the house
+                                                       # cites a live sibling inside a footnote
+BARE_RE = re.compile(r'(?<![(<\[])\b(https?://[^\s<>()\[\]]+)')   # url on its own
+TRAILING = '.,;:!?\'"*_'                               # prose punctuation glued to a bare url
 UA = {'User-Agent': 'writing-desk-link-check/1.0'}
+
+
+def extract(text):
+    """Every http(s) URL in the draft, in any of the three markdown forms.
+
+    De-duplicated, so a URL written inline in the body and as an autolink in a
+    footnote is fetched once. Trailing prose punctuation is trimmed — a sentence
+    ending in a bare URL otherwise checks 'https://…/flow.' and reports a false dead.
+    """
+    urls = set()
+    for rx in (LINK_RE, AUTO_RE, BARE_RE):
+        for u in rx.findall(text):
+            u = u.rstrip(TRAILING)
+            if u:
+                urls.add(u)
+    return urls
 
 
 def manifest_host(piece_dir):
@@ -70,7 +98,7 @@ def main():
         sys.exit(1)
 
     host = manifest_host(piece_dir)
-    urls = sorted(set(LINK_RE.findall(open(draft).read())))
+    urls = sorted(extract(open(draft).read()))
     if '--all' not in sys.argv and host:
         urls = [u for u in urls if host in u]
 

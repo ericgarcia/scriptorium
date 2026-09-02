@@ -70,6 +70,7 @@ from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             read_manifest, parse_blocks)
 from substack_sync import (H, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline)
+from check_links import extract as extract_links
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -98,6 +99,34 @@ def unit_normalization():
     check('H ignores leading/trailing space', H('  a b  ') == H('a b'))
     check('smarten opens then closes', smarten_quotes('"a" b') == '“a” b')
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
+
+
+# ---------------------------------------------------------------- unit: link extraction
+def unit_link_extraction():
+    """A cross-link must be seen in every form a draft can carry it.
+
+    The checker read only [text](url) until 2026-09-02. The house cites a published
+    sibling as an autolink inside a footnote, so the one form it could not see was
+    the one the convention uses — and a 404 shipped into a draft behind that blind
+    spot.
+    """
+    print("\n-- link extraction -----------------------------------------------")
+    U = 'https://example.com/p/a'
+    check('inline [text](url)', extract_links(f'see [A]({U}) here') == {U})
+    check('autolink <url>', extract_links(f'[^a]: *A* — <{U}>.') == {U},
+          'how a footnote cites a live sibling — the form that was invisible')
+    check('bare url', extract_links(f'watch {U} now') == {U})
+    check('trailing period is not part of the url',
+          extract_links(f'it is at {U}.') == {U},
+          'otherwise a sentence-final url reports a false dead')
+    check('inline and autolink de-duplicate',
+          extract_links(f'[A]({U}) and <{U}>') == {U},
+          'one fetch, not two')
+    check('two distinct urls both survive',
+          extract_links(f'[A]({U}) then <{U}b>') == {U, U + 'b'})
+    check('emphasis markers are stripped from a bare url',
+          extract_links(f'see *{U}*') == {U})
+    check('no url yields nothing', extract_links('nothing here') == set())
 
 
 # ---------------------------------------------------------------- unit: CLI dispatch
@@ -369,6 +398,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='desk-suite-') as tmp:
         print(f"scratch: {tmp}  (removed on exit)")
         unit_normalization()
+        unit_link_extraction()
         unit_cli_dispatch()
         unit_three_way()
         unit_converter(tmp)

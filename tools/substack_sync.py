@@ -75,8 +75,24 @@ BASELINE = 'sync-baseline.json'
 
 
 def H(s):
-    """Hash of the comparison domain: flattened (straight-quoted) reader-text."""
-    return hashlib.sha256(flatten_quotes(s).encode('utf-8')).hexdigest()[:16]
+    """Hash of the COMPARISON domain: straight-quoted, whitespace-collapsed reader-text.
+
+    Whitespace runs are collapsed here and nowhere else. HTML collapses them, so `it.  The`
+    and `it. The` render identically — and `strip_to_reader` already collapses them on the
+    draft side, which means a live post holding a double space describes a block NO DRAFT CAN
+    EVER PRODUCE. Left comparable, that row reports a difference that can never converge, on
+    every sync, forever.
+
+    It is not a hypothetical tidiness argument. Chasing exactly that phantom on `Both Ends of
+    the Leash` (2026-09-01) put a one-character edit between two adjacent footnote anchors and
+    deleted one of them off a live post — an edit no reader could even have seen, made only to
+    quiet a report. Comparing whitespace-insensitively makes the report quiet by itself.
+
+    This function is only ever used for EQUALITY. Nothing positional may use it: collapsing is
+    not length-preserving, so an offset computed on it would not index the real text. The
+    length-preserving `flatten_quotes` is what the diff and offset machinery use.
+    """
+    return hashlib.sha256(re.sub(r'\s+', ' ', flatten_quotes(s)).strip().encode('utf-8')).hexdigest()[:16]
 
 
 def draft_state(piece_dir):
@@ -256,7 +272,7 @@ SCAN_JS = """await (async () => {
     if (n.type.name === 'footnote') fns.push(n.textContent);
     else if (isBodyNode(n)) body.push(n.textContent);
   });
-  const hash = async a => Promise.all(a.map(t => sha(flat(t))));
+  const hash = async a => Promise.all(a.map(t => sha(sameText(t))));   // comparison domain
   const T = document.querySelector('textarea[placeholder="Title"]');
   const S = document.querySelector('textarea[placeholder="Add a subtitle\\u2026"]');
   return JSON.stringify({
@@ -486,7 +502,7 @@ PUSH_JS = """await (async () => {
   for (const r of PATCH) {
     const L = list(r.kind)[r.liveIdx];
     if (!L) { report.stale.push({ kind: r.kind, liveIdx: r.liveIdx, why: 'no block at that index' }); continue; }
-    if (await sha(L.text) !== r.expect)
+    if (await sha(sameText(L.raw)) !== r.expect)                       // same domain as the scan
       report.stale.push({ kind: r.kind, liveIdx: r.liveIdx,
                           why: 'live text changed since the scan', live: L.text.slice(0, 90) });
   }

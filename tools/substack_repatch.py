@@ -103,6 +103,25 @@ JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe
     && n.textContent.trim() !== '';
 
   const flat = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');
+
+  // TWO normalizations, and keeping them apart is the point.
+  //
+  //   flat()     — quotes only. LENGTH-PRESERVING, so a char offset computed on it is a valid
+  //                offset into the real text. Everything positional uses this.
+  //   sameText() — flat() plus collapsed whitespace. NOT length-preserving, so it must never
+  //                touch an offset. Used only to answer "is this block different?"
+  //
+  // A run of whitespace is not content: HTML collapses it, so `it.  The` and `it. The` render
+  // identically and no reader can tell them apart. But `strip_to_reader` collapses runs on the
+  // draft side, so a live post holding a double space describes a block NO DRAFT CAN EVER
+  // PRODUCE — a difference that can never converge, reported on every future sync.
+  //
+  // `Both Ends of the Leash` (2026-09-01) is why this exists. Chasing exactly that phantom, a
+  // one-space push was aimed between two adjacent footnote anchors and deleted one of them off
+  // a live post. The edit was cosmetically invisible to readers; it was made only to quiet a
+  // report. Comparing whitespace-insensitively means the report is quiet on its own and the
+  // post never has to be touched.
+  const sameText = s => flat(s).replace(/\s+/g, ' ').trim();
   const OPENS = new Set([...' \t\n(\u3010[{\u2014\u2013-\u201c\u2018']);
   const smarten = (s, prevCh) => {
     let out = '';
@@ -231,11 +250,11 @@ REPATCH_JS = r"""(() => {
   // live index, the two lists are misaligned, not edited: refuse and say so.
   const findReorder = (targets, live, kind) => {
     const at = new Map();
-    live.forEach((l, i) => { if (!at.has(l.text)) at.set(l.text, i); });
+    live.forEach((l, i) => { if (!at.has(sameText(l.text))) at.set(sameText(l.text), i); });
     const out = [];
     for (let i = 0; i < targets.length; i++) {
-      if (targets[i] === live[i].text) continue;
-      const j = at.get(targets[i]);
+      if (sameText(targets[i]) === sameText(live[i].text)) continue;
+      const j = at.get(sameText(targets[i]));
       if (j !== undefined && j !== i) out.push({ kind, targetIdx: i, livesAtIdx: j });
     }
     return out;
@@ -251,7 +270,7 @@ REPATCH_JS = r"""(() => {
   const findSuspect = (targets, live, kind) => {
     const out = [];
     for (let i = 0; i < targets.length; i++) {
-      if (targets[i] === live[i].text) continue;
+      if (sameText(targets[i]) === sameText(live[i].text)) continue;
       const sim = similarity(live[i].text, targets[i]);
       if (sim < 0.5) out.push({ kind, idx: i, similarity: +sim.toFixed(3),
                                 live: live[i].text.slice(0, 90), target: targets[i].slice(0, 90) });
@@ -275,7 +294,7 @@ REPATCH_JS = r"""(() => {
   const tasks = [];
   const plan = (targets, live, kind) => {
     for (let idx = 0; idx < targets.length; idx++) {
-      if (targets[idx] === live[idx].text) { report.unchanged++; continue; }
+      if (sameText(targets[idx]) === sameText(live[idx].text)) { report.unchanged++; continue; }
       const hunks = diffHunks(live[idx].text, targets[idx]);
       if (!hunks.length) { report.unchanged++; continue; }
       for (const h of hunks) tasks.push({ kind, idx, node: live[idx].node, raw: live[idx].raw,

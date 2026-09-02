@@ -103,19 +103,16 @@ check('C typography-only diff is a no-op',
   !c.report.structural && c.report.stagedEdits === 0 && c.dispatches === 0,
   `unchanged=${c.report.unchanged}/${BODY.length + FNS.length}`);
 
-// --- D: an edit whose boundary sits on an inline node must not delete it ----
+// --- D: an edit whose boundary sits on an inline node must not consume it ----
 // `Both Ends of the Leash` (2026-09-01): a paragraph reading
 //   "...it.[anchor 10] [anchor 11] The behavior..."
-// and a one-space delete removed footnote 11 from a LIVE post, because an offset landing on a
-// text-node boundary resolved to the END of that run — which is the inline node's position.
-// This rebuilds that shape in miniature and asserts the anchor survives.
+// and an edit at the boundary removed footnote 11 from a LIVE post, because an offset landing
+// on a text-node boundary resolved to the END of that run — which is the inline node's
+// position. Uses a REAL character change, not whitespace: whitespace-only differences are no
+// longer attempted at all (see sameText), so they can no longer exercise this path.
 {
-  const nodes = [];
-  let pos = 0;
-  // children: text "A." | anchor | text " " | anchor | text " B"   => reader-text "A.  B"
-  const parts = [
-    { text: 'A.' }, { anchor: 1 }, { text: ' ' }, { anchor: 2 }, { text: ' B' },
-  ];
+  // children: text "abc" | anchor | text "def"   => reader-text "abcdef"
+  const parts = [{ text: 'abc' }, { anchor: 1 }, { text: 'def' }];
   let rel = 0;
   const kids = parts.map(p => {
     const k = p.anchor
@@ -124,14 +121,14 @@ check('C typography-only diff is a no-op',
     rel += k.nodeSize;
     return k;
   });
-  const anchorPositions = kids.filter(k => !k.isText).map(k => 1 + k.rel);
+  const anchorPositions = kids.filter(k => !k.isText).map(k => 1 + k.rel);   // doc pos of anchors
   const para = {
     type: { name: 'paragraph' },
     textContent: parts.map(p => p.text || '').join(''),
     nodeSize: rel + 2,
     descendants(cb) { kids.forEach(k => cb(k, k.rel)); },
   };
-  nodes.push({ node: para, pos });
+  const nodes = [{ node: para, pos: 0 }];
 
   const ranges = [];
   const tr = { replaceWith(f, t) { ranges.push([f, t]); return tr; },
@@ -140,19 +137,32 @@ check('C typography-only diff is a no-op',
     doc: { forEach(cb) { nodes.forEach(({ node, pos }) => cb(node, pos)); },
            resolve() { return { marks: () => [] }; } } },
     view: { dispatch() {} } };
-  // title/subtitle must already equal the snippet's, so setField short-circuits before
-  // touching a DOM prototype this stub does not have.
   const dFields = { 'textarea[placeholder="Title"]': { value: TITLE },
                     'textarea[placeholder="Add a subtitle…"]': { value: SUBTITLE } };
   global.document = { querySelector: sel => (sel === '.ProseMirror' ? { editor } : (dFields[sel] || null)) };
-  // target: one space removed -> "A. B"
+
+  // change the character immediately AFTER the anchor: reader offset 3, 'd' -> 'X'
   const patched = src.replace(/BODY = \[[\s\S]*?\], FNS = \[[\s\S]*?\];/,
-    'BODY = ["A. B"], FNS = [];');
+    'BODY = ["abcXef"], FNS = [];');
   JSON.parse(eval(patched));
   const hitsAnchor = ranges.some(([f, t]) => anchorPositions.some(a => f <= a && a < t));
   check('D boundary edit spares an inline anchor',
     ranges.length > 0 && !hitsAnchor,
     `ranges=${JSON.stringify(ranges)} anchors@${JSON.stringify(anchorPositions)}`);
+}
+
+// --- E: a whitespace-only difference is not a difference --------------------
+// HTML collapses runs, and `strip_to_reader` collapses them on the draft side, so a live post
+// with a double space describes a block no draft can ever produce. Left comparable, it reports
+// a phantom edit on every sync forever — and chasing that phantom is what cost a footnote.
+{
+  const liveE = BODY.map(curl);
+  const idx = liveE.findIndex(t => t.includes('. '));
+  liveE[idx] = liveE[idx].replace('. ', '.  ');            // inject a double space
+  const e = run(liveE, FNS.map(curl), TITLE, SUBTITLE);
+  check('E whitespace-only difference is ignored',
+    !e.report.structural && e.report.stagedEdits === 0 && e.dispatches === 0,
+    `staged=${e.report.stagedEdits} dispatches=${e.dispatches}`);
 }
 
 process.exit(failures ? 1 : 0);

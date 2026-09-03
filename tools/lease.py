@@ -63,24 +63,67 @@ def _path(slug, root=None):
     return os.path.join(lease_dir(root), '%s.json' % slug)
 
 
+SHELLS = {'zsh', 'bash', 'sh', 'dash', 'fish', 'ksh', 'tcsh', 'csh', 'python', 'python3'}
+
+
+def _parent_of(pid):
+    """(ppid, command) for a pid, or (None, None). Uses ps so it needs no dependencies."""
+    import subprocess
+    try:
+        out = subprocess.run(['ps', '-o', 'ppid=,comm=', '-p', str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout.split(None, 1)
+        if len(out) < 2:
+            return None, None
+        return int(out[0]), out[1].strip().split('/')[-1]
+    except Exception:
+        return None, None
+
+
+def _session_anchor(start=None, parent_of=None, max_hops=8):
+    """The nearest ancestor that is NOT a shell — stable for the life of a session.
+
+    THE FOURTH BUG FROM ONE CONFUSION, and the reason this is not just `os.getppid()`.  The
+    fallback was the pid, which changes every invocation.  Then it was the PPID, which was tested
+    by calling it twice inside ONE shell command and looked perfectly stable.  It is not: this
+    harness starts a FRESH SHELL for every command, so the PPID changes too (measured 88309 ->
+    88414 across two calls) and a session could not release the lease it had just taken.
+
+    What is actually stable is everything ABOVE the shell.  So walk up past the shells and stop at
+    the first ancestor that is not one; that process outlives the individual commands and is
+    distinct between sessions.  Falls back to the session id and then the pid, both of which are
+    wrong in the ways described above but are better than crashing.
+    """
+    parent_of = parent_of or _parent_of
+    pid = start if start is not None else os.getppid()
+    seen = set()
+    for _ in range(max_hops):
+        if pid is None or pid in seen or pid <= 1:
+            break
+        seen.add(pid)
+        ppid, comm = parent_of(pid)
+        if comm is None:
+            break
+        if comm.lower() not in SHELLS:
+            return pid           # first non-shell: this is the session
+        pid = ppid
+    try:
+        return os.getsid(0)
+    except Exception:
+        return os.getpid()
+
+
 def session_id():
     """Who holds a lease.  MUST be stable across separate CLI invocations.
 
-    THE BUG THIS FIXES, and it is the third one in this file from a single confusion.  The
-    fallback used to be this process's own pid.  Every `lease.py` call is its own process, so
-    `acquire` and `release` reported different identities and a session could not release the
-    lease it had just taken — nine of them wedged in one sweep.  Earlier the same confusion made
-    every lease look stale, and before that let one session silently take another's.
-
-    A PID IS NOT A SESSION.  The parent is: every command a session runs comes from the same
-    shell, so PPID is stable across invocations and still distinct between sessions.  An explicit
-    env var beats it whenever the harness provides one.
+    An explicit env var wins whenever the harness provides one; otherwise the session is the
+    nearest non-shell ancestor (see `_session_anchor`), because every command a session runs is a
+    fresh shell underneath the same long-lived process.
     """
     for var in ('CLAUDE_SESSION_ID', 'DESK_SESSION_ID'):
         v = os.environ.get(var)
         if v:
             return v
-    return 'shell%d' % os.getppid()
+    return 'sess%d' % _session_anchor()
 
 
 def pid_alive(pid):

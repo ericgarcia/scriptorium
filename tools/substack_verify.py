@@ -181,6 +181,38 @@ def pieces_touched_by(repo, rev_range):
     return slugs, None
 
 
+def resolve_piece(repo, arg):
+    """Resolve a piece argument to a directory, and say WHY when it cannot.
+
+    Accepts either a path (`pieces/not-yet`) or a bare slug (`not-yet`), because the rest of the
+    desk's tooling is addressed by slug and there is no reason this one should differ.
+
+    Returns `(dir, url, reason)`. Exactly one of `url` / `reason` is set.
+
+    The reason strings matter more than the convenience. Before this existed, every failure
+    printed "no public_url — not published": a typo'd slug, a piece that was never composed, and
+    a genuinely unpublished piece were indistinguishable. On 2026-09-02 that cost a real
+    diagnosis — `substack_verify --fresh forking-paths` reported a freshly published essay as not
+    published, because the bare slug resolved to a directory that does not exist and an absent
+    file reads as an empty manifest. A message that names the wrong cause is worse than no
+    message, because it is believed.
+    """
+    arg = arg.rstrip('/')
+    d = arg if os.path.isdir(arg) else None
+    if d is None:
+        cand = os.path.join(repo, 'pieces', os.path.basename(arg))
+        d = cand if os.path.isdir(cand) else None
+    if d is None:
+        return (arg, None, f"no such piece — tried ./{arg}/ and pieces/{os.path.basename(arg)}/")
+    man = os.path.join(d, 'publish.yaml')
+    if not os.path.isfile(man):
+        return (d, None, "no publish.yaml — never composed to Substack")
+    url = read_manifest(man).get('public_url')
+    if not url:
+        return (d, None, "no public_url in publish.yaml — composed but not published")
+    return (d, url, None)
+
+
 def published_pieces(repo, only=None):
     out = []
     pieces = os.path.join(repo, 'pieces')
@@ -289,11 +321,10 @@ def main():
             return 0
     elif a.pieces:
         targets = []
-        for d in a.pieces:
-            d = d.rstrip('/')
-            url = read_manifest(os.path.join(d, 'publish.yaml')).get('public_url')
-            if not url:
-                print(f"  skip  {os.path.basename(d)}  (no public_url — not published)")
+        for arg in a.pieces:
+            d, url, reason = resolve_piece(a.repo, arg)
+            if reason:
+                print(f"  skip  {os.path.basename(d)}  ({reason})")
                 continue
             targets.append((os.path.basename(d), d, url))
     else:

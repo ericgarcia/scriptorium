@@ -177,6 +177,44 @@ def unit_cli_dispatch():
     check('every branch names a handler', not missing_branch, f'{missing_branch}')
 
 
+# ---------------------------------------------------------------- unit: piece resolution
+def unit_piece_resolution(tmp):
+    """A failure to resolve a piece must name its own cause.
+
+    On 2026-09-02 `substack_verify --fresh forking-paths` reported a freshly published essay as
+    "no public_url — not published". The bare slug resolved to no directory, an absent
+    publish.yaml read as an empty manifest, and the empty manifest read as unpublished. Three
+    different causes printed one message, and the message named the wrong one — which is worse
+    than silence, because it gets believed. This asserts they stay distinguishable.
+    """
+    print("\n-- piece resolution names its own failure ------------------------")
+    sys.path.insert(0, HERE)
+    from substack_verify import resolve_piece
+
+    repo = os.path.join(tmp, 'repo')
+    os.makedirs(os.path.join(repo, 'pieces', 'live'))
+    os.makedirs(os.path.join(repo, 'pieces', 'composed'))
+    os.makedirs(os.path.join(repo, 'pieces', 'bare'))
+    open(os.path.join(repo, 'pieces', 'live', 'publish.yaml'), 'w').write(
+        'title: L\npublic_url: https://example.invalid/p/l\n')
+    open(os.path.join(repo, 'pieces', 'composed', 'publish.yaml'), 'w').write(
+        'title: C\npost_url: https://example.invalid/publish/post/1\n')
+
+    d, url, why = resolve_piece(repo, 'live')
+    check('a bare slug resolves', url and why is None, f'url={url} why={why}')
+    d2, url2, _ = resolve_piece(repo, os.path.join(repo, 'pieces', 'live'))
+    check('a path resolves to the same piece', d2 == d, f'{d2} != {d}')
+
+    _, url3, why3 = resolve_piece(repo, 'composed')
+    check('composed-but-unpublished says so', url3 is None and 'not published' in (why3 or ''), str(why3))
+    _, url4, why4 = resolve_piece(repo, 'bare')
+    check('missing publish.yaml says so', url4 is None and 'never composed' in (why4 or ''), str(why4))
+    _, url5, why5 = resolve_piece(repo, 'nope')
+    check('a bad slug says no such piece', url5 is None and 'no such piece' in (why5 or ''), str(why5))
+    check('the three failures are distinguishable', len({why3, why4, why5}) == 3,
+          'a shared message is what caused the 2026-09-02 misdiagnosis')
+
+
 # ---------------------------------------------------------------- unit: three-way
 def unit_three_way():
     print("\n-- three-way classification --------------------------------------")
@@ -557,6 +595,7 @@ def main():
         unit_normalization()
         unit_link_extraction()
         unit_cli_dispatch()
+        unit_piece_resolution(tmp)
         unit_three_way()
         unit_converter(tmp)
         unit_footnote_continuation(tmp)

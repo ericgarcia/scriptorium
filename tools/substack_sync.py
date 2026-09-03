@@ -901,6 +901,40 @@ def cmd_seed(piece_dir, mode, arg):
     print(f"wrote {p} — {note} (body={len(body_h)} fns={len(fns_h)})")
 
 
+def _warn_if_draft_uncommitted(piece_dir):
+    """A baseline sealed against an UNCOMMITTED draft describes a state the repo does not contain.
+
+    Measured 2026-09-03. Six baselines were sealed from working-tree drafts; three of those drafts
+    carried a house edit that had been pushed to Substack but never committed. Locally everything
+    agreed — draft, live post and baseline. In CI, which checks out the committed tree, the draft
+    was the old text and the baseline described the new one, so the build went red on every push
+    and the local suite stayed green, which is the most confusing shape a failure can take.
+
+    The baseline is not wrong in that situation; git is behind. So this WARNS rather than refuses —
+    sealing mid-edit is legitimate — but it names the consequence and the fix, because nothing
+    warned at all the first time and the inconsistency was invisible until CI found it.
+    """
+    # ABSOLUTE path: with `git -C <piece_dir>` a relative pathspec resolves inside that
+    # directory, so passing 'pieces/<slug>/draft.md' looks for it twice-nested and matches
+    # nothing. The first version of this guard silently never fired for that reason.
+    draft = os.path.abspath(os.path.join(piece_dir, 'draft.md'))
+    try:
+        top = subprocess.run(['git', '-C', piece_dir, 'rev-parse', '--show-toplevel'],
+                             capture_output=True, text=True, timeout=10)
+        if top.returncode != 0:
+            return
+        st = subprocess.run(['git', '-C', piece_dir, 'status', '--porcelain', '--', draft],
+                            capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        return
+    if not st:
+        return
+    print('WARNING: %s has uncommitted changes.' % draft)
+    print('  This baseline describes the draft AS IT IS ON DISK, which is not what the repo holds.')
+    print('  Commit the draft in the SAME commit as the baseline, or CI will compare the committed')
+    print('  draft against a baseline of the uncommitted one and fail while your local suite passes.')
+
+
 def cmd_seal(piece_dir, live_json):
     live = json.load(open(live_json))
     d = draft_state(piece_dir)
@@ -915,6 +949,7 @@ def cmd_seal(piece_dir, live_json):
     if H(d['title']) != H(live['title']) or H(d['subtitle']) != H(live['subtitle']):
         print("REFUSING to seal: title/subtitle still differ between publish.yaml and live.")
         sys.exit(7)
+    _warn_if_draft_uncommitted(piece_dir)
     p = write_baseline(piece_dir, d['title'], d['subtitle'], db, df, 'sealed: draft and live agree')
     print(f"sealed {p} (body={len(db)} fns={len(df)})")
 

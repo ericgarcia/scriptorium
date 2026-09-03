@@ -71,8 +71,15 @@ landed on shared singletons**, so those are the things with rules.
   point of use** — hash what came back over the wire, not the file you meant to serve.
 - **The system pasteboard is global.** Between loading it and pasting, any other session can take
   it. Run `md_to_clipboard.py --verify` immediately before the paste.
-- **Scope your commits by path.** Commit the piece you worked on and its style edits; do not
-  sweep in another session's in-flight work.
+- **Scope your commits by path — but a shared ledger is the exception, and it is not worth
+  agonizing over.** Commit the piece you worked on and its style edits; do not sweep in another
+  session's in-flight work. **The rule is about `pieces/<slug>/` — somebody else's `draft.md`,
+  or a whole piece directory that is theirs.** It does **not** govern the book-level append-only
+  ledgers (`facts.md`, `pieces.md`, `sources.md`), where four sessions may be appending at once
+  and there is no clean seam to cut along: **commit those whole, and say in the message what rode
+  along.** (Eric, 2026-09-02: *"I'm fine with changes from other sessions in facts.md being
+  committed in different sessions."*) The reason the disclosure still matters is that the commit
+  message becomes the only record of what was reviewed and what merely travelled.
 
 ## Principles
 

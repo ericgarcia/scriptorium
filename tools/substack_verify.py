@@ -18,6 +18,13 @@ that promise is worth more than the convenience of one runner.
     python3 substack_verify.py pieces/lord-lord
     python3 substack_verify.py --fresh        # bypass the CDN cache (use after an Update)
 
+WITHOUT --fresh THIS TOOL CAN REPORT DRIFT THAT DOES NOT EXIST, and it did on 2026-09-03: a
+sweep of 26 pieces returned three DRIFTED, and all three came back MATCH the moment the same
+pieces were re-checked cache-busted. The CDN was serving pages older than the posts. A false
+DRIFT is worse than a false MATCH here, because the obvious response to drift is to push the
+draft over the live post — repairing something that was never broken, and overwriting whatever
+the cached copy was too old to show. PREFER --fresh, and never act on a cached DRIFT.
+
 Exit: 0 all checked pieces match | 1 drift | 2 nothing could be checked.
 
 Reaching zero pieces is a FAILURE, not a pass. A run that checked nothing must never be

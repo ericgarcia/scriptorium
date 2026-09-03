@@ -46,6 +46,13 @@ INTERNAL EDITORIAL NOTES (never publish):
     well-formed note always passed. A draft carrying 17 of them converted clean
     (2026-08-29). A `†` marker means the claim is UNVERIFIED; publishing it
     silently is exactly the failure these guards exist to prevent.
+  - GUARD 3 (header): an empty `title` or `subtitle` in publish.yaml exits 6, no
+    override. The subtitle is the second line of every archive card and the
+    social preview; the composer accepts an empty one silently, and a post went
+    live without one on 2026-08-05 and sat that way for a month before anyone
+    looked (found 2026-09-03). A title/subtitle whose comment says PROPOSED /
+    working / not settled is printed as a warning, since a private draft is
+    where the author reviews it.
 """
 import sys, os, re, json, base64, mimetypes
 
@@ -73,6 +80,44 @@ def read_manifest(path):
                     block = None
                     m[k] = v
     return m
+
+UNSETTLED = re.compile(r'\b(?:proposed|proposal|not (?:yet )?settled|unsettled|placeholder|tbd|tk|working title)\b', re.I)
+SETTLED = re.compile(r'(?<!not )(?<!not yet )(?<!un)settled\b', re.I)
+
+def manifest_gate(piece_dir):
+    """Is the reader-facing header of this post complete?  Returns (errors, warnings).
+
+    An empty `title` or `subtitle` is an ERROR and the compose refuses.  The subtitle is
+    not decoration on Substack: it is the second line of every archive card, the homepage
+    listing, the social preview and the email header, and the composer accepts an empty
+    one without a murmur.  Measured 2026-09-03: a post had been live since 2026-08-05 with
+    no subtitle at all, and nothing in the pipeline had ever looked -- the converter read
+    `man.get('subtitle', '')` and passed the empty string straight into the editor.
+
+    A `title`/`subtitle` whose trailing comment says it is still PROPOSED / a working title /
+    not yet settled is a WARNING, not a refusal: a private draft is exactly where the author
+    reviews it, and the note is the desk's own record that they have not.  It is printed so
+    the person composing sees it, because the field the comment is about is the one line of
+    the post the author is least likely to re-read in the editor."""
+    path = os.path.join(piece_dir, 'publish.yaml')
+    if not os.path.exists(path):
+        return ([f'no publish.yaml in {piece_dir}'], [])
+    man = read_manifest(path)
+    errors, warnings = [], []
+    for k in ('title', 'subtitle'):
+        v = man.get(k, '')
+        if not isinstance(v, str) or not v.strip():
+            errors.append(f'publish.yaml has no {k}')
+    for line in open(path):
+        key = line.split(':', 1)[0].strip()
+        if key in ('title', 'subtitle') and '#' in line:
+            note = line.split('#', 1)[1].strip()
+            # "settled 2026-09-02 (replaced the working title X)" is a settled line whose
+            # history mentions the old state; the settlement wins over the mention.
+            if UNSETTLED.search(note) and not (SETTLED.search(note)
+                                                and not re.search(r'not (?:yet )?settled|unsettled', note, re.I)):
+                warnings.append(f'{key} is marked unsettled: {note[:70]}')
+    return errors, warnings
 
 def esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -416,6 +461,16 @@ def main():
     piece_dir = args[0].rstrip('/')
     out_js = args[1] if len(args) > 1 else 'paste.js'
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    gate_errors, gate_warnings = manifest_gate(piece_dir)
+    for w in gate_warnings:
+        print(f"WARNING: {w} -- the author has not signed off on this line; make sure they "
+              f"read it in the editor before Publish.")
+    if gate_errors:
+        for e in gate_errors:
+            print(f"WARNING: {e}")
+        print("Refusing to write output. A post needs a title and a subtitle before it is "
+              "composed; add them to publish.yaml. There is no override.")
+        sys.exit(6)
     html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
     js = (JS_TEMPLATE
           .replace('%TITLE%', json.dumps(man.get('title', '')))

@@ -51,7 +51,7 @@ silently gone.
 import sys, os, json, hashlib, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from md_to_substack import read_manifest, convert  # noqa: E402
+from md_to_substack import read_manifest, convert, manifest_gate  # noqa: E402
 
 FN_TEMPLATE = """(() => {
   window.__sbFN = %FOOTNOTES%;
@@ -173,9 +173,16 @@ def main():
         fn_out = sys.argv[sys.argv.index('--fn-out') + 1]
 
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    # Same gates as a normal compose. A different transport is not a lower bar.
+    gate_errors, gate_warnings = manifest_gate(piece_dir)
+    for w in gate_warnings:
+        print('WARNING: %s -- the author has not signed off on this line; make sure they '
+              'read it in the editor before Publish.' % w)
+    if gate_errors:
+        sys.exit('REFUSING: %s. A post needs a title and a subtitle before it is composed; '
+                 'add them to publish.yaml. There is no override.' % '; '.join(gate_errors))
     html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
 
-    # Same gates as a normal compose. A different transport is not a lower bar.
     if residual:
         sys.exit('REFUSING: %d footnote(s) still contain "verify" after cleaning: %s'
                  % (len(residual), residual))

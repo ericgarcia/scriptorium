@@ -17,6 +17,8 @@ that promise is worth more than the convenience of one runner.
     python3 substack_verify.py                # every published piece
     python3 substack_verify.py pieces/lord-lord
     python3 substack_verify.py --fresh        # bypass the CDN cache (use after an Update)
+    python3 substack_verify.py --archive      # the reader's list: every live post has a
+                                              # title + subtitle and the desk knows it
 
 WITHOUT --fresh THIS TOOL CAN REPORT DRIFT THAT DOES NOT EXIST, and it did on 2026-09-03: a
 sweep of 26 pieces returned three DRIFTED, and all three came back MATCH the moment the same
@@ -238,6 +240,85 @@ def published_pieces(repo, only=None):
     return out
 
 
+def _norm_header(s):
+    s = (s or '')
+    for a, b in (('\u2018', "'"), ('\u2019', "'"), ('\u201c', '"'), ('\u201d', '"'),
+                 ('\u2014', '--'), ('\u2013', '-'), ('\u2026', '...'), ('\u00a0', ' ')):
+        s = s.replace(a, b)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def header_drift(post, man):
+    """Title and subtitle: the two lines of a post the body comparison never sees.
+
+    The body check was blind to them by construction -- it compares blocks of body_html,
+    and the header is not in body_html. So a post could match block-for-block while its
+    subtitle was empty, and one did: live from 2026-08-05, found 2026-09-03, never once
+    reported by a verify run. An EMPTY live subtitle is drift even if the manifest is empty
+    too, because the reader sees the archive card, not the manifest."""
+    out = []
+    for k in ('title', 'subtitle'):
+        live, want = _norm_header(post.get(k)), _norm_header(man.get(k))
+        if not live:
+            out.append(f'live post has NO {k}')
+        elif want and live != want:
+            out.append(f'{k} differs: live {live[:60]!r} vs manifest {want[:60]!r}')
+    return out
+
+
+def walk_archive(base, fresh=False, page=50):
+    """Every post the publication serves publicly, via its archive API, newest first.
+
+    This is the check that does not start from the repo. `published_pieces()` can only
+    verify what the desk knows about; a post composed straight in Substack, or one that
+    predates the desk, is invisible to it. The archive is the reader's list, and the
+    reader's list is the one that has to be right."""
+    posts, offset, seen = [], 0, set()
+    while True:
+        url = f'{base}/api/v1/archive?sort=new&limit={page}&offset={offset}'
+        batch = [p for p in json.loads(fetch_public(url, fresh)) if p.get('id') not in seen]
+        # A SHORT PAGE IS NOT THE LAST PAGE. Substack caps a page below the limit asked for
+        # (measured 2026-09-03: limit=50 returned 23, and offset=23 returned 6 more), so the
+        # only end-of-list signal that can be trusted is an empty one. Stopping on a short
+        # page silently dropped the six oldest posts -- including the one with no subtitle.
+        if not batch:
+            return posts
+        posts += batch
+        seen.update(p.get('id') for p in batch)
+        offset += len(batch)
+
+
+def audit_archive(repo, fresh):
+    """Cross the live archive with the desk. Returns (rows, problems)."""
+    known = {}
+    pieces = os.path.join(repo, 'pieces')
+    for name in sorted(os.listdir(pieces)) if os.path.isdir(pieces) else []:
+        man = read_manifest(os.path.join(pieces, name, 'publish.yaml'))
+        u = man.get('public_url', '')
+        if u:
+            known[u.rstrip('/').rsplit('/', 1)[-1]] = (name, man)
+    if not known:
+        return [], ['no piece records a public_url, so the publication cannot be located']
+    base = re.match(r'https?://[^/]+', next(iter(known.values()))[1]['public_url']).group(0)
+    posts = walk_archive(base, fresh)
+    rows, problems = [], []
+    for p in posts:
+        slug = p.get('slug', '')
+        name, man = known.get(slug, (None, None))
+        flags = []
+        if not _norm_header(p.get('subtitle')):
+            flags.append('NO SUBTITLE')
+        if not _norm_header(p.get('title')):
+            flags.append('NO TITLE')
+        if name is None:
+            flags.append('not in the desk')
+        elif man is not None:
+            flags += [f for f in header_drift(p, man) if 'differs' in f]
+        rows.append((slug, name or '-', (p.get('post_date') or '')[:10], flags))
+        problems += [f'{slug}: {f}' for f in flags]
+    return rows, problems
+
+
 def verify(name, piece_dir, url, fresh):
     try:
         post = extract_post(fetch_public(url, fresh))
@@ -253,10 +334,12 @@ def verify(name, piece_dir, url, fresh):
     facts = {'audience': post.get('audience'),
              'emailed': post.get('email_sent_at'),
              'blocks': f'{len(lb)}/{len(body)}', 'fns': f'{len(lf)}/{len(fns)}'}
-    if [H(x) for x in lb] == [H(x) for x in body] and [H(x) for x in lf] == [H(x) for x in fns]:
+    header = header_drift(post, read_manifest(os.path.join(piece_dir, 'publish.yaml')))
+    if (not header and [H(x) for x in lb] == [H(x) for x in body]
+            and [H(x) for x in lf] == [H(x) for x in fns]):
         return ('MATCH', '', facts)
 
-    detail = []
+    detail = list(header)
     if len(lb) != len(body): detail.append(f'body {len(lb)} live vs {len(body)} draft')
     if len(lf) != len(fns):  detail.append(f'footnotes {len(lf)} live vs {len(fns)} draft')
     for i, (a, b) in enumerate(zip([H(x) for x in body], [H(x) for x in lb])):
@@ -282,7 +365,27 @@ def main():
                          'for a pre-push hook, origin/main..HEAD)')
     ap.add_argument('--budget', type=int, default=BUDGET,
                     help='stop after this many seconds rather than grinding (0 = no limit)')
+    ap.add_argument('--archive', action='store_true',
+                    help='walk the PUBLICATION\'s public archive instead of the repo: every '
+                         'live post must have a title and a subtitle and be known to the desk')
     a = ap.parse_args()
+
+    if a.archive:
+        rows, problems = audit_archive(a.repo, a.fresh)
+        if not rows:
+            print('FAILED: the archive returned no posts' + (f' ({problems[0]})' if problems else ''))
+            return 2
+        w = max(len(r[0]) for r in rows)
+        print(f"{len(rows)} live post(s) in the publication archive"
+              + ("  [cache-busted]" if a.fresh else ""))
+        for slug, name, date, flags in rows:
+            print(f"  {slug:<{w}}  {date}  {name:<28} {'; '.join(flags)}")
+        if problems:
+            print(f"\nFAILED: {len(problems)} problem(s) a reader can see:")
+            for pr in problems: print(f"  {pr}")
+            return 1
+        print("\nevery live post has a title and a subtitle, and the desk knows all of them.")
+        return 0
 
     if a.list:
         # "Which pieces must match Substack?" should be one command, not an inference

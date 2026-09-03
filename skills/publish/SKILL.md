@@ -166,6 +166,22 @@ first.
    deleting the marker, and never reach for `--allow-verify` / `--allow-unverified` to silence a
    real one.
 
+0d. **Header gate — the post has a title AND a subtitle.** The converter (and therefore the
+   clipboard tool) **refuses with exit 6** when `publish.yaml` has an empty `title` or
+   `subtitle`, and there is no override: add the line. The subtitle is not decoration — it is
+   the second line of every archive card, the homepage listing, the social preview and the
+   email header, and **the composer accepts an empty one without a murmur.** Found 2026-09-03:
+   a post had been live since 2026-08-05 with no subtitle at all, and nothing in the pipeline
+   had ever looked, because every check compared *body* blocks and the header is not in the
+   body. A `title`/`subtitle` whose trailing comment still says *PROPOSED* / *working title* /
+   *not yet settled* **warns rather than refuses** — a private draft is where the author reviews
+   it — but say so in chat, because that one line is the part of the post the author is least
+   likely to re-read in the editor. Once they sign off, replace the comment with *settled
+   <date>* so the suite's note goes quiet. The offline half of this guard runs in
+   `test_suite.py` (`corpus_manifests`); the online half is `substack_verify.py --archive`
+   (below), which reads the **publication's** list rather than the repo's and is the only check
+   that can see a post the desk never composed.
+
 ## Steps — clipboard transport (the default; use this)
 
 > **Never retype the essay.** The older JS-snippet path bakes the whole piece into a string
@@ -399,7 +415,21 @@ Exit 0 match, 1 drift, 2 nothing could be read. **2 is not a pass**: a run that 
 no pages reports failure, because "I could not look" and "it matches" must never wear
 the same face.
 
-Run with no arguments to sweep every published piece.
+Run with no arguments to sweep every published piece. Each piece's **title and subtitle**
+are compared too (normalised for curly quotes and dashes): the body comparison cannot see
+them, since they are not in `body_html`, and an **empty live subtitle is drift on its own**.
+
+**`--archive` checks the publication, not the repo.** Every other mode starts from
+`pieces/` and can only verify what the desk knows about. `--archive` walks the public
+archive API instead — the reader's list — and fails on any live post with **no subtitle**,
+no title, one the desk has **no manifest for**, or a header that differs from its manifest.
+That is the check that would have caught a post which had sat live for a month with an
+empty subtitle (2026-08-05 → 2026-09-03): it was composed by hand, before the desk, so
+nothing keyed off `pieces/` could see it. Run it after every publish.
+
+```
+python3 framework/tools/substack_verify.py --archive --fresh
+```
 
 > Do not put this in CI on a GitHub-hosted runner. Measured 2026-09-02: Substack returns
 > **403 to Azure IP ranges** on every path — page, API, and RSS, with any user agent. It

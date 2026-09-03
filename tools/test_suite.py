@@ -69,10 +69,10 @@ PIECES, CORPUS_KIND = _resolve_corpus()
 
 from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
-                            read_manifest, parse_blocks)
+                            read_manifest, parse_blocks, manifest_gate)
 from substack_sync import (H, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline)
-from substack_verify import live_blocks, extract_post
+from substack_verify import live_blocks, extract_post, header_drift
 from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links, unrenderable as unrenderable_links
 
@@ -438,6 +438,41 @@ def unit_live_extraction():
           extract_post('<html><body>nothing here</body></html>') is None)
 
 
+def unit_manifest_gate(tmp):
+    print("\n-- manifest gate: a post needs a title and a subtitle ---------------")
+    d = os.path.join(tmp, 'gate'); os.makedirs(d, exist_ok=True)
+    man = os.path.join(d, 'publish.yaml')
+    with open(man, 'w') as f:
+        f.write('title: T\nfootnotes: native\n')
+    errs, _w = manifest_gate(d)
+    check('a manifest with no subtitle is refused', errs == ['publish.yaml has no subtitle'], str(errs))
+    with open(man, 'w') as f:
+        f.write('title: T\nsubtitle:    \n')
+    errs, _w = manifest_gate(d)
+    check('a blank subtitle counts as missing', errs == ['publish.yaml has no subtitle'], str(errs))
+    with open(man, 'w') as f:
+        f.write('title: T   # working title (alts: A / B)\nsubtitle: S   # PROPOSED 2026-09-02, not yet settled\n')
+    errs, warns = manifest_gate(d)
+    check('an unsettled title/subtitle warns but does not refuse',
+          not errs and len(warns) == 2 and warns[0].startswith('title') and warns[1].startswith('subtitle'),
+          str((errs, warns)))
+    with open(man, 'w') as f:
+        f.write('title: T   # settled 2026-09-01 (Eric)\nsubtitle: S\n')
+    errs, warns = manifest_gate(d)
+    check('a settled header passes clean', not errs and not warns, str((errs, warns)))
+    check('a missing manifest is an error, not a pass', manifest_gate(os.path.join(tmp, 'nope'))[0])
+
+    # the live side: the body comparison never sees the header, so this one must
+    post = {'title': 'T', 'subtitle': ''}
+    check('an empty live subtitle is drift even when the manifest is empty too',
+          header_drift(post, {'title': 'T'}) == ['live post has NO subtitle'])
+    post = {'title': 'T', 'subtitle': 'It\u2019s here \u2014 now'}
+    check('curly quotes and dashes do not count as header drift',
+          header_drift(post, {'title': 'T', 'subtitle': "It's here -- now"}) == [])
+    check('a changed subtitle is reported',
+          header_drift(post, {'title': 'T', 'subtitle': 'Other'})[0].startswith('subtitle differs'))
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -495,6 +530,35 @@ def corpus_headers():
             stale.append(p)
     check(f'all {n} live pieces carry a current published header',
           not stale, '; '.join(stale[:4]) + '  (fix: piece_header.py --apply)')
+
+
+def corpus_manifests():
+    """Every composed piece carries the two lines the body check cannot see.
+
+    A post's title and subtitle are not in body_html, so corpus_baselines and
+    substack_verify's block comparison are blind to them by construction. This is the
+    offline half of the guard: the manifest that will be composed must already carry both.
+    (The online half is `substack_verify.py --archive`, which reads the reader's list.)
+    """
+    print("\n-- corpus: composed pieces carry a title and a subtitle -------------")
+    pieces_dir = PIECES
+    if not os.path.isdir(pieces_dir):
+        skip('manifests', f'no corpus at {pieces_dir}'); return
+    bad, unsettled, n = [], [], 0
+    for p in sorted(os.listdir(pieces_dir)):
+        d = os.path.join(pieces_dir, p)
+        if not os.path.isfile(os.path.join(d, 'publish.yaml')):
+            continue
+        n += 1
+        errs, warns = manifest_gate(d)
+        if errs:
+            bad.append(f'{p}: ' + '; '.join(errs))
+        if warns and read_manifest(os.path.join(d, 'publish.yaml')).get('public_url'):
+            unsettled.append(p)
+    check(f'all {n} composed pieces carry a title and a subtitle', not bad, '; '.join(bad[:4]))
+    if unsettled:
+        print(f"  note  live but the manifest still marks the header unsettled: {', '.join(unsettled)}"
+              "  (clear the comment once the author has signed off)")
 
 
 def corpus_baselines():
@@ -603,8 +667,10 @@ def main():
         unit_pull_verification()
         unit_images()
         unit_live_extraction()
+        unit_manifest_gate(tmp)
         corpus_integrity()
         corpus_headers()
+        corpus_manifests()
         corpus_baselines()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")

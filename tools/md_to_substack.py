@@ -203,7 +203,11 @@ def render_footnote_block(b, piece_dir):
     m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b.strip(), re.S)
     if not m:
         return None
-    text, _removed = clean_footnote(' '.join(m.group(2).split('\n')))
+    # .split() and not .split('\n'): markdown continues a footnote with an INDENTED line,
+    # so splitting on newlines alone re-joins the indentation into the text as a run of
+    # spaces. Collapse every whitespace run, exactly as the continuation-paragraph path in
+    # parse_blocks() already does.
+    text, _removed = clean_footnote(' '.join(m.group(2).split()))
     return inline(text, piece_dir)
 
 def parse_blocks(piece_dir):
@@ -257,7 +261,12 @@ def parse_blocks(piece_dir):
             continue
         m = re.match(r'^\[\^(\w+)\]:\s?(.*)$', b, re.S)              # footnote definition
         if m:
-            raw = ' '.join(m.group(2).split('\n'))
+            # .split(), not .split('\n') — see render_footnote_block(). A multi-LINE footnote
+            # definition indents its continuation lines, and splitting on newlines alone carries
+            # that indentation into the rendered text ("iconography.     The reading"). Invisible
+            # to the fidelity digest, which normalizes whitespace on BOTH sides, so it reached a
+            # rendered page before anyone saw it (hollow-flute, 2026-09-02).
+            raw = ' '.join(m.group(2).split())
             text, removed = clean_footnote(raw)
             if removed:
                 stripped += 1

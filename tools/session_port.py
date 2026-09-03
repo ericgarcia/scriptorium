@@ -30,18 +30,59 @@ import functools, hashlib, http.server, os, socket, socketserver, sys
 PORT_LO, PORT_HI = 20000, 60000
 
 
-def session_id():
-    """Best available identity for this session, in descending order of trust.
+SHELLS = {'zsh', 'bash', 'sh', 'dash', 'fish', 'ksh', 'tcsh', 'csh', 'python', 'python3'}
 
-    Falls back to the pid, which is unique on this machine right now — which is all a port
-    needs.  It does NOT fall back to a constant: a constant is the bug.
+
+def _parent_of(pid):
+    """(ppid, command) for a pid, or (None, None)."""
+    import subprocess
+    try:
+        out = subprocess.run(['ps', '-o', 'ppid=,comm=', '-p', str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout.split(None, 1)
+        if len(out) < 2:
+            return None, None
+        return int(out[0]), out[1].strip().split('/')[-1]
+    except Exception:
+        return None, None
+
+
+def session_anchor(start=None, parent_of=None, max_hops=8):
+    """The nearest ancestor that is NOT a shell — stable for the life of a session.
+
+    THIS FUNCTION LIVES HERE AND `lease.py` IMPORTS IT, because there were two copies and only
+    one of them got fixed.  The pid fallback made every invocation a different session; the PPID
+    fallback that replaced it looked stable when called twice inside one shell command and was
+    not, because this harness starts a fresh shell per command.  `lease.py` was repaired and
+    `session_port.py` was not, so `port_for()` went on returning a different port every call —
+    caught only when a hash gate refused to eval a file served on a port nothing was listening on.
+    **One definition, imported, so the next repair cannot land in half the places.**
     """
+    parent_of = parent_of or _parent_of
+    pid = start if start is not None else os.getppid()
+    seen = set()
+    for _ in range(max_hops):
+        if pid is None or pid in seen or pid <= 1:
+            break
+        seen.add(pid)
+        ppid, comm = parent_of(pid)
+        if comm is None:
+            break
+        if comm.lower() not in SHELLS:
+            return pid
+        pid = ppid
+    try:
+        return os.getsid(0)
+    except Exception:
+        return os.getpid()
+
+
+def session_id():
+    """Best available identity for this session; an explicit env var wins."""
     for var in ('CLAUDE_SESSION_ID', 'DESK_SESSION_ID'):
         v = os.environ.get(var)
         if v:
             return v
-    cwd = os.environ.get('DESK_INSTANCE') or os.getcwd()
-    return 'pid%d@%s' % (os.getpid(), cwd)
+    return 'sess%d' % session_anchor()
 
 
 def port_for(name=None, lo=PORT_LO, hi=PORT_HI):

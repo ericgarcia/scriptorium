@@ -177,17 +177,17 @@ def test_lease():
         TABLE_A = {4001: (3001, 'zsh'), 3001: (2001, 'Application'), 2001: (1, 'Claude')}
         TABLE_B = {4002: (3001, 'zsh'), 3001: (2001, 'Application'), 2001: (1, 'Claude')}
         look = lambda t: (lambda pid: t.get(pid, (None, None)))
-        a = lease._session_anchor(start=4001, parent_of=look(TABLE_A))
-        b = lease._session_anchor(start=4002, parent_of=look(TABLE_B))
+        a = lease.session_anchor(start=4001, parent_of=look(TABLE_A))
+        b = lease.session_anchor(start=4002, parent_of=look(TABLE_B))
         check('lease: identity survives a fresh shell per invocation', a == b == 3001,
               'got %r and %r' % (a, b))
         # ...and two genuinely different sessions still differ.
         TABLE_C = {4003: (3002, 'zsh'), 3002: (2002, 'Application'), 2002: (1, 'Claude')}
-        c = lease._session_anchor(start=4003, parent_of=look(TABLE_C))
+        c = lease.session_anchor(start=4003, parent_of=look(TABLE_C))
         check('lease: two different sessions still get different identities', a != c)
         # a chain that is shells all the way up must terminate rather than spin.
         LOOP = {5001: (5002, 'zsh'), 5002: (5001, 'zsh')}
-        got = lease._session_anchor(start=5001, parent_of=look(LOOP))
+        got = lease.session_anchor(start=5001, parent_of=look(LOOP))
         check('lease: a cyclic/all-shell chain terminates', isinstance(got, int))
 
         check('lease: writes are atomic (no .tmp left behind)',

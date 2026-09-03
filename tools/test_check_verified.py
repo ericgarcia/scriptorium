@@ -102,6 +102,34 @@ class GateTests(unittest.TestCase):
         _, hits, _ = cv.check(d)
         self.assertTrue(any('†' in h[2] for h in hits))
 
+    # --- the log is history --------------------------------------------------------------
+
+    def test_log_only_doubt_blocks_when_nothing_is_cleared(self):
+        """The Corey caveat lived in a log. Without a clearance it must still block."""
+        d = piece(self.tmp, 'kge', log='- **Standing caveat:** quotes still from the transcript.')
+        _, hits, _ = cv.check(d)
+        self.assertTrue(hits, 'a log doubt blocks while no clearance is recorded')
+
+    def test_a_dated_clearance_makes_the_log_history(self):
+        """An append-only log entry must not block a piece forever once it has been cleared.
+
+        The 2026-08 entry can never be edited, so if it kept blocking, the only way past the gate
+        would be to falsify the log. check_refs.py exempts log/ for the same reason.
+        """
+        d = piece(self.tmp, 'kge', log='- Wrote notes (the full unverified anchor ledger), this log.',
+                  publish='title: X\nverified:\n  date: 2026-09-02\n  by: Eric\n')
+        _, hits, cleared = cv.check(d)
+        self.assertIsNotNone(cleared)
+        self.assertEqual([], hits, 'a dated clearance makes an old log entry history')
+
+    def test_readme_doubt_still_blocks_despite_a_clearance(self):
+        """README/notes describe the CURRENT state, so they are not excused by a clearance."""
+        d = piece(self.tmp, 'kge', readme='## Anchors to verify before print',
+                  publish='title: X\nverified:\n  date: 2026-09-02\n  by: Eric\n')
+        _, hits, cleared = cv.check(d)
+        self.assertIsNotNone(cleared)
+        self.assertTrue(hits, 'a current-state doubt is not superseded by a clearance')
+
     # --- front matter -----------------------------------------------------------------------
 
     def test_unverified_in_draft_front_matter_blocks(self):

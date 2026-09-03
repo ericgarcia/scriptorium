@@ -184,8 +184,19 @@ def check(piece_dir):
         if os.path.exists(p):
             hits += _find(_read(p), fn)
 
+    # THE LOG IS APPEND-ONLY HISTORY, AND THAT CHANGES WHAT A HIT IN IT MEANS.
+    # README.md and notes.md describe the piece's CURRENT state, so a doubt in them is a doubt
+    # that is still open. A log entry records what was true ON THE DAY IT WAS WRITTEN, and it may
+    # never be edited — so a 2026-08 entry saying "the full unverified anchor ledger" would block
+    # this piece forever, and the only way out would be to falsify the log. check_refs.py exempts
+    # log/ and corrections.md for exactly this reason.
+    # But the Corey caveat WAS in a log, and dropping the log entirely would reopen the hole this
+    # tool exists to close. So: log hits are collected and shown, and they block ONLY while no
+    # dated clearance has been recorded in publish.yaml. Writing the clearance is what says "that
+    # entry is now history" — deliberately, with a date, in the reviewable place.
+    log_hits = []
     for p in sorted(glob.glob(os.path.join(piece_dir, 'log', '*.md'))):
-        hits += _find(_read(p), 'log/' + os.path.basename(p))
+        log_hits += _find(_read(p), 'log/' + os.path.basename(p))
 
     draft = os.path.join(piece_dir, 'draft.md')
     if os.path.exists(draft):
@@ -197,7 +208,10 @@ def check(piece_dir):
             hits.append(('draft.md', line, 'a † unverified-claim marker', frag))
         hits += _find(d.split('\n---\n')[0], 'draft.md (front-matter)')
 
-    return name, hits, clearance(piece_dir)
+    cleared = clearance(piece_dir)
+    if not cleared:
+        hits += log_hits          # no dated clearance: the log still counts against the piece
+    return name, hits, cleared
 
 
 def published_pieces():

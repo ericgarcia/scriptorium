@@ -71,6 +71,11 @@ landed on shared singletons**, so those are the things with rules.
   point of use** — hash what came back over the wire, not the file you meant to serve.
 - **The system pasteboard is global.** Between loading it and pasting, any other session can take
   it. Run `md_to_clipboard.py --verify` immediately before the paste.
+- **`git commit -- <paths>`, never `git add` then `git commit`. The INDEX is shared too.**
+  Another session's `git add` stages files in the same `.git/index`, and a bare `git commit` then
+  sweeps them in — measured 2026-09-03, when a two-file commit carried four files of another
+  session's `hollow-flute` work that were never added by this one. **Pathspec-limited commit
+  ignores whatever else is staged**, which is the only form that is actually scoped.
 - **Scope your commits by path — but a shared ledger is the exception, and it is not worth
   agonizing over.** Commit the piece you worked on and its style edits; do not sweep in another
   session's in-flight work. **The rule is about `pieces/<slug>/` — somebody else's `draft.md`,

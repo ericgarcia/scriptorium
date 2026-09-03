@@ -201,10 +201,24 @@ def check(piece_dir):
     draft = os.path.join(piece_dir, 'draft.md')
     if os.path.exists(draft):
         d = _read(draft)
-        # front-matter counts as scaffold; the body's † is the converter's business too
-        for m in re.finditer(r'†', d):
-            line = d.count('\n', 0, m.start()) + 1
-            frag = re.sub(r'\s+', ' ', d[m.start():m.start() + 90]).strip()
+        # THE DAGGER HAS TWO JOBS IN THIS HOUSE AND ONLY ONE OF THEM IS A DOUBT.
+        #   (a) it quarantines an editorial note so the converter drops it — and that note is
+        #       usually a record of work ALREADY DONE ("† Checked against the luma page",
+        #       "† (internal: prayer wording confirmed vs. Big Book p. 63)");
+        #   (b) it marks a claim that has not been verified yet.
+        # Only (b) is a blocker. Treating every dagger as (b) made the tool block `flow` and
+        # `lord-lord` for having done the checking and written it down, and block `distinction`
+        # and `fear-of-god` for the sentence "zero † markers remain" — i.e. for saying they were
+        # clean. A guard that fires on evidence of diligence teaches people to stop being diligent.
+        d_scrubbed = _strip_cleared(d)
+        OPEN_NOTE = re.compile(r'^\s*\(?\s*(?:internal:\s*)?'
+                               r'(?:verify|todo|tk|check(?![a-z])|confirm(?!ed)|pin|source|cite)\b', re.I)
+        for m in re.finditer(r'†', d_scrubbed):
+            tail = d_scrubbed[m.end():m.end() + 90]
+            if not OPEN_NOTE.match(tail):
+                continue                      # a completed note, or a sentence about daggers
+            line = d_scrubbed.count('\n', 0, m.start()) + 1
+            frag = re.sub(r'\s+', ' ', d_scrubbed[m.start():m.start() + 90]).strip()
             hits.append(('draft.md', line, 'a † unverified-claim marker', frag))
         hits += _find(d.split('\n---\n')[0], 'draft.md (front-matter)')
 

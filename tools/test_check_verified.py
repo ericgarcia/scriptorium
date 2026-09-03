@@ -102,6 +102,20 @@ class GateTests(unittest.TestCase):
         _, hits, _ = cv.check(d)
         self.assertTrue(any('†' in h[2] for h in hits))
 
+    def test_a_completed_dagger_note_is_not_a_doubt(self):
+        """flow and lord-lord use the dagger to quarantine a note recording work already done."""
+        d = piece(self.tmp, 'done',
+                  draft='A claim.† Checked against the luma page 2026-08-26.\n'
+                        'Another.† (internal: prayer wording confirmed vs. Big Book p. 63.)\n')
+        _, hits, _ = cv.check(d)
+        self.assertEqual([], hits, 'a completed dagger note must not block')
+
+    def test_a_sentence_about_daggers_is_not_a_doubt(self):
+        """distinction and fear-of-god were blocked for saying they were clean."""
+        d = piece(self.tmp, 'clean', draft='anchors VERIFIED against the KJV (zero † markers remain).\n')
+        _, hits, _ = cv.check(d)
+        self.assertEqual([], hits)
+
     # --- the log is history --------------------------------------------------------------
 
     def test_log_only_doubt_blocks_when_nothing_is_cleared(self):

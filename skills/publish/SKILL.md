@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes. A RE-SYNC of an already-published post is LIVE the moment it is written — Substack has no staging step there, so verify before writing, not after. Never clicks Publish/Continue/Send, and never sends email.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes — that first click is never delegated. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is delegable: ask in chat, then click Update → Update now. NEVER sends email — the confirm dialog is read first and, if any email option is present, it stops and asks.
 ---
 
 # Publish (to Substack)
@@ -236,7 +236,10 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    else moved (a concurrent edit to the draft, a Substack-side input rule) and that is worth
    knowing before a human publishes.
 7. **Hand off:** the draft is composed. Tell the user to review it in Substack and click
-   **Publish** themselves. **Do not click Publish / Continue / Send.**
+   **Publish** themselves. **Do not click Publish / Continue / Send on a FIRST publication.**
+   That click is the publication itself and is the one that can mail the subscriber list; it stays
+   the author's, and asking for permission does not transfer it. *(Shipping a later **edit** to an
+   already-published post is a different act with a different rule — see Republish step 5.)*
 
 ### Fallback — the JS-snippet path
 
@@ -317,16 +320,32 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    editor. **`reordered`** means a target block's exact text was found at a *different* live
    index: the two lists are misaligned, not edited — the count guard alone could not see this,
    and a piece once aligned 30 footnotes against the wrong 30 live nodes while passing it.
-5. **Hand off — and understand what already happened.** **On an already-published post there is
-   no hand-off to give: the edit is already live.** Substack writes an edit to a *published* post
-   through to the public page on autosave; **Continue** governs the *first* publish and the email,
-   not later edits, and on a published post it is typically **disabled** because there is nothing
-   unpublished left to ship. Observed 2026-09-01: eight live posts read the new text on their
-   public URLs, and `Continue` was `disabled` on returning to the editor. So do not tell the user
-   a staged edit is waiting for their click — **tell them it is live**, and give them the list of
-   what changed so they can check it. Still never click **Continue / Publish / Send** yourself: on
-   an *unpublished* draft that click is the real publication, and on any post it is the control
-   that can **send email**.
+5. **Ship it: ask, then click Update → Update now.** A body edit to a published post
+   **stages** — measured three times now (2026-09-01 on two posts, 2026-09-03 on `hollow-flute`):
+   the editor reads **Saved**, **Update** is **enabled**, and the **cache-busted public page still
+   serves the old text.** So the edit is *not* live until the button is pressed, and leaving it
+   pressed-by-nobody strands a correction the author believes they asked for.
+
+   **The default is therefore: ask the user for permission in chat, and on a clear yes, click it
+   yourself.** Do not make a person walk to a browser to press a button on a change they already
+   approved. **What is NOT delegated by that yes:** the *first* publication of an unpublished
+   draft (step 7 above) — that click is the publication and stays theirs.
+
+   **The email guard is absolute and survives this change.** Before confirming, read the dialog
+   and prove it cannot mail anyone: look for *email / send / newsletter / notify / subscribers
+   will receive* wording and for any enabled email control. On an already-published post the
+   dialog has consistently offered **none** — audience and comment radios only. **If an email
+   option is present, or you cannot tell, STOP and ask.** Never disable, uncheck, or work around
+   one to get the button pressed.
+
+   **Then verify against the cache-busted reader URL, not the "Your post is live!" screen** —
+   that screen is a claim, not evidence. `substack_verify.py --fresh <piece>` is the evidence.
+   Report *confirmed public*, or *staged, awaiting Update* — never "done" on the strength of
+   **Saved**.
+
+   **Read the report** the patch returns: `{stagedEdits, unchanged, applied[], footnoteChanges[],
+   reviewMarks[], failed[], structural, reordered[], suspect[]}`. **`failed` must be empty** before
+   any of the above.
 
 ## After a human clicks Publish — mark the file as published
 
@@ -458,20 +477,23 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   transport. The author's words should travel **disk → pasteboard → browser**, never through the
   agent's fingers. This is not a performance preference: a transcription slip publishes a typo in
   the author's voice, and every guard downstream reads it as an intended edit.
-- **Never click Publish/Continue/Send — the human publishes.** (Safety rule + editorial
-  correctness.) But **do not mistake that for a safety net on a live post.** The old wording here
-  claimed the opposite of the truth — that republish "only stages" and "holds doubly" on a live
-  post. **It does not. On an already-published post, writing to the editor *is* publishing:** the
-  text reaches readers on autosave, with no click and no further gate. The human-in-the-loop
-  protection is real for an **unpublished** draft and **absent** for a live one.
-  **What this changes in practice:** verify **both sides** of the write. *Before*, because if
-  autosave publishes, the pre-image hash check is the only gate there is. *After*, against the
-  **cache-busted reader URL**, because a live edit may instead sit **staged** behind an enabled
-  **Update** — measured 2026-09-01 on two posts, where the editor said *Saved* while readers still
-  got the old text. **"Saved" is not "shipped."** What the no-click rule buys on a live post is
-  narrow but real: **no email is sent.** A body edit does not notify subscribers; **Continue →
-  Publish / Update now** can — check the confirm dialog for an email option before confirming (on
-  an already-published post it has not offered one).
+- **Shipping an edit is delegable; publishing is not.** Two different acts, two rules.
+  **First publication of an unpublished draft: never click.** It is the publication, and it is the
+  control that can mail the subscriber list. **Shipping a later edit to an already-published post:
+  ask in chat, and on a clear yes, click Update → Update now yourself** (revised 2026-09-03 on
+  Eric's instruction — the old blanket never-click made a person press a button on a change they
+  had already approved, and stranded corrections behind it).
+  **The email guard does not move.** Read the confirm dialog before confirming and prove it cannot
+  mail anyone — *email / send / newsletter / notify* wording, any enabled email control. On an
+  already-published post it has consistently offered none. **If one is present, or you cannot tell,
+  STOP and ask.** Never uncheck or route around one.
+  **And permission is per-change, not standing:** a yes to shipping this fix is not a yes to the
+  next one.
+- **Verify both sides of a live write, and never infer the outcome.** *Before*, because the
+  pre-image hash check is the only gate that exists if autosave turns out to publish. *After*,
+  against the **cache-busted reader URL** — measured repeatedly, the editor says *Saved* while
+  readers still get the old text. **"Saved" is not "shipped," and neither is "Your post is live!"**
+  — that screen is a claim; `substack_verify --fresh` is the evidence.
 - **Republish is surgical, and touch-ups only.** It changes the smallest span that differs and
   nothing else. If the diff is structural — a block or footnote added, removed, or reordered —
   the tool **refuses** (`structural:true`, zero edits); recompose the piece or edit by hand

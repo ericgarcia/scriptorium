@@ -110,6 +110,29 @@ first.
    proven rather than guessed), searching `~/Downloads` by default; failing that it keeps
    Substack's copy. Run it dry first — it changes nothing without `--apply`.
 
+0b-embeds. **An embed is not an image, and the image checks were blind to it.**
+   An image can be made recompose-safe by putting its URL in `draft.md`, because the converter
+   emits `<img>`. **No markdown emits an embed.** A YouTube embed is a `youtube2` node carrying
+   a `videoId` and nothing URL-shaped, so the media scrape — which collected only URL-ish
+   attributes — walked straight past it, and every check reported a clean post.
+
+   Measured on `hollow-flute`, 2026-09-03: a YouTube embed sat at the top of a live post,
+   invisible to `check-images`, to the body scrape (which excludes media), and therefore to the
+   fidelity digest. A full recompose would have dropped it silently with nothing in the repo to
+   rebuild it from.
+
+   The scrape now also returns `embeds`, and `check-images` **refuses (exit 9)** while any live
+   embed is unrecorded. Record each one in `publish.yaml`:
+
+   ```yaml
+   embeds:
+     xNHwumRin9c: youtube2 — https://www.youtube.com/watch?v=... — top of post
+   ```
+
+   **Recording is NOT protection, and the message says so.** It makes the loss visible in
+   advance; a recompose still drops the embed and it must be **re-added by hand in the composer
+   afterwards.** Never resolve the refusal by deleting the embed from the post.
+
 0b-links. **Status-check the in-body cross-links:**
    `python3 framework/tools/check_links.py pieces/<name>` — exits non-zero and names any link
    that does not resolve. A cross-link URL copied out of the scaffold is **unverified by

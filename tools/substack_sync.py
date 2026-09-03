@@ -629,7 +629,26 @@ IMAGES_JS = """(() => {
     if (el.src && /^https?:\/\//.test(el.src) && !out.some(o => o.src === el.src))
       out.push({ type: 'dom-img', attr: 'src', src: el.src, alt: el.alt || '', caption: '' });
   }
-  return JSON.stringify({ images: out });
+  // EMBEDS: media the draft cannot express at all. An image at least has a URL that can sit
+  // in draft.md; a YouTube embed is a `youtube2` node carrying `videoId` and NOTHING that
+  // looks like a URL, so the loop above cannot see it and every image check ran blind past
+  // it. Collect any non-text node that produced no image entry, so a new embed kind Substack
+  // adds later is caught by default rather than needing this list extended.
+  const TEXTY = new Set(['doc','paragraph','heading','text','hardBreak','horizontalRule','hr',
+    'blockquote','bulletList','orderedList','listItem','footnote','codeBlock',
+    'footnoteAnchor']);   // footnoteAnchor is structural, not media — the footnote machinery owns it
+  const emb = [];
+  const visitEmbed = (n) => {
+    const a = n.attrs || {};
+    const isImage = out.some(o => ['src','url','imageSrc','thumbnail'].some(k => a[k] === o.src));
+    if (!TEXTY.has(n.type.name) && !isImage) {
+      const id = Object.values(a).find(v => typeof v === 'string' && v.length);
+      emb.push({ type: n.type.name, key: id || n.type.name, attrs: a });
+    }
+    n.forEach ? n.forEach(visitEmbed) : null;
+  };
+  root.editor.state.doc.forEach(visitEmbed);
+  return JSON.stringify({ images: out, embeds: emb });
 })()"""
 
 
@@ -708,6 +727,32 @@ def cmd_check_images(piece_dir, images_json):
         print("(![alt](<url>)) and re-run. Do not resolve this by removing the image from the post.")
         sys.exit(8)
     print("\nOK — every live image is referenced in the draft. A recompose cannot lose one.")
+
+    # ---- embeds -------------------------------------------------------------------------
+    # An embed is NOT like an image. An image can be made recompose-safe by pasting its URL
+    # into draft.md, because the converter emits <img>. There is no markdown that emits a
+    # `youtube2` node, so an embed CANNOT be made reproducible — recording it only makes the
+    # loss visible and re-addable by hand. Say that plainly rather than implying the manifest
+    # protects it. (hollow-flute, 2026-09-03: a YouTube embed sat on a live post completely
+    # invisible to every check here, because it carries a videoId and no URL.)
+    embeds = data.get('embeds', [])
+    if embeds:
+        man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+        recorded = set(man.get('embeds', {}) or {})
+        unrecorded = [e for e in embeds if e['key'] not in recorded]
+        print(f"\nlive embeds: {len(embeds)}   recorded in publish.yaml: {len(embeds) - len(unrecorded)}")
+        for e in embeds:
+            mark = 'UNRECORDED' if e in unrecorded else 'ok        '
+            print(f"  {mark} {e['type']:12} {e['key']}")
+        if unrecorded:
+            print(f"\nREFUSING: {len(unrecorded)} live embed(s) are not recorded in publish.yaml.")
+            print("A recompose WILL drop them — no markdown reproduces an embed — and nothing in")
+            print("the repo can rebuild one. Add each under an `embeds:` block (key = the id below,")
+            print("value = what it is and where it sits), then re-add it by hand in the composer")
+            print("after any recompose. Do not resolve this by deleting the embed from the post.")
+            sys.exit(9)
+        print("Every live embed is recorded. NOTE: recording is not protection — a recompose")
+        print("still drops them, and they must be re-added by hand in the composer afterwards.")
 
 
 

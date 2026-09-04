@@ -16,6 +16,13 @@ and say — concretely — where it lands and where it strays.
    — the same steering `draft` uses. You're checking the draft against *this*
    voice, not against generic "good writing".
 
+3. Run `python3 framework/tools/check_pronouns.py pieces/<name> --names <named figures>` and
+   read every hit against the constitution's pronoun rules before you read the prose: forced
+   sentence-initial capitals, the generic masculine (a hypothetical person is *they*), a
+   lowercase *the one / someone* or a *what* for God, a lowercase deity pronoun. Each hit is
+   justified by naming its referent or it is a finding. (Added 2026-09-03; the sweep had been
+   typed by hand per session and twice was not typed at all.)
+
 ## Giving feedback
 
 - Be concrete and located: quote the line, name what's off (which principle or

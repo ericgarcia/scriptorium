@@ -140,6 +140,18 @@ first.
    address from the day it published, because that URL had only ever been copied and never
    followed. Fix a dead link here **and** in every scaffold file that repeats it.
 
+0b-pronouns. **Run the pronoun sweep, and justify every hit by naming who it points at:**
+   `python3 framework/tools/check_pronouns.py pieces/<name> --names <the named figures> --strict`
+   It lists sentence-initial forced capitals (a capital *He* silently reassigns a referent to the
+   Son), every masculine pronoun and *a man / the man* (a hypothetical person takes they/them; the
+   exception is *this person actually exists*), any lowercase *the one / someone / a mind* in a
+   sentence that names God (this voice writes *the One*, *Someone*, and never lets God be a
+   *what*), and any lowercase deity pronoun outside a quotation. **`--strict` refuses on the last
+   two.** Added 2026-09-03 after *The Mask Comes Off Last* reached a composed draft with twenty-one
+   generic masculines and a lowercase *the one* for God — both rules were in force, neither was in
+   any sweep, and both were caught by the author reading the page. **A rule that is not in the
+   sweep list is not in force.**
+
 0b. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
    cites a work, or pins a scriptural/textual locus must be fact-checked before composing —
    misquoting a real person in a public post is the failure to prevent. If the piece's

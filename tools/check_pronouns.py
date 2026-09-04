@@ -52,8 +52,16 @@ def body_of(piece_dir):
     return src
 
 def sentences(text):
-    flat = re.sub(r'\s+', ' ', text)
-    return [s.strip() for s in re.split(r'(?<=[.!?])\s+(?=[A-Z“"\*\[])', flat) if s.strip()]
+    # Paragraphs first, so a paragraph head is always a sentence head (a forced capital there was
+    # missed by a whole-file split); then sentences, allowing the sentence to close in a mark —
+    # `*`, `"`, `”`, `]`, `)` — after its terminal punctuation, which is where the other misses were.
+    out = []
+    for para in re.split(r'\n\s*\n', text):
+        flat = re.sub(r'\s+', ' ', para).strip()
+        if not flat:
+            continue
+        out.extend(s.strip() for s in re.split(r'(?<=[.!?])[\*"”\]\)]*\s+(?=[“"\*\[\(]*[A-Z])', flat) if s.strip())
+    return out
 
 def ctx(s, m, w=70):
     return '…' + s[max(0, m.start()-w):m.end()+w] + '…'

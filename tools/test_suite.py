@@ -566,13 +566,31 @@ def unit_pronouns(tmp):
     # --strict: E and F warn, they do not refuse; C/D still do
     tool = os.path.join(HERE, 'check_pronouns.py')
     p = subprocess.run([sys.executable, tool, d, '--strict'], capture_output=True, text=True)
-    check('--strict exits 0 with only E/F hits, and says they are warnings',
-          p.returncode == 0 and 'E/F hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+    check('--strict exits 0 with only E/F/G hits, and says they are warnings',
+          p.returncode == 0 and 'E/F/G hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
     d2 = os.path.join(tmp, 'pronouns-d'); os.makedirs(d2, exist_ok=True)
     with open(os.path.join(d2, 'draft.md'), 'w', encoding='utf-8') as f:
         f.write("*Draft.*\n\n---\n\nGod made the world and he saw that it was good.\n")
     p = subprocess.run([sys.executable, tool, d2, '--strict'], capture_output=True, text=True)
     check('--strict still exits 3 on a D hit', p.returncode == 3, f"rc={p.returncode}")
+
+    # G — the LORD takes capitals (2026-09-07): a mixed-case Lord in the body is listed, a
+    # footnote definition's King James wording is not, and LORD itself is never a hit
+    d3 = os.path.join(tmp, 'pronouns-g'); os.makedirs(d3, exist_ok=True)
+    with open(os.path.join(d3, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\nI turned my life over to the Lord. *Wait on the LORD.*[^ps] "
+                "The steward's lord came home.\n\n[^ps]: Psalm 27:14 (KJV): *Wait on the LORD*; "
+                "Matthew 22:37 reads *love the Lord thy God*.\n")
+    r3 = check_pronouns.sweep(d3)
+    check('G lists the mixed-case "the Lord" in the author\'s prose', len(r3['G']) == 1 and 'over to the Lord' in r3['G'][0], str(r3['G']))
+    d4 = os.path.join(tmp, 'pronouns-g2'); os.makedirs(d4, exist_ok=True)
+    with open(os.path.join(d4, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\n*Wait on the LORD.*[^ps] The steward's lord came home.\n\n"
+                "[^ps]: Psalm 27:14 (KJV); Matthew 22:37 reads *love the Lord thy God*.\n")
+    check('G does not list LORD, a lowercase lord, or a footnote definition\'s King James wording',
+          not check_pronouns.sweep(d4)['G'], str(check_pronouns.sweep(d4)['G']))
+    p = subprocess.run([sys.executable, tool, d3, '--strict'], capture_output=True, text=True)
+    check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'E/F/G hits are warnings' in p.stdout, f"rc={p.returncode}")
 
 
 # ---------------------------------------------------------------- corpus

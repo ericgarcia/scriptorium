@@ -71,12 +71,19 @@ by naming who it points at — that is the sweep, and this tool only makes sure 
 USAGE
     python3 check_pronouns.py <piece-dir> [--names A,B,C] [--strict]
       --names   comma-separated named figures whose pronouns are theirs (Campbell,Peter,...)
-      --strict  exit 3 if any C or D hit remains (for a publish preflight); A, B, E and F
-                always exit 0 because they are lists to be justified, not verdicts — E and F
+      --strict  exit 3 if any C or D hit remains (for a publish preflight); A, B, E, F and G
+                always exit 0 because they are lists to be justified, not verdicts — E, F and G
                 each need a human call on a referent or a speaker, which no rule can make.
+    G lists every *Lord* (mixed case) outside a footnote definition — the house sets *the LORD*
+    in capitals wherever the word names God (2026-09-07), own prose and quoted scripture alike,
+    so each remaining *Lord* is justified by naming what it is instead: a parable's lord, Caesar
+    as lord, another tradition's Lord, a made-up god, a fixed text, a work's received title (the
+    Lord's Prayer). A justified G-hit is silenced the same way as a C-hit, by a substring under
+    `pronouns_allow:` in publish.yaml. Footnote definitions are never swept: the note that records
+    the King James's wording keeps the King James's own *Lord*.
     A C-hit whose referent is NOT God is justified by listing a substring of it in the piece's
     publish.yaml under `pronouns_allow:` — reviewable, and it survives the session.
-EXIT  0 clean or only A/B/E/F listings · 3 C/D hits under --strict · 1 usage
+EXIT  0 clean or only A/B/E/F/G listings · 3 C/D hits under --strict · 1 usage
 """
 import os, re, sys
 
@@ -192,11 +199,11 @@ def load_allow(piece):
     return allow
 
 def sweep(piece, names=(), allow=None):
-    """Run every section over the piece.  Returns {'sentences': n, 'A': [...], ... 'F': [...]}."""
+    """Run every section over the piece.  Returns {'sentences': n, 'A': [...], ... 'G': [...]}."""
     allow = load_allow(piece) if allow is None else allow
     text = body_of(piece)
     sents = sentences(text)
-    A, B, C, D, E, F = [], [], [], [], [], []
+    A, B, C, D, E, F, G = [], [], [], [], [], [], []
     name_re = re.compile(r'\b(' + '|'.join(map(re.escape, names)) + r')\b') if names else None
     for s in sents:
         # A — sentence-initial forced capitals
@@ -244,7 +251,14 @@ def sweep(piece, names=(), allow=None):
             if gospel and FIRST_PERSON.search(body):
                 for m in re.finditer(r"\b(me|my|mine|myself)\b", body):
                     F.append((m.group(1), evidence, sentence_at(flat, start + m.start())))
-    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F}
+        # G — a mixed-case *Lord* anywhere in a body paragraph (prose or quotation): the house
+        # writes LORD wherever the word names God, so each of these names something else or is a miss.
+        for m in re.finditer(r"\bLord\b", flat):
+            window = flat[max(0, m.start()-60):m.end()+60]
+            if any(a in window for a in allow):
+                continue                                       # justified in publish.yaml
+            G.append(ctx(flat, m, 70))
+    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G}
 
 def _clip(s, n=200):
     return s if len(s) <= n else s[:n] + '…'
@@ -262,7 +276,7 @@ def main():
         i = sys.argv.index('--names'); names = [n.strip() for n in sys.argv[i+1].split(',')]
     strict = '--strict' in sys.argv
     r = sweep(piece, names)
-    A, B, C, D, E, F = (r[k] for k in 'ABCDEF')
+    A, B, C, D, E, F, G = (r[k] for k in 'ABCDEFG')
     print(f"check_pronouns — {os.path.basename(piece)}: {r['sentences']} sentences")
     print(f"\nA. sentence-initial capitals to justify ({len(A)}):")
     for p, c in A: print(f"   {p:5s} {c}")
@@ -276,9 +290,11 @@ def main():
     for w, ev, c in E: print(f"   {w:8s} {ev:14s} {_clip(c)}")
     print(f"\nF. lowercase me/my/mine inside a Gospel quotation — the Son's own pronouns take the capital ({len(F)}):")
     for w, ev, c in F: print(f"   {w:8s} {ev:14s} {_clip(c)}")
+    print(f"\nG. mixed-case *Lord* in the body — the house writes LORD wherever it names God; justify each as a figure, another tradition, a fixed text or a title ({len(G)}):")
+    for c in G: print(f"   {_clip(c)}")
     if strict:
-        if E or F:
-            print("\nSTRICT: E/F hits are warnings — each needs a referent or speaker named; not refused.")
+        if E or F or G:
+            print("\nSTRICT: E/F/G hits are warnings — each needs a referent or speaker named; not refused.")
         if C or D:
             print("\nSTRICT: C/D hits remain — justify or fix before compose.")
             sys.exit(3)

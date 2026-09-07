@@ -375,6 +375,46 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    reviewMarks[], failed[], structural, reordered[], suspect[]}`. **`failed` must be empty** before
    any of the above.
 
+### Structural republish — when the surgical tool refuses
+
+`substack_repatch.py` refuses a block-count change, and it is right to: a paragraph added,
+removed, merged or split is a rewrite, and the surgical engine's 1:1 alignment would write into
+the wrong paragraph. **The answer used to be "recompose or edit by hand," and both were bad on a
+post that carries an embed or an image** — a recompose destroys the embed (nothing in the repo can
+rebuild it), and "by hand" meant a hand-built snippet that needed one more guard every time it
+ran (`hollow-flute`, three times, 2026-09-04 → 07). That snippet is now the tool's second engine:
+
+```
+python3 framework/tools/substack_repatch.py --structural pieces/<name> <out.js>
+```
+
+Run it once in the live post's editor, like the surgical snippet. It **aligns the draft against
+the live document by block text** (LCS), then: **anchor-bearing blocks pair 1:1 by order inside
+each changed range and are edited by text hunk only**, so a native footnote anchor is never
+touched by HTML; every other changed block is **replaced whole from the converter's own HTML**
+(italics, links), with quotes **smartened outside tags only** — a curled quote inside `href="…"`
+is a dead link, measured 2026-09-04; **a retired footnote's anchor is dropped**, and the orphaned
+footnote node too if the editor does not remove it itself (Substack did, measured 2026-09-07); an
+**insert lands on the draft's side of a divider** (after the `---` if the draft puts one before
+the new block, otherwise right after the preceding block).
+
+**It refuses, before touching anything,** when a block's HTML does not hash to its own text (the
+**transcription guard** — the sha256/16 is computed by the generator, so a snippet retyped into
+an eval fails closed on any slip); when anchor-bearing blocks do not pair 1:1 (un-merge or re-split
+the draft so each footnote-bearing paragraph has a live counterpart — that is what the v3 sync
+needed); when the draft **adds** a footnote (`insertFootnote` is not automated here — add it in
+the composer, or recompose); when footnote order differs; or when a hunk would span an inline
+node or cross a mark boundary.
+
+**Read the report:** `{refused, ok, applied[], failed[], plan{replace,insert,delete,hunk,fnHunk,
+dropAnchor}, final{body, footnotes, anchors, bodyMismatch[], fnMismatch[], linksMissing[],
+dividersOff[], firstNode}}`. **`refused` must be null and `ok` must be true**; `final` is the
+whole document read back after the edits — counts, every block's text, every footnote, the anchor
+count, and a link mark on every block whose HTML carried one. Then the same as any republish:
+ask, click **Update → Update now** after reading the dialog for email, and **`substack_verify
+--fresh`**. The engine is exercised against a stubbed editor on every piece by the suite
+(`test_substack_structural.js`, cases S1–S9).
+
 ## After a human clicks Publish — mark the file as published
 
 A piece keeps its text in `draft.md` for its whole life. The filename does **not** change

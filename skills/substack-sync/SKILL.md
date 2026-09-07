@@ -236,9 +236,13 @@ temporary directory — so it can never touch a live post. It replaced a bash lo
   and mean it.
 - **Conflicts stop the run.** Do not pick a side. Show the user both versions and let them
   choose.
-- **Structural divergence is not auto-merged.** A block added, removed or reordered on
-  either side is described and left alone. A live essay is not the place to guess at a
-  paragraph.
+- **Structural divergence is not auto-merged by `plan`/`push`.** A block added, removed or
+  reordered on either side is described and left alone by the three-way tooling. **When the
+  draft side is the one that moved** — a rewrite of a live post — use the structural engine,
+  `substack_repatch.py --structural` (see the `publish` skill, *Structural republish*): it
+  aligns by block text, keeps footnote anchors by editing those blocks by hunk only, drops a
+  retired footnote's anchor, refuses an added footnote, and hash-checks every block it writes.
+  Seal afterwards as usual. It still never guesses: every refusal names the block.
 - **Never pass a flag to force past a refusal.** The refusals here exist because each one
   has already been the failure mode once.
 - **Seal every completed sync.** The baseline is the whole mechanism.

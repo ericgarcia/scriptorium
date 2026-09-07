@@ -592,6 +592,7 @@ def engine_suite(tmp):
         skip('engine suite', f'no corpus at {pieces_dir}'); return
     repatch = os.path.join(HERE, 'substack_repatch.py')
     runner = os.path.join(HERE, 'test_substack_repatch.js')
+    srunner = os.path.join(HERE, 'test_substack_structural.js')
     if subprocess.run(['node', '--version'], capture_output=True).returncode != 0:
         skip('engine suite', 'node not available')
         return
@@ -611,6 +612,18 @@ def engine_suite(tmp):
         if r.returncode != 0:
             failures.append(f'{p}: ' + '; '.join(l.strip() for l in r.stdout.splitlines()
                                                  if l.startswith('FAIL')))
+        # the structural engine, against the same piece: S1–S9, with a document model that
+        # moves whole blocks, anchors and marks (see test_substack_structural.js)
+        sjs = os.path.join(tmp, f'{p}.structural.js')
+        sgen = subprocess.run([sys.executable, repatch, '--structural', d, sjs], capture_output=True, text=True)
+        if sgen.returncode != 0:
+            failures.append(f'{p}: structural generator refused ({sgen.stdout.strip().splitlines()[:1]})')
+            continue
+        sr = subprocess.run(['node', srunner, sjs], capture_output=True, text=True)
+        skipped += sr.stdout.count('\nskip') + sr.stdout.startswith('skip')
+        if sr.returncode != 0:
+            failures.append(f'{p} [structural]: ' + '; '.join(l.strip() for l in sr.stdout.splitlines()
+                                                              if l.startswith('FAIL')))
     check(f'JS patcher suite passes for all {ran} pieces', not failures,
           ' | '.join(failures[:3]))
     if skipped:

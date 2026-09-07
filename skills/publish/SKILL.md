@@ -146,11 +146,24 @@ first.
    Son), every masculine pronoun and *a man / the man* (a hypothetical person takes they/them; the
    exception is *this person actually exists*), any lowercase *the one / someone / a mind* in a
    sentence that names God (this voice writes *the One*, *Someone*, and never lets God be a
-   *what*), and any lowercase deity pronoun outside a quotation. **`--strict` refuses on the last
-   two.** Added 2026-09-03 after *The Mask Comes Off Last* reached a composed draft with twenty-one
-   generic masculines and a lowercase *the one* for God — both rules were in force, neither was in
-   any sweep, and both were caught by the author reading the page. **A rule that is not in the
-   sweep list is not in force.**
+   *what*), and any lowercase deity pronoun outside a quotation. **`--strict` refuses on those
+   last two.** Added 2026-09-03 after *The Mask Comes Off Last* reached a composed draft with
+   twenty-one generic masculines and a lowercase *the one* for God — both rules were in force,
+   neither was in any sweep, and both were caught by the author reading the page. **A rule that
+   is not in the sweep list is not in force.**
+   Two more sections look **inside** a scripture quotation, where the first four stop (added
+   2026-09-07): **E** lists every capitalized *He / Him / His / Himself* inside an italic or
+   blockquoted scripture quotation, with its sentence — justify each as the Son, or, where the
+   referent is the Father, bracket the substitution (*[Them] only shalt thou serve*, the verb
+   bracketed too where agreement needs it); **F** lists every lowercase *me / my / mine / myself*
+   inside a quotation whose footnote cites a Gospel — the Son's own pronouns take the house
+   capital in a quotation (*He that hath seen Me*), never bracketed, disclosed once per piece.
+   **E and F warn and never refuse**, because each needs a human call on a referent or a speaker.
+   Measured on *False Light*, 2026-09-07, four misses in one draft that no section could see:
+   Matthew 4:10 *Him only shalt thou serve*, Matthew 5:45 *He maketh His sun*, John 5:30 *mine
+   own self*, John 15:5 *without me* — the first caught by the author reading the page. The
+   Matthew 4:10 span had no footnote ref of its own (the ref sat on an earlier span), which is why
+   E also qualifies a span on King James diction alone.
 
 0b. **Verify the footnotes.** Every footnote that quotes or characterizes a real person,
    cites a work, or pins a scriptural/textual locus must be fact-checked before composing —

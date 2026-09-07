@@ -37,8 +37,12 @@ the loop — write freely, revise later, let git remember old versions.
 0. Run `python3 framework/tools/check_pronouns.py pieces/<name> --names <named figures>` on what
    you just wrote and repair before logging: restructure any sentence-initial forced capital, make
    every invented person *they/them*, capitalize every oblique reference to God (*the One*,
-   *Someone*) and keep God a *who*. Justify each remaining hit by naming its referent. (Added
-   2026-09-03 — see the constitution's pronoun section and `corrections.md`.)
+   *Someone*) and keep God a *who*. Inside a scripture quotation, read sections E and F: a
+   capitalized *He / Him / His* there says *the Son* — for the Father it is a bracketed *[Them]*
+   (verb bracketed too where agreement needs it) — and the Son's own *me / my / mine* take the
+   capital. Justify each remaining hit by naming its referent. (Added 2026-09-03 — see the
+   constitution's pronoun section and `corrections.md`; E and F added 2026-09-07 after *False
+   Light* carried four such misses.)
 1. Append a dated entry to `pieces/<name>/log/<current-month>.md` — what you
    drafted, decisions, open threads. Append-only, newest at the bottom.
 2. Update `pieces/<name>/README.md` — the `Stage:` and `Next move:` lines.

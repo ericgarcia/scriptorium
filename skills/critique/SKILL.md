@@ -19,9 +19,14 @@ and say — concretely — where it lands and where it strays.
 3. Run `python3 framework/tools/check_pronouns.py pieces/<name> --names <named figures>` and
    read every hit against the constitution's pronoun rules before you read the prose: forced
    sentence-initial capitals, the generic masculine (a hypothetical person is *they*), a
-   lowercase *the one / someone* or a *what* for God, a lowercase deity pronoun. Each hit is
+   lowercase *the one / someone* or a *what* for God, a lowercase deity pronoun — and, inside a
+   scripture quotation, a capitalized *He / Him / His* (section E: the Son, or else a bracketed
+   *[Them]* for the Father) and a lowercase *me / my / mine* where a Gospel footnote says the Son
+   is speaking (section F: the house capitalizes His own pronouns in a quotation). Each hit is
    justified by naming its referent or it is a finding. (Added 2026-09-03; the sweep had been
-   typed by hand per session and twice was not typed at all.)
+   typed by hand per session and twice was not typed at all. E and F added 2026-09-07 after
+   *False Light* carried four misses inside King James quotations — *Him only shalt thou serve*,
+   *He maketh His sun*, *mine own self*, *without me* — that no sweep could see.)
 
 ## Giving feedback
 

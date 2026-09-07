@@ -33,6 +33,9 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
   corpus  every live piece's header says it is live, not a draft
   corpus  every published piece matches its sealed baseline
   engine  the JS patcher's own suite (A–E) against every piece, via a stubbed editor
+  unit    the pronoun sweep's sections E and F look INSIDE a scripture quotation — the four
+          casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
+          fixture and must all be listed; --strict warns on them and does not refuse
 """
 import os, re, sys, json, subprocess, tempfile
 
@@ -75,6 +78,7 @@ from substack_sync import (H, three_way, align, canonical_image_url,
 from substack_verify import live_blocks, extract_post, header_drift
 from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links, unrenderable as unrenderable_links
+import check_pronouns
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -473,6 +477,104 @@ def unit_manifest_gate(tmp):
           header_drift(post, {'title': 'T', 'subtitle': 'Other'})[0].startswith('subtitle differs'))
 
 
+# ---------------------------------------------------------------- unit: pronoun sweep, E and F
+PRONOUN_FIXTURE = """*Draft — fixture for the pronoun sweep; the four False Light misses of 2026-09-07 as they were before the audit.*
+
+---
+
+And the answer: *Get thee hence.*[^matt4] Not riches in the abstract. And the reason He gives is
+worth the whole essay: *Thou shalt worship the Lord thy God, and Him only shalt thou serve.* The
+question on the mountain was never competence.
+
+*For He maketh His sun to rise on the evil and on the good, and sendeth rain on the just and on
+the unjust.*[^matt545] The rain is not a reward.
+
+Set that next to the man who said this instead. *I can of mine own self do nothing: as I hear, I
+judge … because I seek not mine own will, but the will of the Father which hath sent me.*[^john530]
+*Without me ye can do nothing.*[^john155] The grammar of the two texts runs in opposite directions.
+
+He that hath seen Me hath seen the Father: *He that hath seen Me hath seen the Father.*[^john149]
+Paul says it plainly: *I can do all things through Christ which strengtheneth me.*[^phil413] John
+the elder says *We love [Them], because [They] first loved us.*[^1john] The point is *not* that
+*He* wins; the point is that the exam was refused.
+
+> And He said unto them, Why are ye so fearful? how is it that ye have no faith?[^mark440]
+
+[^matt4]: Matthew 4:8–10 (KJV). The King James reads *and him only shalt thou serve*.
+
+[^matt545]: Matthew 5:45 (KJV). The King James reads *for he maketh his sun to rise on the evil and on
+    the good*.
+
+[^john530]: John 5:30 (KJV), abridged. Cf. 5:19, *The Son can do nothing of Himself*.
+
+[^john155]: John 15:5 (KJV). The King James reads *without me ye can do nothing*.
+
+[^john149]: John 14:9 (KJV).
+
+[^phil413]: Philippians 4:13 (KJV).
+
+[^1john]: 1 John 4:19 (KJV).
+
+[^mark440]: Mark 4:40 (KJV).
+"""
+
+
+def unit_pronouns(tmp):
+    print("\n-- pronoun sweep: E and F look inside a scripture quotation ---------")
+    d = os.path.join(tmp, 'pronouns'); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(PRONOUN_FIXTURE)
+    r = check_pronouns.sweep(d)
+    E = [(w, ev) for w, ev, _ in r['E']]
+    F = [(w, ev) for w, ev, _ in r['F']]
+    e_sent = {(w, ev): sent for w, ev, sent in r['E']}
+    f_sent = {(w, ev): sent for w, ev, sent in r['F']}
+
+    # the measured misses — each must be listed
+    check('E lists Matthew 4:10 "Him only shalt thou serve" (no adjacent ref; KJV diction qualifies it)',
+          ('Him', 'kjv-diction') in E, str(E))
+    check('E hit carries its sentence',
+          'Him only shalt thou serve' in e_sent.get(('Him', 'kjv-diction'), ''), str(e_sent))
+    check('E lists Matthew 5:45 "He maketh His sun" — both pronouns, via the ref',
+          E.count(('He', 'ref:matt545')) == 1 and E.count(('His', 'ref:matt545')) == 1, str(E))
+    check('F lists John 5:30 "mine own self" twice and "sent me" once, via the Gospel ref',
+          F.count(('mine', 'ref:john530')) == 2 and F.count(('me', 'ref:john530')) == 1, str(F))
+    check('F lists John 15:5 "without me"', ('me', 'ref:john155') in F, str(F))
+    check('F hit carries its sentence',
+          'Without me ye can do nothing' in f_sent.get(('me', 'ref:john155'), ''), str(f_sent))
+
+    # what must NOT be listed
+    check('F skips an epistle — Paul\'s "strengtheneth me" is not a Gospel',
+          not any(ev == 'ref:phil413' for _, ev in F), str(F))
+    check('F does not mistake 1 John for the Gospel of John',
+          not any(ev == 'ref:1john' for _, ev in F), str(F))
+    check('F is clean on a recased Gospel quotation ("hath seen Me")',
+          not any(ev == 'ref:john149' for _, ev in F), str(F))
+    check('E lists the recased John 14:9 "He" for justification (referent: the Son)',
+          ('He', 'ref:john149') in E, str(E))
+    check('E does not list a bracketed [They]/[Them] as a masculine',
+          not any(ev == 'ref:1john' for _, ev in E), str(E))
+    check('E ignores italic emphasis in the author\'s own prose (*He* wins — no ref, no diction)',
+          not any(sent.startswith('The point is') for _, _, sent in r['E']), str(r['E']))
+    check('E sweeps a blockquote carrying a KJV ref',
+          ('He', 'ref:mark440') in E, str(E))
+    check('neither E nor F sweeps a footnote definition (the note keeps the source wording)',
+          not any('King James reads' in sent for _, _, sent in r['E'] + r['F']), str(r['E'] + r['F']))
+    check('the quotation edge still holds for D (lowercase "him" inside *…* is not a D hit)',
+          not r['D'], str(r['D']))
+
+    # --strict: E and F warn, they do not refuse; C/D still do
+    tool = os.path.join(HERE, 'check_pronouns.py')
+    p = subprocess.run([sys.executable, tool, d, '--strict'], capture_output=True, text=True)
+    check('--strict exits 0 with only E/F hits, and says they are warnings',
+          p.returncode == 0 and 'E/F hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+    d2 = os.path.join(tmp, 'pronouns-d'); os.makedirs(d2, exist_ok=True)
+    with open(os.path.join(d2, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\nGod made the world and he saw that it was good.\n")
+    p = subprocess.run([sys.executable, tool, d2, '--strict'], capture_output=True, text=True)
+    check('--strict still exits 3 on a D hit', p.returncode == 3, f"rc={p.returncode}")
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -681,6 +783,7 @@ def main():
         unit_images()
         unit_live_extraction()
         unit_manifest_gate(tmp)
+        unit_pronouns(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

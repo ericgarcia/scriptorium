@@ -73,7 +73,7 @@ def main():
     body, fns, residual, fn_issues = render_reader(piece_dir)
 
     if residual:
-        print(f"WARNING: {len(residual)} footnote(s) still contain 'verify' after cleaning: "
+        print(f"WARNING: {len(residual)} footnote(s) still carry verify or clearance language (an ISO date, 'consulted …') after cleaning: "
               f"{residual}. Resolve the note (verify -> move behind a †, or delete) before republishing.")
         print("Refusing to write output.")
         sys.exit(2)

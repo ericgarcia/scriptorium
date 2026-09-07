@@ -184,7 +184,9 @@ def main():
     html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
 
     if residual:
-        sys.exit('REFUSING: %d footnote(s) still contain "verify" after cleaning: %s'
+        sys.exit('REFUSING: %d block(s) still carry verify or clearance language after cleaning: %s\n'
+                 '  A verify note: verify the claim, then put the note behind a dagger. Clearance '
+                 'language (an ISO date, "consulted 2026-09-07"): move it to publish.yaml -> verified:.'
                  % (len(residual), residual))
     if fn_issues['nested']:
         sys.exit('REFUSING: footnote reference(s) inside a footnote: %s. These publish as a '

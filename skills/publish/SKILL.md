@@ -178,6 +178,18 @@ first.
    deleting the marker, and never reach for `--allow-verify` / `--allow-unverified` to silence a
    real one.
 
+0c-clearance. **Clearance language is scaffold too, and the converter refuses it.** A footnote that
+   says the checking was *done* — *(both consulted 2026-09-07)*, *checked 2026-09-02 against …*, a
+   bare ISO date — is the desk's verification record reaching the reader. Its place is
+   `publish.yaml` → `verified:`; the footnote carries the citation and nothing about the checking.
+   Found 2026-09-07 on *The Towel*: eight loans were cleared with sources written into the footnotes,
+   one of them carried its access date along, every guard read it as clean (a note that says the
+   verifying is finished contains no *verify*), and the author caught it in the composer. The
+   converter now refuses on an ISO date anywhere in the reader text, and on *consulted / accessed /
+   retrieved* followed by a date, in both transports and in the suite's corpus check. Date a source
+   the way a reader expects — *(2002)*, *March 10, 1967* — and put the day you checked it in the
+   manifest.
+
 0d. **Header gate — the post has a title AND a subtitle.** The converter (and therefore the
    clipboard tool) **refuses with exit 6** when `publish.yaml` has an empty `title` or
    `subtitle`, and there is no override: add the line. The subtitle is not decoration — it is

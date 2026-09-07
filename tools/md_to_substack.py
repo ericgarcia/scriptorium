@@ -180,6 +180,11 @@ def inline(text, piece_dir):
 # Imperative/bare forms only. PAST TENSE MEANS THE WORK IS DONE: a note reading
 # "Checked against the luma page 2026-08-26" is a record of verification, not a request
 # for it, and blocking on it would refuse a piece that is already correct (flow, 2026-09-01).
+CLEARANCE_RE = re.compile(
+    r'\b20\d\d-\d\d-\d\d\b'                                   # an ISO date is scaffold, always
+    r'|\b(?:consulted|accessed|retrieved)\s+(?:on\s+)?(?:\d|20\d\d|[A-Z][a-z]+ \d)',   # consulted 7 Sept / on 2026
+    re.I)
+
 UNVERIFIED_RE = re.compile(
     r'\b(verify|verifying|todo|to-do|tk|fixme|xxx)\b'
     r'|\bcheck\b(?!ed|ing)|\bconfirm\b(?!ed|ing)|\bpin\b(?!ned)'
@@ -383,7 +388,17 @@ def parse_blocks(piece_dir):
         'orphaned':     fn_orphans,                                     # unindented para after a footnote def
     }
     ordered = [[n, footnotes[n]] for n in ref_order if n in footnotes]
-    residual = [n for n, c in ordered if re.search(r'verify', c, re.I)]
+    # A footnote (or a body block) that carries CLEARANCE language — "consulted 2026-09-07",
+    # "checked 2026-09-02", a bare ISO date — is scaffold that reached the reader. The desk's
+    # place for a verification record is publish.yaml -> `verified:`; the footnote carries the
+    # citation and nothing about the checking. Found 2026-09-07 when "(both consulted
+    # 2026-09-07)" was composed into a live footnote of The Towel and the author caught it in
+    # the editor: the guards above look for verify/todo language, and a note that says the
+    # checking is DONE reads as clean to every one of them. An ISO date is the tell — reader
+    # prose dates a source "(2002)" or "March 10, 1967", never 2026-09-07 — so it refuses on
+    # the date shape and on consulted/accessed/retrieved + a date, wherever it is.
+    residual = [n for n, c in ordered if re.search(r'verify', c, re.I) or CLEARANCE_RE.search(c)]
+    residual += ['body#%d' % i for i, b in enumerate(out) if CLEARANCE_RE.search(b)]
     sources = {'body': out_src, 'fns': [fn_src[n] for n, _c in ordered]}
     return out, ordered, stripped, residual, unverified, fn_issues, sources
 
@@ -481,8 +496,10 @@ def main():
           f"dividers~{html.count('<hr>')}  images~{html.count('<img')}  footnotes~{len(footnotes)}  "
           f"editorial-notes-stripped~{stripped}")
     if residual:
-        print(f"WARNING: {len(residual)} footnote(s) still contain 'verify' after cleaning: "
-              f"{residual}. Verify the claim, then move the note behind a † (or delete it).")
+        print(f"WARNING: {len(residual)} block(s) still carry verify or clearance language after "
+              f"cleaning: {residual}. A 'verify' note: verify the claim, then move the note behind "
+              f"a † (or delete it). Clearance language (an ISO date, 'consulted 2026-09-07'): the "
+              f"record belongs in publish.yaml -> verified:, not in the reader's footnote.")
         if not allow_verify:
             print("Refusing to write output. Re-run with --allow-verify to override.")
             sys.exit(2)

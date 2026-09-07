@@ -494,10 +494,10 @@ def corpus_integrity():
             if iss[k]:
                 faults.append(f'{p}: footnote {k} {iss[k]}')
         if residual:
-            faults.append(f'{p}: unverified note residue {residual}')
+            faults.append(f'{p}: verify/clearance residue {residual}')
         if not body:
             faults.append(f'{p}: renders to an empty body')
-    check(f'all {n} pieces render with no footnote or verify faults',
+    check(f'all {n} pieces render with no footnote, verify, or clearance faults',
           not faults, '; '.join(faults[:4]))
 
 

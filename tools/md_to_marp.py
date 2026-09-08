@@ -190,9 +190,9 @@ def per_movement(slides, outline_path):
     budgets = {}
     if os.path.exists(outline_path):
         for ln in open(outline_path, encoding='utf-8'):
-            m = re.match(r'^##\s+([IVXLC]+|\d+)[.)]?\s.*?\((\d+)\s*min\)', ln)
+            m = re.match(r'^##\s+([IVXLC]+|\d+)[.)]?\s.*?\((\d+(?:\.\d+)?)\s*min\)', ln)
             if m:
-                budgets[m.group(1)] = int(m.group(2))
+                budgets[m.group(1)] = float(m.group(2))
     out, cur, words = [], None, 0
     for s in slides:
         if s['kind'] == 'section':
@@ -312,7 +312,7 @@ def main():
         flag = ''
         if budget:
             mins = w / wpm
-            flag = f"  outline {budget} min" + ('  OVER' if mins > budget * 1.1 else '  under' if mins < budget * 0.8 else '')
+            flag = f"  outline {budget:g} min" + ('  OVER' if mins > budget * 1.1 else '  under' if mins < budget * 0.8 else '')
         print(f"  {title[:40]:40s} {w:5d} words  ~{w/wpm:4.1f} min{flag}")
     for f in faults:
         print('  fault:', f)

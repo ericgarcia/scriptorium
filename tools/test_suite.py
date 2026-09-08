@@ -79,6 +79,7 @@ from substack_verify import live_blocks, extract_post, header_drift
 from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links, unrenderable as unrenderable_links
 import check_pronouns
+import md_to_marp
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -593,6 +594,67 @@ def unit_pronouns(tmp):
     check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'E/F/G hits are warnings' in p.stdout, f"rc={p.returncode}")
 
 
+TALK_FIXTURE = """*Draft — v0. Header is scaffold.*
+
+---
+
+## I. The Setup (5 min)
+
+<!-- slide: The promise -->
+> Enough attributes and the right person is a query away.
+- one bullet
+
+The spoken script of the first slide.
+It continues on a second line of the same paragraph.
+
+A second paragraph.
+
+<!-- slide -->
+![Figure 1](assets/fig1.png)
+
+Say what the axes are.
+
+<!-- slide: Silent -->
+> A line with nobody speaking over it.
+
+## II. The Geometry (12 min)
+
+<!-- slide: One -->
+Words words words.
+"""
+
+
+def unit_talk(tmp):
+    print("\n-- talk: draft.md -> Marp deck with the script as notes ---------------")
+    d = os.path.join(tmp, 'talk'); os.makedirs(os.path.join(d, 'assets'), exist_ok=True)
+    with open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(TALK_FIXTURE)
+    with open(os.path.join(d, 'outline.md'), 'w', encoding='utf-8') as f:
+        f.write("## I. The Setup (5 min)\n## II. The Geometry (12 min)\n")
+    slides = md_to_marp.parse(TALK_FIXTURE)
+    kinds = [x['kind'] for x in slides]
+    check('movements become section slides and markers become slides',
+          kinds == ['section', 'slide', 'slide', 'slide', 'section', 'slide'], str(kinds))
+    first = slides[1]
+    check('blockquote and list go on the slide, prose becomes notes',
+          first['on'] == ['> Enough attributes and the right person is a query away.', '- one bullet']
+          and first['notes'] == ['The spoken script of the first slide. It continues on a second line of the same paragraph.',
+                                 'A second paragraph.'], str(first))
+    check('the header above --- is discarded', not any('scaffold' in n for x in slides for n in x['notes']))
+    faults = md_to_marp.check(slides, d)
+    check('--check names a missing figure and a slide with no notes',
+          any('missing figure assets/fig1.png' in f for f in faults) and any('Silent' in f and 'no speaker notes' in f for f in faults),
+          str(faults))
+    deck = md_to_marp.render(slides, {'title': 'T', 'subtitle': 'S'}, d)
+    check('the deck opens with Marp front matter and the title slide',
+          deck.startswith('---\nmarp: true') and '# T' in deck and '## S' in deck)
+    check('notes travel as HTML comments and a figure is sized for the slide',
+          '<!--\nThe spoken script' in deck and '![Figure 1 h:600px](assets/fig1.png)' in deck, deck[:400])
+    per = md_to_marp.per_movement(slides, os.path.join(d, 'outline.md'))
+    check('per-movement words carry the outline minutes',
+          [(t.split('.')[0], b) for t, w, b in per] == [('I', 5), ('II', 12)] and per[0][1] > per[1][1], str(per))
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -802,6 +864,7 @@ def main():
         unit_live_extraction()
         unit_manifest_gate(tmp)
         unit_pronouns(tmp)
+        unit_talk(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

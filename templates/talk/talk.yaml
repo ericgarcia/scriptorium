@@ -1,0 +1,10 @@
+# Talk manifest — read by framework/tools/md_to_marp.py. Flat key: value.
+title: <talk title>
+subtitle: <one line>
+speaker: <name>
+duration_min: 45          # spoken minutes, not counting questions
+theme: default            # default | gaia | uncover (Marp built-ins)
+size: 16:9
+paginate: true
+# footer: <short footer text>
+# out: deck.md

@@ -25,9 +25,35 @@ presenter notes and is never shown to the room.
 <!-- slide -->                         <- an untitled slide (a figure alone, a beat)
 ```
 
+One more marker, for the designer and never the room:
+
+```
+<!-- design: the spike is the point; give the d = 1000 panel the most air -->
+```
+
 That is the whole grammar. `python3 framework/tools/md_to_marp.py pieces/<slug>` reads it with
 `talk.yaml` (title, subtitle, speaker, duration, theme, size) and writes `deck.md`, a Marp
-deck with the script as notes. Render with
+deck with the script as notes.
+
+## The design hand-off: `slides/`
+
+A deck is also designed, slide by slide, by someone (Claude Design, a human) who did not write
+the talk. `md_to_marp.py --briefs` writes `pieces/<slug>/slides/`:
+
+- `00-style.md` — the **general visual style doc**: what the deck is for, the one rule every
+  slide obeys, canvas, palette (the figures' palette — the slides must not fight them), type,
+  how each of the five kinds of slide looks, do/don't, continuity. **The author writes it**
+  (start from `templates/talk/slides/00-style.md`); the tool never overwrites it.
+- `NN-<title>.md` — **one brief per slide**, generated from the draft: kind, movement, position
+  and neighbors; what is on the slide *verbatim and nothing else*; the figure file and the rule
+  that it is placed, not redrawn; what the speaker says over it (context, never rendered); the
+  design notes from the slide's `<!-- design: … -->` markers.
+- `README.md` — the index: every slide, its kind, movement, figure and spoken words.
+
+Hand the folder over with `00-style.md` first, then the slides in order. **Regenerate the
+briefs; never edit them by hand** — a per-slide design note belongs in the draft, so the next
+regeneration keeps it. The deck (`deck.md`) and the briefs come from the same draft and cannot
+drift from each other or from the script. Render with
 `npx -y @marp-team/marp-cli deck.md -o deck.html` (or `-o deck.pdf`), from inside the piece
 directory so the figure paths resolve. `--check` refuses on a figure the draft names that is
 not on disk, and on a slide with no script over it.
@@ -69,8 +95,8 @@ not on disk, and on a slide with no script over it.
 
 ## After a drafting session
 
-1. `python3 framework/tools/md_to_marp.py pieces/<slug> --check` — zero faults, and the minute
-   count against `talk.yaml`'s `duration_min`.
+1. `python3 framework/tools/md_to_marp.py pieces/<slug> --check --briefs` — zero faults, the
+   minute count per movement against the outline, and a fresh `slides/` folder.
 2. Render the deck once and look at it: a figure that is unreadable at slide size is a figure
    to regenerate, not to caption around.
 3. `check_pronouns.py` on the draft as for any piece (an invented person is *they/them*; the

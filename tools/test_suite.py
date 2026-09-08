@@ -650,6 +650,15 @@ def unit_talk(tmp):
           deck.startswith('---\nmarp: true') and '# T' in deck and '## S' in deck)
     check('notes travel as HTML comments and a figure is sized for the slide',
           '<!--\nThe spoken script' in deck and '![Figure 1 h:600px](assets/fig1.png)' in deck, deck[:400])
+    out_dir, n, has_style = md_to_marp.write_briefs(slides, {'title': 'T', 'subtitle': 'S', 'speaker': 'Me'}, d)
+    briefs = sorted(f for f in os.listdir(out_dir) if f.endswith('.md'))
+    check('--briefs writes one brief per slide plus the title slide and an index, and names an untitled figure slide by its figure',
+          n == 7 and len(briefs) == 8 and '04-fig1.md' in briefs and 'README.md' in briefs, str(briefs))
+    b = open(os.path.join(out_dir, '03-the-promise.md'), encoding='utf-8').read()
+    check('a brief carries the slide text verbatim, the script as context, and position/neighbors',
+          '> Enough attributes and the right person is a query away.' in b and 'The spoken script of the first slide.' in b
+          and '**Position:** 3 of 7' in b and 'A second paragraph.' in b, b[:600])
+    check('00-style.md is reported absent rather than invented', has_style is False)
     per = md_to_marp.per_movement(slides, os.path.join(d, 'outline.md'))
     check('per-movement words carry the outline minutes',
           [(t.split('.')[0], b) for t, w, b in per] == [('I', 5), ('II', 12)] and per[0][1] > per[1][1], str(per))

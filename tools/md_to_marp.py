@@ -13,6 +13,7 @@ THE DIALECT (kept deliberately small — see skills/talk/SKILL.md)
     ![alt](assets/fig1.png)              -> image       = on-slide figure
     Plain paragraphs are the SPOKEN SCRIPT and become the slide's presenter notes.
     <!-- slide -->                       -> a slide with no title (a figure alone, a beat)
+    <!-- design: put the spike on the right -->   -> a note for the slide's designer; never rendered
 
 So the script is prose and the slide is everything that is not prose. A talk is drafted the
 way an essay is — the argument in paragraphs — and the deck falls out of it: nothing on a
@@ -27,15 +28,21 @@ OUTPUT    pieces/<slug>/<out> — Marp markdown. Render with
 Images are referenced relative to the piece directory, so render from inside it or pass
 --allow-local-files.
 
-USAGE     python3 md_to_marp.py pieces/<slug> [--out deck.md] [--check]
+USAGE     python3 md_to_marp.py pieces/<slug> [--out deck.md] [--check] [--briefs]
     --check  exit 2 if a figure the draft references is missing on disk, or a slide has no
              notes at all (a slide the speaker has nothing to say over is usually a mistake).
+    --briefs also write pieces/<slug>/slides/ — one brief per slide (NN-<title>.md: what is on
+             it verbatim, the figure, what is said over it, the design note) and an index
+             README.md — the folder handed to a designer (Claude Design) slide by slide. The
+             general visual style doc, slides/00-style.md, is the author's and is never
+             overwritten; the template scaffolds one.
 EXIT      0 written · 1 usage · 2 --check found a fault
 """
 import os, re, sys
 
 FIG_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 SLIDE_RE = re.compile(r'<!--\s*slide(?:\s*:\s*(.*?))?\s*-->')
+DESIGN_RE = re.compile(r'<!--\s*design\s*:\s*(.*?)\s*-->', re.S)
 MOVEMENT_RE = re.compile(r'^##\s+(.*)$')
 
 
@@ -77,18 +84,21 @@ def parse(text):
         m = MOVEMENT_RE.match(line)
         if m:
             flush_para()
-            cur = {'kind': 'section', 'title': m.group(1).strip(), 'on': [], 'notes': []}
+            cur = {'kind': 'section', 'title': m.group(1).strip(), 'on': [], 'notes': [], 'design': []}
             slides.append(cur)
             continue
         m = SLIDE_RE.search(line)
         if m:
             flush_para()
-            cur = {'kind': 'slide', 'title': (m.group(1) or '').strip(), 'on': [], 'notes': []}
+            cur = {'kind': 'slide', 'title': (m.group(1) or '').strip(), 'on': [], 'notes': [], 'design': []}
             slides.append(cur)
             continue
         if cur is None:
             continue                                    # prose before any movement: dropped
         if line.startswith('<!--'):
+            dm = DESIGN_RE.search(line)
+            if dm:
+                flush_para(); cur['design'].append(dm.group(1).strip())
             continue                                    # other comments are scaffold
         if not line.strip():
             flush_para(); continue
@@ -174,6 +184,88 @@ def per_movement(slides, outline_path):
     return out
 
 
+def slug_of(title, fallback):
+    t = re.sub(r"[^a-z0-9]+", "-", (title or fallback).lower()).strip("-")
+    return t[:48] or fallback
+
+
+def kind_of(s):
+    if s['kind'] == 'section':
+        return 'section'
+    has_fig = any(FIG_RE.search(l) for l in s['on'])
+    has_list = any(re.match(r'^\s*([-*]|\d+\.)\s+', l) for l in s['on'])
+    if has_fig:
+        return 'figure'
+    if has_list:
+        return 'bullets'
+    return 'claim' if s['on'] else 'beat'
+
+
+def write_briefs(slides, man, piece_dir):
+    """slides/NN-<title>.md per slide + README.md index. 00-style.md is the author's; kept."""
+    out_dir = os.path.join(piece_dir, 'slides')
+    os.makedirs(out_dir, exist_ok=True)
+    for f in os.listdir(out_dir):                        # regenerate cleanly; keep the style doc
+        if re.match(r'^\d{2}-', f) and f != '00-style.md':
+            os.remove(os.path.join(out_dir, f))
+    title = man.get('title', 'Untitled')
+    entries = [{'kind': 'title', 'title': title, 'on': [f"# {title}"] + ([f"## {man['subtitle']}"] if man.get('subtitle') else []) + ([man['speaker']] if man.get('speaker') else []), 'notes': [], 'design': []}] + slides
+    def label_of(s):
+        """A slide's name for humans: its title, else its figure's alt, else its first line."""
+        if s['title']:
+            return s['title']
+        fm = next((FIG_RE.search(l) for l in s['on'] if FIG_RE.search(l)), None)
+        if fm:
+            return re.sub(r'\s+(h|w|height|width):\S+', '', fm.group(1)) or os.path.splitext(os.path.basename(fm.group(2)))[0]
+        if s['on']:
+            return ' '.join(re.sub(r'^[>\-*\d.\s]+', '', s['on'][0]).split()[:8])
+        return ''
+    movement = ''
+    rows = []
+    n = len(entries)
+    for i, s in enumerate(entries, 1):
+        if s['kind'] == 'section':
+            movement = s['title']
+        k = 'title' if s['kind'] == 'title' else kind_of(s)
+        label = label_of(s)
+        fm = next((FIG_RE.search(l) for l in s['on'] if FIG_RE.search(l)), None)
+        file_label = s['title'] or (os.path.splitext(os.path.basename(fm.group(2)))[0] if fm else label)
+        name = f"{i:02d}-{slug_of(file_label, k)}.md"
+        prev_t = label_of(entries[i-2]) if i > 1 else '—'
+        next_t = label_of(entries[i]) if i < n else '—'
+        figs = [FIG_RE.search(l) for l in s['on']]
+        figs = [m for m in figs if m]
+        lines = [f"# Slide {i:02d} — {label or k}", '',
+                 f"**Kind:** {k} · **Movement:** {movement or '—'} · **Position:** {i} of {n} · "
+                 f"**Previous:** {prev_t or '(untitled)'} · **Next:** {next_t or '(untitled)'}", '',
+                 '## On the slide — verbatim, and nothing else', '']
+        lines += [l for l in s['on'] if not FIG_RE.search(l)] or ['*(no text — the figure, or the section title, is the slide)*']
+        if figs:
+            lines += ['', '## Figure', '']
+            for m in figs:
+                alt = re.sub(r'\s+(h|w|height|width):\S+', '', m.group(1))
+                lines.append(f"- `{m.group(2)}` — {alt}. Generated by `assets/figures.py`; place it, do not redraw it. "
+                             f"The speaker walks the room through it (below), so it must be legible from the back row.")
+        lines += ['', '## What the speaker says over it (context for the designer; never rendered)', '']
+        lines += ['\n\n'.join(s['notes']) if s['notes'] else '*(nothing — a beat)*']
+        lines += ['', '## Design notes', '']
+        lines += [f"- {d}" for d in s['design']] or ['- none beyond `00-style.md`: one claim, the house palette, the type scale for this kind of slide.']
+        open(os.path.join(out_dir, name), 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+        words = len(' '.join(s['notes']).split())
+        rows.append((i, name, k, movement, label or '(untitled)', figs[0].group(2) if figs else '', words))
+    idx = [f"# Slides — {title}", '',
+           f"One brief per slide, generated from `draft.md` by `md_to_marp.py --briefs` — **regenerate, never edit these by hand** "
+           f"(a per-slide design note goes in the draft as `<!-- design: … -->`). `00-style.md` is the general visual style doc and is "
+           f"the author's. Hand this folder to the designer (Claude Design) with `00-style.md` first, then the slides in order.", '',
+           f"{n} slides · {man.get('size', '16:9')} · {man.get('duration_min', '?')} min · footer: {man.get('footer', '—')}", '',
+           '| # | brief | kind | movement | title | figure | spoken words |', '|---|---|---|---|---|---|---|']
+    for i, name, k, mv, t, fig, w in rows:
+        idx.append(f"| {i:02d} | [{name}]({name}) | {k} | {mv} | {t} | {('`'+fig+'`') if fig else ''} | {w} |")
+    open(os.path.join(out_dir, 'README.md'), 'w', encoding='utf-8').write('\n'.join(idx) + '\n')
+    style = os.path.join(out_dir, '00-style.md')
+    return out_dir, n, os.path.exists(style)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if not args:
@@ -203,6 +295,9 @@ def main():
         print(f"  {title[:40]:40s} {w:5d} words  ~{w/wpm:4.1f} min{flag}")
     for f in faults:
         print('  fault:', f)
+    if '--briefs' in sys.argv:
+        out_dir, n, has_style = write_briefs(slides, man, piece)
+        print(f"wrote {out_dir}/: {n} slide briefs + README.md" + ('' if has_style else "  (no 00-style.md yet — copy templates/talk/slides/00-style.md and fill it in)"))
     if faults and '--check' in sys.argv:
         sys.exit(2)
 

@@ -118,6 +118,7 @@ def render(slides, man, piece_dir):
             f"paginate: {man.get('paginate', 'true')}"]
     if man.get('footer'):
         head.append(f"footer: '{man['footer']}'")
+    head.append('style: "img { display: block; margin: 0 auto; }"')   # a figure sits centered, not flush left
     head.append('---')
     out = ['\n'.join(head), '']
     # title slide
@@ -137,11 +138,18 @@ def render(slides, man, piece_dir):
             if s['title']:
                 out.append(f"## {s['title']}")
         for l in s['on']:
-            # a figure fills the slide's free height: Marp reads `h:` from the alt text
+            # a figure fills the slide's free box: Marp reads `h:`/`w:` from the alt text. Size by
+            # whichever side binds, or a wide figure (an attribution card at 2.4:1) gets a fixed
+            # height, is clamped to the slide width by CSS, and renders squeezed.
             m = FIG_RE.match(l.strip())
             if m and not re.search(r'\b(h|w|height|width):', m.group(1)):
-                h = 520 if s['title'] else 600
-                l = f"![{m.group(1)} h:{h}px]({m.group(2)})"
+                box_h = 520 if s['title'] else 600
+                box_w = 1150
+                dims = png_size(os.path.join(piece_dir, m.group(2)))
+                if dims and dims[0] / dims[1] > box_w / box_h:
+                    l = f"![{m.group(1)} w:{box_w}px]({m.group(2)})"
+                else:
+                    l = f"![{m.group(1)} h:{box_h}px]({m.group(2)})"
             out.append(l)
         if s['notes']:
             notes = '\n\n'.join(s['notes']).replace('-->', '--​>')
@@ -149,6 +157,19 @@ def render(slides, man, piece_dir):
             out.append(f'<!--\n{notes}\n-->')
         out.append('')
     return '\n'.join(out)
+
+
+def png_size(path):
+    """(width, height) from a PNG's IHDR, or None. No imaging library needed."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(24)
+        if head[:8] != b'\x89PNG\r\n\x1a\n' or head[12:16] != b'IHDR':
+            return None
+        import struct
+        return struct.unpack('>II', head[16:24])
+    except OSError:
+        return None
 
 
 def check(slides, piece_dir):

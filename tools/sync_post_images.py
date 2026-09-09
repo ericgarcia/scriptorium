@@ -45,17 +45,33 @@ def slug_of(manifest_text):
     return m.group(1) if m else None
 
 
+def origin_of(manifest_text):
+    """The publication this piece actually lives on, read from its own manifest.
+
+    One hard-coded host was harmless while the desk had a single Substack.  With a
+    second publication it becomes a silent cross-publication fetch: the slug resolves
+    on the wrong host, or 404s, and the failure looks like a missing post rather than
+    a wrong address.  The manifest already carries the answer in `public_url`, so ask
+    it.  A manifest with no URL keeps the historical default rather than guessing.
+    """
+    m = re.search(r'^\s*public_url\s*:\s*(https?://[^/\s]+)', manifest_text, re.M)
+    if m:
+        return m.group(1)
+    m = re.search(r'(https?://[^/\s]+)/p/[a-z0-9-]+', manifest_text)
+    return m.group(1) if m else 'https://elmuffin.substack.com'
+
+
 def fetch_json(url):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=40) as r:
         return json.loads(r.read().decode())
 
 
-def originals_for(slug):
+def originals_for(slug, origin='https://elmuffin.substack.com'):
     """Every distinct S3 original the post points at, cover first, then body order.
     Substack wraps images in a CDN transform URL with the real one percent-encoded
     inside; unwrap so we fetch the untouched upload rather than a re-encode."""
-    post = fetch_json(f'https://elmuffin.substack.com/api/v1/posts/{slug}')
+    post = fetch_json(f'{origin}/api/v1/posts/{slug}')
     def unwrap(u):
         if not u: return None
         m = re.search(r'(https%3A%2F%2F.+)$', u)
@@ -115,7 +131,7 @@ def main():
         log(f'{piece_dir}: no /p/<slug> in publish.yaml — not published yet, nothing to sync')
         sys.exit(0)
 
-    urls, post = originals_for(slug)
+    urls, post = originals_for(slug, origin_of(man_text))
     if not urls:
         log(f'{piece_dir} ({slug}): the post has no images'); sys.exit(0)
 

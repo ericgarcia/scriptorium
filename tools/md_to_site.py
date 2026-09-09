@@ -47,7 +47,7 @@ try:
 except ImportError:
     Image = None
 
-BUNDLE_SPEC = "1.0"
+BUNDLE_SPEC = "1.1"
 FOOTNOTE_DEF = re.compile(r'^(\[\^[^\]]+\]:)(.*)$')
 IMAGE_MD = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
 
@@ -58,7 +58,30 @@ def die(code, msg):
 
 
 def slug_of(piece_dir):
+    """The DESK's identifier: the directory name. Stable for the life of the piece,
+    because the desk cross-references by slug and titles move."""
     return os.path.basename(os.path.normpath(piece_dir))
+
+
+def site_slug_of(man, source_slug):
+    """The PUBLIC identifier: derived from the title, so a URL reads as what it is.
+
+    These are two different jobs and they want two different names. The desk needs a
+    handle that never moves; a reader needs an address that says what they are about to
+    read. Substack already resolves it this way — 33 of the desk's 34 published pieces
+    have a Substack slug equal to slugify(title) while their directory kept its original
+    name — so deriving the same way keeps the two publications addressing a piece alike.
+
+    An explicit `site_slug` in publish.yaml wins, for the case where the derivation is
+    wrong or a published URL must be preserved verbatim."""
+    if man.get('site_slug'):
+        return str(man['site_slug'])
+    title = man.get('title')
+    if not title:
+        return source_slug
+    s = str(title).lower().replace('\u2019', "'").replace("'", '')
+    s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
+    return s or source_slug
 
 
 def load_manifest(piece_dir):
@@ -180,8 +203,9 @@ def reader_digest(piece_dir):
 
 
 def export_piece(piece_dir, bundle, opts):
-    slug = slug_of(piece_dir)
+    source_slug = slug_of(piece_dir)
     man = load_manifest(piece_dir)
+    slug = site_slug_of(man, source_slug)
 
     draft = os.path.join(piece_dir, 'draft.md')
     if not os.path.exists(draft):
@@ -196,6 +220,10 @@ def export_piece(piece_dir, bundle, opts):
     body, images, hero = resolve_images(piece_dir, slug, body, bundle, opts)
 
     fm = {'slug': slug, 'title': man.get('title') or slug}
+    if source_slug != slug:
+        # What the desk calls it. Keeps a bundle traceable back to the piece it came
+        # from, and lets the site emit a redirect from any URL it published before.
+        fm['source_slug'] = source_slug
     for k in ('subtitle', 'published_at', 'footnotes'):
         if man.get(k):
             fm[k] = man[k]
@@ -217,7 +245,7 @@ def export_piece(piece_dir, bundle, opts):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'w') as f:
             f.write(doc)
-    return slug, len(images), len(doc), len(stripped)
+    return slug, len(images), len(doc), len(stripped), source_slug
 
 
 def main():
@@ -248,17 +276,19 @@ def main():
             'generated_at': datetime.datetime.now(datetime.timezone.utc)
                             .replace(microsecond=0).isoformat(),
             'image_store': o.image_store,
-            'pieces': [s for s, _n, _z, _k in rows]}
+            'pieces': [s for s, _n, _z, _k, _src in rows],
+            'renames': {src: s for s, _n, _z, _k, src in rows if src != s}}
     if o.apply:
         os.makedirs(o.bundle, exist_ok=True)
         with open(os.path.join(o.bundle, 'bundle.json'), 'w') as f:
             json.dump(meta, f, indent=2)
             f.write('\n')
 
-    notes = sum(k for _s, _n, _z, k in rows)
-    for s, n, size, k in rows:
-        print(f"  {s:34} {n} image(s)  {size/1024:4.0f} KB"
-              + (f"  [{k} internal note(s) stripped]" if k else ''))
+    notes = sum(k for _s, _n, _z, k, _src in rows)
+    for s, n, size, k, src in rows:
+        print(f"  {s:38} {n} image(s)  {size/1024:4.0f} KB"
+              + (f"  [{k} note(s) stripped]" if k else '')
+              + (f"  (was {src})" if src != s else ''))
     print(f"{len(rows)} piece(s), {notes} internal note(s) stripped -> {o.bundle}"
           + (f"  ({len(skipped)} not opted in)" if skipped else ''))
     if not o.apply:

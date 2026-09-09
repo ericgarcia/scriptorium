@@ -246,6 +246,22 @@ temporary directory — so it can never touch a live post. It replaced a bash lo
 - **Never pass a flag to force past a refusal.** The refusals here exist because each one
   has already been the failure mode once.
 - **Seal every completed sync.** The baseline is the whole mechanism.
+- **A draft that is deliberately ahead of its post gets declared, not sealed.** A rewrite
+  drafted and waiting on the author's read is a normal state on this desk, and the corpus
+  baseline check would otherwise report it as a failure for as long as it lasts — which is how
+  a corpus-wide gate gets tuned out and stops being read at all. Say so in `publish.yaml`:
+
+      draft_ahead:
+        since: 2026-09-07
+        note: v2 rewrite drafted, awaiting Eric's read; the post still holds v1.
+
+  It is shaped like the `verified:` clearance on purpose — a date and a sentence, in the diff,
+  surviving the session. **One line per value**; the manifest reader does not fold `>-` block
+  scalars, and a folded `note:` parses to the literal string `>-`. Two rules stop it becoming a
+  way to switch the check off: a declaration with **no `since:` date excuses nothing** and still
+  fails, and a declaration on a piece that is **back in sync** fails too, so the key retires
+  itself once the rewrite ships instead of sitting there excusing the next drift nobody noticed.
+  **It is never a substitute for sealing a sync that actually completed.**
 - **A pull that reverses an editorial pass is a red flag, not a result.** If a plan wants to
   undo something the author clearly meant (capitalization, a house convention, a considered
   rewrite), stop and re-run `detect` — the baseline is probably wrong, and the "Substack-side

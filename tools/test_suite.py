@@ -37,7 +37,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
           fixture and must all be listed; --strict warns on them and does not refuse
 """
-import os, re, sys, json, subprocess, tempfile
+import os, re, sys, json, subprocess, tempfile, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -757,12 +757,13 @@ def corpus_baselines():
     pieces_dir = PIECES
     if not os.path.isdir(pieces_dir):
         skip('corpus baselines', f'no corpus at {pieces_dir}'); return
-    pub, behind = 0, []
+    pub, behind, ahead = 0, [], []
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
-        if not read_manifest(os.path.join(d, 'publish.yaml')).get('public_url'):
+        man = read_manifest(os.path.join(d, 'publish.yaml'))
+        if not man.get('public_url'):
             continue                                              # composed drafts are not live
         pub += 1
         base = load_baseline(d)
@@ -770,9 +771,52 @@ def corpus_baselines():
             behind.append(f'{p} (no baseline)')
             continue
         body, fns, _r, _i = render_reader(d)
-        if [H(t) for t in body] != base['body'] or [H(t) for t in fns] != base['fns']:
+        differs = [H(t) for t in body] != base['body'] or [H(t) for t in fns] != base['fns']
+        # A draft may be DELIBERATELY ahead of its live post: a rewrite is drafted and is
+        # waiting on the author to read it before anything touches a public page. That is a
+        # normal, intended state on this desk, and reporting it as a failure for as long as it
+        # lasts is how a corpus-wide gate gets tuned out. `draft_ahead:` in publish.yaml is the
+        # declaration, and it is deliberately shaped like the `verified:` clearance: a date and
+        # a sentence, written where it is reviewable in the diff and survives the session.
+        #
+        #     draft_ahead:
+        #       since: 2026-09-07
+        #       note: v2 rewrite drafted, awaiting Eric's read; the post still holds v1.
+        #
+        # One line per value — `read_manifest` does not fold `>-` block scalars, and a `note:`
+        # written as one would parse to the literal string '>-'.
+        #
+        # Two rules keep it from becoming a way to switch the check off:
+        #   * a declaration with no `since:` date does NOT excuse anything — it still fails, so
+        #     the escape hatch cannot be a bare toggle;
+        #   * a declaration on a piece that is back IN SYNC fails too, which retires the key by
+        #     itself once the rewrite ships, instead of letting it sit there excusing the next
+        #     drift nobody noticed.
+        decl = man.get('draft_ahead')
+        since = decl.get('since', '').strip() if isinstance(decl, dict) else ''
+        if decl and not since:
+            behind.append(f'{p} (draft_ahead: with no since: date)')
+        elif decl and not differs:
+            behind.append(f'{p} (draft_ahead: but the draft matches the post — retire the key)')
+        elif decl:
+            ahead.append((p, since, _age(since), decl.get('note', '').strip()))
+        elif differs:
             behind.append(p)
     check(f'all {pub} published pieces are in sync', not behind, '; '.join(behind))
+    for name, since, age, note in ahead:
+        print(f"  note  {name}: draft deliberately ahead of the live post since {since}{age} "
+              f"(declared in publish.yaml; a re-sync or recompose clears it)"
+              + (f"\n        {note}" if note else ''))
+
+
+def _age(since):
+    """' , N days' for a declaration date, so one left to rot is visible in the report."""
+    try:
+        d = datetime.date.fromisoformat(since)
+    except ValueError:
+        return ''
+    n = (datetime.date.today() - d).days
+    return f', {n} day{"" if n == 1 else "s"}' if n > 0 else ''
 
 
 # ---------------------------------------------------------------- engine (stubbed browser)

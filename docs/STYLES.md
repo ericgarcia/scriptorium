@@ -116,13 +116,13 @@ make a set of voices legible as a family, use a shared prefix:
 
 ```
 styles/
-  being-good/          # the witness voice — testifies to a life, God kept oblique
+  being-good-journal/  # the witness voice — testifies to a life, God kept oblique
   being-good-essay/    # the argued voice — reasons in the open, names God directly
 ```
 
 Rules of thumb:
 
-- **Name the family by the publication, the voice by its job** — `being-good`,
+- **Name the family by the publication, the voice by its job** — `being-good-journal`,
   `being-good-essay`. Siblings read as siblings.
 - **A piece picks exactly one.** Never blend two voices in a single draft; if a piece
   seems to need both, it's probably two pieces.

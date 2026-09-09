@@ -147,6 +147,27 @@ def acquire(slug, what='', root=None, force=False):
     return True, rec
 
 
+def acquire_wait(slug, what='', timeout=120, poll=1.0, root=None):
+    """Take the lease, WAITING for it to be free rather than refusing.
+
+    Added 2026-09-08 for the system pasteboard, which is a singleton every composing session
+    needs for a few seconds and no session needs for long. `acquire` refuses on contention,
+    which is right for a piece (a draft is hours of work; two sessions on it is a coordination
+    problem, not a queue). A pasteboard is the opposite: the correct response to "somebody has
+    it" is "wait your turn", and the timeout is what keeps a dead holder from stalling everyone.
+    Returns (ok, record, waited_seconds). On timeout, record is the holder's and ok is False —
+    the caller reports WHO held it; nothing is broken automatically (see the module docstring).
+    """
+    t0 = time.time()
+    while True:
+        ok, rec = acquire(slug, what, root=root)
+        if ok:
+            return True, rec, round(time.time() - t0, 1)
+        if time.time() - t0 >= timeout:
+            return False, rec, round(time.time() - t0, 1)
+        time.sleep(poll)
+
+
 def release(slug, root=None, force=False):
     cur = read(slug, root)
     if not cur:
@@ -179,7 +200,7 @@ def _fmt(rec):
         age // 60, rec.get('what') or '')
 
 
-USAGE = ("usage: lease.py acquire SLUG [--what TEXT] [--force]\n"
+USAGE = ("usage: lease.py acquire SLUG [--what TEXT] [--force] [--wait [SECONDS]]\n"
          "       lease.py release SLUG [--force]\n"
          "       lease.py check SLUG          # exit 0 free/mine, 3 held by another\n"
          "       lease.py list [--prune]")
@@ -228,6 +249,19 @@ def main(argv):
         return 3
 
     if cmd == 'acquire':
+        wait_s = None
+        if '--wait' in argv:
+            i = argv.index('--wait')
+            wait_s = float(argv[i + 1]) if i + 1 < len(argv) and not argv[i + 1].startswith('-') else 120.0
+        if wait_s is not None and not force:
+            ok, rec, waited = acquire_wait(slug, what, timeout=wait_s)
+            if ok:
+                print('acquired %s%s' % (slug, ' after waiting %.0fs' % waited if waited >= 1 else ''))
+                return 0
+            sys.stderr.write('lease: %s still HELD by %s (pid %s) after %.0fs — %s\n'
+                             'Timed out waiting. Nothing was broken; --force records a break.\n'
+                             % (slug, rec.get('session'), rec.get('pid'), waited, rec.get('what') or 'no note'))
+            return 3
         ok, rec = acquire(slug, what, force=force)
         if ok:
             note = ''

@@ -69,8 +69,12 @@ landed on shared singletons**, so those are the things with rules.
   from the session and **fails loudly** when it is taken. A fixed port plus a swallowed bind error
   once served one session's code to another session's browser. And **identify fetched bytes at the
   point of use** — hash what came back over the wire, not the file you meant to serve.
-- **The system pasteboard is global.** Between loading it and pasting, any other session can take
-  it. Run `md_to_clipboard.py --verify` immediately before the paste.
+- **The system pasteboard is global — so it is leased, and pasted in one process.**
+  `md_to_clipboard.py --paste` takes the `pasteboard` lease (waits up to 120s, names the holder on
+  timeout, never breaks it), loads the board, reads it back, raises the Chrome tab by URL, and sends
+  the real ⌘V itself, so the board is exposed for milliseconds rather than a tool round-trip. Never
+  `pbcopy` around it. (Three pasteboard races in one afternoon, 2026-09-07, all to sibling sessions.
+  Needs Accessibility permission for the app running the tool.)
 - **`git commit -- <paths>`, never `git add` then `git commit`. The INDEX is shared too.**
   Another session's `git add` stages files in the same `.git/index`, and a bare `git commit` then
   sweeps them in — measured 2026-09-03, when a two-file commit carried four files of another

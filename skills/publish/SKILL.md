@@ -240,26 +240,45 @@ first.
 So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A programmatic
 `.focus()` does **not** satisfy the Clipboard API — the click has to be a real one.
 
-1. **Load the clipboard:** `python3 framework/tools/md_to_clipboard.py pieces/<name> --fn-out <fn.js>`
-   Runs the same converter and therefore the **same refusals** (a stray "verify", nested
-   footnote refs, undefined/duplicated markers) — a different transport is never a lower bar.
-   Prints the block counts, the **SHA-256 of the HTML read back off the pasteboard**, and
-   the title/subtitle from the manifest. It writes the footnote snippet separately, because
-   **footnotes cannot travel by clipboard** — a paste cannot create native ones.
+1. **Take the pasteboard and paste in ONE process (the default since 2026-09-08):**
 
-   **The pasteboard is global mutable state and another process can take it.** Until
-   2026-09-02 this tool checked only that the string "HTML" appeared in `clipboard info` and
-   then printed the hash of the string it had *intended* to place — neither of which is
-   evidence about the clipboard. **It reported a clean write while the pasteboard actually
-   held a footnote snippet from a different piece, left by a concurrent session**, and that
-   snippet was pasted into a fresh post and caught only by the post-check. The tool now reads
-   the bytes back and refuses on a mismatch. **Re-check immediately before the paste**, because
-   loading and pasting are separate steps with a wide gap between them:
-   `python3 framework/tools/md_to_clipboard.py pieces/<name> --verify`
+   ```
+   python3 framework/tools/md_to_clipboard.py pieces/<name> --paste --expect-url publish/post/<id> --fn-b64 <fn.b64> --fn-out <fn.js>
+   ```
+
+   after a **real click** into the body (step 3 below happens first — the click gives the editor
+   focus; the tool gives the keystroke). It acquires the **`pasteboard` lease** (`lease.py`,
+   waiting up to 120s for another session to finish, then stopping and naming the holder — it
+   never breaks a lease), runs the same converter and therefore the **same refusals** (a stray
+   "verify", nested footnote refs, undefined/duplicated markers), places the HTML flavor, **reads
+   it back off the pasteboard and hashes it**, locates the Chrome tab whose URL contains
+   `--expect-url`, makes it the active tab of the frontmost window, **reads the active tab's URL
+   back and refuses if it does not match**, re-reads the board one last time, sends a **real ⌘V
+   through System Events**, and releases the lease. The pasteboard is exposed for the milliseconds
+   of the keystroke, not for a tool round-trip.
+
+   **Why this replaced the two-step.** The pasteboard is global mutable state. Until 2026-09-02 the
+   tool checked only that "HTML" appeared in `clipboard info`; **it reported a clean write while the
+   board held another piece's footnote snippet**, which pasted into a fresh post. The read-back fixed
+   that, and `--verify` immediately before the ⌘V was added — and on 2026-09-07 **one session still
+   lost the board three times in an afternoon** (a stranger's name and an `assetError` node; a stray
+   quotation; a re-check seconds before a paste found another session's whole essay). Every taker was
+   another Claude session composing. So: a lease, because the takers all run this tool; and one
+   process, because the gap `--verify` guarded was a full round-trip. **Needs Accessibility
+   permission** for the app running the tool (System Settings → Privacy & Security →
+   Accessibility); without it the tool stops at `not allowed to send keystrokes (1002)` with nothing
+   pasted and the lease released. **Say so and stop; do not fall back to retyping.**
+
+   **The two-step still exists and is still lease-guarded:** run without `--paste` to load and hold
+   the lease, `--verify` immediately before a ⌘V sent from the browser tool, then `--release`. Use it
+   only where System Events cannot reach the browser.
 2. **Open the composer in real Chrome** and set Title + Subtitle by JS (small, no prose in it),
-   then `clearContent(true)` so a retry can't append to a half-paste.
-3. **Body:** run `--verify`, then a **real click** into the body, then a **real `cmd+v`**.
-   Formatting, links and dividers arrive intact; footnote refs remain as `[[FNn]]` markers.
+   then `clearContent(true)` so a retry can't append to a half-paste. **Snapshot any image or embed
+   the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
+   `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared
+   before it was read; `undo` brought it back that time).
+3. **Body:** a **real click** into the body, then step 1's `--paste`. Formatting, links and dividers
+   arrive intact; footnote refs remain as `[[FNn]]` markers.
    **Substack applies smart-quote input rules on paste** (`'`→`’`, `"`→`“ ”`), so the live text
    will differ from the draft at every apostrophe — that is expected, it is what the whole
    corpus published with, and step 6's digest must account for it rather than treat it as
@@ -274,10 +293,13 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    remove — and two obvious alternatives do **not** work on this surface: both
    `navigator.clipboard.readText()` and a `fetch()` to a CORS-enabled `http://127.0.0.1`
    **hang and time out the CDP call at 45s**, with the renderer alive and responsive afterwards
-   and no permission prompt on screen. **What does work:** base64 the footnote data, paste it as
-   text at the end of the doc (base64's charset is immune to the smart-quote input rules that
-   would corrupt raw JSON), read it back out of the DOM with `atob`, delete the carrier node,
-   then insert. **Insert in batches of ~8–9** — thirty-five in one call also exceeds the 45s
+   and no permission prompt on screen. **What does work:** base64 the footnote data (`--fn-b64` writes it), put the cursor in an EMPTY
+   TOP-LEVEL paragraph between the body and the footnotes (`splitBlock` at the end of the last body
+   node — not `focus('end')`, which lands INSIDE the last footnote), and paste it as text with the
+   same lease-guarded one-process tool: `md_to_clipboard.py --text-file <fn.b64> --paste
+   --expect-url publish/post/<id>` (base64's charset is immune to the smart-quote input rules that
+   would corrupt raw JSON). Read it back out of the DOM with `atob`, **checksum it against the
+   file**, delete the carrier node, then insert. **Insert in batches of ~8–9** — thirty-five in one call also exceeds the 45s
    timeout. Prove the transfer with a checksum computed on both sides before inserting anything.
 5. **Post-check (JS):** title/subtitle set · block counts match · **0 empty paragraphs** ·
    heading/divider/image counts · footnotes == manifest count · **0 `[[FN` markers left** ·
@@ -579,6 +601,10 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   content, and swallowed edits the author made in the wrong window. **Before composing, navigate
   away or close every surface except the one you are composing on**, and say which surface you are
   using so the author edits the same one.
+- **The pasteboard is a leased singleton.** `md_to_clipboard.py` takes the `pasteboard` lease and
+  waits for it; never `pbcopy` around the tool, and never paste from a board you did not load under
+  the lease in the same process. Three races in one afternoon (2026-09-07), all to sibling sessions,
+  are why. If `--paste` is refused for Accessibility, say so and stop; do not fall back to retyping.
 - **Never retype the essay to get it into Substack.** If a step requires the agent to reproduce
   the author's prose character by character, that step is wrong — reach for the clipboard
   transport. The author's words should travel **disk → pasteboard → browser**, never through the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Put a piece's composed body HTML on the system clipboard, for a real ⌘V paste.
+"""Put a piece's composed body HTML on the system clipboard and paste it with a real ⌘V.
 
 WHY THIS EXISTS
 ---------------
@@ -22,36 +22,78 @@ WHAT WORKS, AND WHAT DOES NOT (measured 2026-09-01)
 So this is used with the `claude-in-chrome` surface, not the in-app pane. Programmatic
 `focus()` does not satisfy the Clipboard API; the click has to be a real one.
 
+THE PASTEBOARD IS A SINGLETON, AND THIS TOOL NOW TREATS IT AS ONE (2026-09-08)
+-------------------------------------------------------------------------------
+Between loading the pasteboard and pressing ⌘V, any other process can take it. With several
+desk sessions composing at once that is not a corner case: on 2026-09-07 one session lost the
+pasteboard THREE times in one afternoon — a stranger's name and a broken asset landed in an
+editor once; a stray quotation once; a re-check seconds before a paste found another session's
+whole essay ("I. The Same Street") on the board. `--verify` immediately before the keystroke
+was necessary and not sufficient, because the gap it guards is a full tool round-trip.
+
+Two things close it, and this tool does both:
+
+  1. A LEASE on the pasteboard (`lease.py`, slug `pasteboard`), acquired before the write and
+     released after the paste. Every session that has ever taken the board mid-compose was
+     another Claude session running this same tool, so an advisory lease is sufficient: the
+     other session WAITS (`--wait`, default 120s) instead of clobbering. On timeout it reports
+     who holds the lease and stops; it never breaks the lease itself.
+
+  2. `--paste` collapses load → read-back → verify → keystroke into ONE process. The board is
+     exposed for the milliseconds it takes to send ⌘V through System Events, not for the seconds
+     an agent spends between tool calls. The keystroke goes to a Chrome tab this tool has FIRST
+     raised and CHECKED (`--expect-url`): it finds the window and tab whose URL contains the
+     expected string, makes that tab active and that window frontmost, reads the active tab's
+     URL back, and refuses to press anything if it does not match. The editor still needs a
+     REAL click for focus before this runs — `.focus()` from a script does not satisfy Chrome.
+
+  Requires: macOS Accessibility permission for the app running this (Terminal, or the Claude
+  desktop app) — System Settings → Privacy & Security → Accessibility. The first `--paste`
+  fails with `osascript is not allowed to send keystrokes (1002)` until it is granted; the tool says
+  so and nothing is pasted.
+
 USAGE
 -----
-    python3 framework/tools/md_to_clipboard.py <piece-dir> [--fn-out notes.js]
+    # the body (HTML flavor), one process, atomic:
+    python3 framework/tools/md_to_clipboard.py <piece-dir> --paste --expect-url publish/post/<id> [--fn-out notes.js]
+
+    # any text payload the same way (the base64 footnote carrier):
+    python3 framework/tools/md_to_clipboard.py --text-file payload.b64 --paste --expect-url publish/post/<id>
+
+    # legacy two-step (load now, ⌘V from the browser tool later) — still lease-guarded:
+    python3 framework/tools/md_to_clipboard.py <piece-dir> [--fn-out notes.js]   # holds the lease
+    python3 framework/tools/md_to_clipboard.py <piece-dir> --verify                # right before ⌘V
+    python3 framework/tools/md_to_clipboard.py --release                           # after the paste
 
 Prints the same counts as `md_to_substack.py`, plus the SHA-256 of the HTML **read back off
 the pasteboard** — evidence about the clipboard, not a hash of what this script hoped to put
-there. `--verify` re-checks that the pasteboard still holds this piece and nothing else; run it
-immediately before the ⌘V, because the pasteboard is global mutable state and the gap between
-loading and pasting is wide enough for another process to win it. Runs the identical
-preflight refusals (a stray "verify" note, nested footnote refs) — this is a different
-transport, never a way around the gates.
+there. Runs the identical preflight refusals (a stray "verify" note, nested footnote refs) —
+this is a different transport, never a way around the gates.
 
-Footnotes cannot travel by clipboard: a paste cannot create native Substack footnotes.
-`--fn-out` writes the small footnote-insertion snippet (a few KB, keyed on the [[FNn]]
-markers the paste leaves behind), which is small enough to run directly.
+Footnotes cannot travel as HTML by clipboard: a paste cannot create native Substack footnotes.
+`--fn-out` writes the footnote-insertion snippet (keyed on the [[FNn]] markers the paste leaves
+behind); `--fn-b64` writes the footnote DATA as one base64 line, which is what `--text-file
+--paste` carries into the page for the insertion snippet to decode (see skills/publish).
 
 PLATFORM
 --------
-macOS only today, and `set_clipboard_html` below is the entire platform-specific surface --
-everything else in this repo is platform-neutral. Windows and Linux support is wanted and is a
-small, well-scoped contribution; see "Platform support" in the README for sketches and for the
-one hard requirement: the payload must land under the HTML clipboard *flavor*. Plain text is the
-trap -- it pastes, it looks like it worked, and every heading, blockquote, italic and link is
-silently gone.
+macOS only today, and `set_clipboard_html` / `set_clipboard_text` / `press_paste` below are
+the entire platform-specific surface -- everything else in this repo is platform-neutral.
+Windows and Linux support is wanted and is a small, well-scoped contribution; see "Platform
+support" in the README for sketches and for the one hard requirement: the payload must land
+under the HTML clipboard *flavor*. Plain text is the trap -- it pastes, it looks like it
+worked, and every heading, blockquote, italic and link is silently gone.
 """
 
-import sys, os, json, hashlib, subprocess
+import sys, os, json, hashlib, subprocess, base64, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from md_to_substack import read_manifest, convert, manifest_gate  # noqa: E402
+import lease as _lease                                           # noqa: E402
+
+PASTEBOARD_SLUG = 'pasteboard'
+DEFAULT_WAIT = 120.0
+DEFAULT_APP = 'Google Chrome'
 
 FN_TEMPLATE = """(() => {
   window.__sbFN = %FOOTNOTES%;
@@ -69,13 +111,11 @@ FN_TEMPLATE = """(() => {
 })()"""
 
 
-def set_clipboard_html(html: str) -> None:
-    """Put `html` on the macOS pasteboard under the HTML flavor.
+def _sha(s: str) -> str:
+    return hashlib.sha256(s.encode('utf-8')).hexdigest()[:16]
 
-    pbcopy only sets public.utf8-plain-text, which ProseMirror pastes as flat text --
-    every heading, blockquote, link and italic would be lost. AppleScript's
-    «data HTML<hex>» sets the real HTML flavor, which is what the paste handler reads.
-    """
+
+def _darwin_only():
     if sys.platform != 'darwin':
         sys.exit(
             'md_to_clipboard: macOS only -- this is the one platform-specific piece of the\n'
@@ -93,6 +133,18 @@ def set_clipboard_html(html: str) -> None:
             '                 (StartHTML/EndHTML/StartFragment/EndFragment) -- Set-Clipboard\n'
             '                 alone will not do it.\n'
             'See "Platform support" in the framework README.')
+
+
+# ----------------------------------------------------------------------------- pasteboard I/O
+
+def set_clipboard_html(html: str) -> None:
+    """Put `html` on the macOS pasteboard under the HTML flavor.
+
+    pbcopy only sets public.utf8-plain-text, which ProseMirror pastes as flat text --
+    every heading, blockquote, link and italic would be lost. AppleScript's
+    «data HTML<hex>» sets the real HTML flavor, which is what the paste handler reads.
+    """
+    _darwin_only()
     hexed = html.encode('utf-8').hex()
     # Passed via stdin, not argv: a 32KB essay overruns the command-line length limit.
     proc = subprocess.run(['osascript', '-'], input='set the clipboard to «data HTML%s»' % hexed,
@@ -108,9 +160,7 @@ def set_clipboard_html(html: str) -> None:
                  '  intended sha256=%s\n  actual   sha256=%s\n'
                  'Another process almost certainly owns the pasteboard (a concurrent session, a\n'
                  'clipboard manager). Do NOT paste. Re-run once the pasteboard is yours.'
-                 % (len(html), len(got),
-                    hashlib.sha256(html.encode()).hexdigest()[:16],
-                    hashlib.sha256(got.encode()).hexdigest()[:16]))
+                 % (len(html), len(got), _sha(html), _sha(got)))
 
 
 def read_clipboard_html():
@@ -137,17 +187,155 @@ def read_clipboard_html():
         return None
 
 
-def verify_only(piece_dir):
-    """Re-check that the pasteboard still holds THIS piece's body, immediately before pasting.
+def set_clipboard_text(text: str) -> None:
+    """Put a plain-text payload on the pasteboard (the base64 footnote carrier) and read it back."""
+    _darwin_only()
+    proc = subprocess.run(['pbcopy'], input=text.encode('utf-8'), capture_output=True)
+    if proc.returncode != 0:
+        sys.exit('md_to_clipboard: pbcopy failed: %s' % proc.stderr.decode(errors='replace').strip())
+    got = read_clipboard_text()
+    if got != text:
+        sys.exit('md_to_clipboard: text write did not take (wrote %d chars, board holds %d, '
+                 'sha %s vs %s). Another process owns the pasteboard. Do NOT paste.'
+                 % (len(text), len(got or ''), _sha(text), _sha(got or '')))
 
-    Loading the clipboard and pasting are separate steps with a human-scale gap between them,
-    and the pasteboard is global mutable state that any other process can take. On 2026-09-02
-    a concurrent session's `pbcopy` won that race. Run this immediately before the ⌘V.
+
+def read_clipboard_text():
+    proc = subprocess.run(['pbpaste'], capture_output=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode('utf-8', errors='replace')
+
+
+# ----------------------------------------------------------------------------- the keystroke
+
+def raise_tab(expect_url: str, app: str = DEFAULT_APP) -> str:
+    """Find the Chrome tab whose URL contains `expect_url`, make it the active tab of a
+    frontmost window, and return the URL Chrome reports for the active tab afterwards.
+
+    The keystroke goes to whatever is frontmost. Chrome routinely has several windows open
+    (seven, measured 2026-09-08), and the automation tab group is not necessarily the front
+    one; a ⌘V sent blind would land in the wrong page. So the tab is located BY URL and raised,
+    and the caller compares what comes back against what it expected before pressing anything.
     """
+    script = '''
+tell application "%(app)s"
+  set found to false
+  set hit to ""
+  repeat with w in windows
+    set i to 0
+    repeat with t in tabs of w
+      set i to i + 1
+      if (URL of t) contains "%(needle)s" then
+        set active tab index of w to i
+        set index of w to 1
+        set found to true
+        set hit to URL of t
+        exit repeat
+      end if
+    end repeat
+    if found then exit repeat
+  end repeat
+  if not found then return "NOTFOUND"
+  activate
+  delay 0.4
+  return URL of active tab of front window
+end tell''' % {'app': app.replace('"', ''), 'needle': expect_url.replace('"', '')}
+    proc = subprocess.run(['osascript', '-'], input=script, text=True, capture_output=True)
+    if proc.returncode != 0 and '-600' in proc.stderr:
+        # "Application isn't running (-600)" was seen ONCE, transiently, seconds after Accessibility
+        # was granted, with Chrome demonstrably running and answering the same script a moment later.
+        # One retry after a beat; a second failure is real and is reported.
+        time.sleep(1.0)
+        proc = subprocess.run(['osascript', '-'], input=script, text=True, capture_output=True)
+    if proc.returncode != 0:
+        sys.exit('md_to_clipboard: could not address %s via AppleScript: %s' % (app, proc.stderr.strip()))
+    return proc.stdout.strip()
+
+
+def frontmost_app() -> str:
+    proc = subprocess.run(['osascript', '-e',
+                           'tell application "System Events" to get name of first application '
+                           'process whose frontmost is true'], text=True, capture_output=True)
+    return proc.stdout.strip() if proc.returncode == 0 else ''
+
+
+def press_paste(app: str = DEFAULT_APP) -> None:
+    """Send a REAL ⌘V to the frontmost app through System Events.
+
+    This is the step that needs Accessibility permission. The error when it is missing is
+    unmistakable (`not allowed to send keystrokes`, error 1002); surface it and stop — nothing
+    has been pasted, and the pasteboard still holds the payload for a manual ⌘V.
+    """
+    front = frontmost_app()
+    if front and app.split()[0].lower() not in front.lower():
+        sys.exit('md_to_clipboard: refusing to press ⌘V — frontmost app is %r, not %r.' % (front, app))
+    proc = subprocess.run(['osascript', '-e',
+                           'tell application "System Events" to keystroke "v" using command down'],
+                          text=True, capture_output=True)
+    if proc.returncode != 0:
+        sys.exit('md_to_clipboard: the keystroke was NOT sent: %s\n'
+                 'If this says "not allowed to send keystrokes" (1002), grant Accessibility to the\n'
+                 'app running this tool — the Claude desktop app or Terminal, whichever launched it\n'
+                 '(System Settings → Privacy & Security → Accessibility) — then\n'
+                 're-run. The pasteboard still holds the payload; the lease is released.'
+                 % proc.stderr.strip())
+
+
+# ----------------------------------------------------------------------------- lease helpers
+
+def take_pasteboard(what: str, wait: float):
+    ok, rec, waited = _lease.acquire_wait(PASTEBOARD_SLUG, what, timeout=wait)
+    if not ok:
+        sys.exit('md_to_clipboard: the pasteboard lease is HELD by %s (pid %s, %s) since %s and did '
+                 'not free up in %.0fs. Waited; did not break it. Re-run, or `lease.py list`.'
+                 % (rec.get('session'), rec.get('pid'), rec.get('what') or 'no note',
+                    rec.get('acquired'), waited))
+    if waited >= 1:
+        print('pasteboard lease: acquired after waiting %.0fs' % waited)
+    return rec
+
+
+def drop_pasteboard():
+    _lease.release(PASTEBOARD_SLUG)
+
+
+def assert_pasteboard_mine():
+    rec = _lease.read(PASTEBOARD_SLUG)
+    if rec and not rec['mine']:
+        sys.exit('md_to_clipboard: the pasteboard lease is held by %s (%s). Do NOT paste; wait or '
+                 'coordinate.' % (rec.get('session'), rec.get('what') or 'no note'))
+
+
+# ----------------------------------------------------------------------------- modes
+
+def do_paste(read_back, expected: str, expect_url: str, app: str, label: str) -> None:
+    """Raise the target tab, re-read the board, press ⌘V — the atomic tail of a --paste."""
+    if not expect_url:
+        sys.exit('md_to_clipboard: --paste needs --expect-url <substring of the editor URL> so the '
+                 'keystroke can be aimed at a checked tab rather than whatever is frontmost.')
+    url = raise_tab(expect_url, app)
+    if url == 'NOTFOUND' or expect_url not in url:
+        sys.exit('md_to_clipboard: no %s tab whose URL contains %r is frontmost (got %r). Nothing '
+                 'pasted.' % (app, expect_url, url))
+    got = read_back()                       # the last look before the keystroke
+    if got != expected:
+        sys.exit('md_to_clipboard: the pasteboard changed under the lease (%s → %s). Something is '
+                 'writing it without taking the lease. Nothing pasted.'
+                 % (_sha(expected), _sha(got or '')))
+    press_paste(app)
+    time.sleep(0.3)
+    print('pasted %s into %s (%s) — %d chars sha256=%s; the lease is released. Post-check in the '
+          'editor now.' % (label, app, url, len(expected), _sha(expected)))
+
+
+def verify_only(piece_dir):
+    """Re-check that the pasteboard still holds THIS piece's body, immediately before pasting."""
     _html, _fns, _st, residual, _unv, fn_issues = convert(piece_dir)
     if residual or fn_issues['nested'] or fn_issues['undefined'] or fn_issues['duplicated']:
         sys.exit('md_to_clipboard --verify: the piece no longer converts cleanly; re-run without '
                  '--verify to see the refusal.')
+    assert_pasteboard_mine()
     got = read_clipboard_html()
     if got is None:
         sys.exit('STALE: the pasteboard has no HTML flavor. Do NOT paste — re-run to reload it.')
@@ -155,22 +343,61 @@ def verify_only(piece_dir):
         sys.exit('STALE: the pasteboard does not hold this piece.\n'
                  '  expected %d chars sha256=%s\n  found    %d chars sha256=%s\n'
                  'Something took the pasteboard since it was loaded. Do NOT paste; re-run to reload.'
-                 % (len(_html), hashlib.sha256(_html.encode()).hexdigest()[:16],
-                    len(got), hashlib.sha256(got.encode()).hexdigest()[:16]))
+                 % (len(_html), _sha(_html), len(got), _sha(got)))
     print('OK: pasteboard holds %s — %d chars sha256=%s. Safe to paste.'
-          % (piece_dir, len(got), hashlib.sha256(got.encode()).hexdigest()[:16]))
+          % (piece_dir, len(got), _sha(got)))
+
+
+def _opt(name, default=None):
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+            return sys.argv[i + 1]
+        return True
+    return default
+
+
+def text_mode(path: str, paste: bool, expect_url: str, app: str, wait: float) -> None:
+    text = open(path, encoding='utf-8').read().replace('\n', '')
+    take_pasteboard('text payload %s (%s)' % (os.path.basename(path), _sha(text)), wait)
+    try:
+        set_clipboard_text(text)
+        print('clipboard: %d chars of text  sha256=%s  (read back off the pasteboard)' % (len(text), _sha(text)))
+        if paste:
+            do_paste(read_clipboard_text, text, expect_url, app, 'text payload')
+        else:
+            print('holding the pasteboard lease; press ⌘V in the editor, then --release.')
+            return                      # keep the lease for the legacy two-step
+    finally:
+        if paste:
+            drop_pasteboard()
 
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    paste = '--paste' in sys.argv
+    expect_url = _opt('--expect-url', '')
+    app = _opt('--app', DEFAULT_APP)
+    wait = float(_opt('--wait', DEFAULT_WAIT))
+
+    if '--release' in sys.argv:
+        ok, rec = _lease.release(PASTEBOARD_SLUG)
+        print('released the pasteboard lease' if ok and rec else
+              ('no pasteboard lease held' if ok else 'pasteboard lease is %s\'s, not this session\'s' % rec.get('session')))
+        return
+
+    text_file = _opt('--text-file')
+    if text_file:
+        # --text-file consumes the positional slot in `args` if given as its argument; ignore args
+        return text_mode(text_file, paste, expect_url, app, wait)
+
     if not args:
         sys.exit(__doc__)
     piece_dir = args[0].rstrip('/')
     if '--verify' in sys.argv:
         return verify_only(piece_dir)
-    fn_out = None
-    if '--fn-out' in sys.argv:
-        fn_out = sys.argv[sys.argv.index('--fn-out') + 1]
+    fn_out = _opt('--fn-out')
+    fn_b64 = _opt('--fn-b64')
 
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
     # Same gates as a normal compose. A different transport is not a lower bar.
@@ -196,32 +423,42 @@ def main():
                  'indices for a later surgical re-sync.'
                  % (fn_issues['undefined'], fn_issues['duplicated']))
 
-    set_clipboard_html(html)
-
-    print('paragraphs~%d  headings~%d  dividers~%d  images~%d  footnotes~%d  '
-          'editorial-notes-stripped~%d'
-          % (html.count('<p>'), html.count('<h2>') + html.count('<h3>'),
-             html.count('<hr>'), html.count('<img'), len(footnotes), stripped))
-    on_board = read_clipboard_html()   # re-read; this is evidence, the variable above is intent
-    print('clipboard: %d chars of text/html  sha256=%s  (read back off the pasteboard)'
-          % (len(on_board), hashlib.sha256(on_board.encode()).hexdigest()[:16]))
-    print('title:    %s' % json.dumps(man.get('title', '')))
-    print('subtitle: %s' % json.dumps(man.get('subtitle', '')))
-    if unverified:
-        print('note: %d anchor(s) still carry a † marker' % len(unverified))
-
     if fn_out:
         with open(fn_out, 'w') as f:
             f.write(FN_TEMPLATE.replace('%FOOTNOTES%', json.dumps(footnotes)))
         print('footnote snippet: %s (%d notes)' % (fn_out, len(footnotes)))
+    if fn_b64:
+        b = base64.b64encode(json.dumps(footnotes, ensure_ascii=False).encode('utf-8')).decode()
+        with open(fn_b64, 'w') as f:
+            f.write(b)
+        print('footnote data (base64): %s (%d notes, %d chars, sha256=%s)' % (fn_b64, len(footnotes), len(b), _sha(b)))
 
-    print()
-    print('Next, in REAL Chrome (not the in-app pane — it cannot reach the pasteboard):')
-    print('  1. open the composer and set title/subtitle')
-    print('  2. re-check the pasteboard, then REAL click into the body and a REAL cmd+v:')
-    print('       python3 framework/tools/md_to_clipboard.py %s --verify' % piece_dir)
-    print('  3. run the --fn-out snippet to convert [[FNn]] markers to native footnotes')
-    print('  4. verify: block count + per-block hashes against the draft')
+    take_pasteboard('body of %s (%s)' % (piece_dir, _sha(html)), wait)
+    try:
+        set_clipboard_html(html)
+        print('paragraphs~%d  headings~%d  dividers~%d  images~%d  footnotes~%d  '
+              'editorial-notes-stripped~%d'
+              % (html.count('<p>'), html.count('<h2>') + html.count('<h3>'),
+                 html.count('<hr>'), html.count('<img'), len(footnotes), stripped))
+        on_board = read_clipboard_html()   # re-read; this is evidence, the variable above is intent
+        print('clipboard: %d chars of text/html  sha256=%s  (read back off the pasteboard)'
+              % (len(on_board), _sha(on_board)))
+        print('title:    %s' % json.dumps(man.get('title', '')))
+        print('subtitle: %s' % json.dumps(man.get('subtitle', '')))
+        if unverified:
+            print('note: %d anchor(s) still carry a † marker' % len(unverified))
+        if paste:
+            do_paste(read_clipboard_html, html, expect_url, app, 'body of %s' % piece_dir)
+        else:
+            print()
+            print('Holding the pasteboard lease. Next, in REAL Chrome (not the in-app pane):')
+            print('  1. open the composer and set title/subtitle; REAL click into the body')
+            print('  2. re-check, then a REAL cmd+v:  python3 framework/tools/md_to_clipboard.py %s --verify' % piece_dir)
+            print('  3. release:                      python3 framework/tools/md_to_clipboard.py --release')
+            print('  (or do all of it in one process next time: --paste --expect-url publish/post/<id>)')
+    finally:
+        if paste:
+            drop_pasteboard()
 
 
 if __name__ == '__main__':

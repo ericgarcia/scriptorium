@@ -188,7 +188,23 @@ def resolve_images(piece_dir, slug, body, bundle, opts):
             return ''                       # hero is front matter; the site lays it out
         return f"![{alt}]({rel})"
 
-    return IMAGE_MD.sub(repl, body).strip(), found, hero
+    body = IMAGE_MD.sub(repl, body).strip()
+
+    # A hero uploaded in the Substack composer is not referenced by draft.md — that is
+    # the whole reason sync_post_images.py exists. Without this fallback such a piece
+    # exports with no image at all, silently, while its picture sits on disk beside it.
+    if hero is None and imgs:
+        local = sorted(imgs)[0]
+        src = os.path.join(piece_dir, local)
+        if os.path.exists(src):
+            name = os.path.splitext(os.path.basename(local))[0] + '.webp'
+            dest = os.path.join(bundle, 'images', slug, name)
+            w, h = derive_image(src, dest, opts.max_width, opts.quality, opts.apply)
+            alt = (man.get('image_alt') or {}).get(local, '')
+            hero = {'src': f"../images/{slug}/{name}", 'alt': alt, 'width': w, 'height': h}
+            found.append(hero)
+
+    return body, found, hero
 
 
 def reader_digest(piece_dir):

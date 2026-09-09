@@ -37,7 +37,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
           fixture and must all be listed; --strict warns on them and does not refuse
 """
-import os, re, sys, json, subprocess, tempfile, datetime
+import os, re, sys, json, shutil, subprocess, tempfile, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -74,8 +74,9 @@ from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
                             read_manifest, parse_blocks, manifest_gate,
                             render_marks, marks_in, mark_keys)
-from substack_sync import (H, three_way, align, canonical_image_url,
-                           reader_to_source_map, edit_block_source, load_baseline)
+from substack_sync import (H, HM, three_way, align, canonical_image_url,
+                           reader_to_source_map, edit_block_source, load_baseline,
+                           baseline_has_marks, write_baseline, draft_state)
 from substack_verify import live_blocks, extract_post, header_drift, mark_drift
 from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links, unrenderable as unrenderable_links
@@ -235,6 +236,32 @@ def unit_three_way():
     check('converged when both made the same edit', got[3] == 'converged', str(got))
     check('conflict when both moved differently', got[4] == 'conflict', str(got))
     check('no structural rows for a same-length change', structural == [], str(structural))
+
+    # The second verdict. Every row above has IDENTICAL text on all three sides here, so
+    # `state` is `unchanged` throughout and only `markState` can carry the finding — which is
+    # exactly the shape of the bug: a block whose words never moved and whose italics did.
+    same = ['T', 'T', 'T', 'T', 'T']
+    mrows, _st = three_way('body', same, same, same,
+                           base_m=['A', 'B', 'C', 'D', 'E'],
+                           draft_m=['A', 'B2', 'C', 'D2', 'E2'],
+                           live_m=['A', 'B', 'C2', 'D2', 'E3'])
+    check('a text-identical row still classifies its marks',
+          all(r['state'] == 'unchanged' for r in mrows), str([r['state'] for r in mrows]))
+    mgot = {r['baseIdx']: r['markState'] for r in mrows}
+    check('marks unchanged / push / pull / converged / conflict',
+          [mgot[i] for i in range(5)] == ['unchanged', 'push', 'pull', 'converged', 'conflict'],
+          str(mgot))
+
+    # UNKNOWN IS NOT UNCHANGED. 34 baselines were sealed before marks were tracked, and a
+    # tool that answers "no formatting change" when it has nothing to compare is the failure
+    # being fixed, wearing a different hat.
+    urows, _u = three_way('body', same, same, same)
+    check('no mark data anywhere reads as unknown, never unchanged',
+          all(r['markState'] == 'unknown' for r in urows), str([r['markState'] for r in urows]))
+    prows, _p2 = three_way('body', same, same, same,
+                           base_m=None, draft_m=['A'] * 5, live_m=['A'] * 5)
+    check('a text-only BASELINE reads as unknown even when both live sides have marks',
+          all(r['markState'] == 'unknown' for r in prows), str([r['markState'] for r in prows]))
 
     pairs, added, removed = align(['A', 'B', 'C'], ['A', 'B', 'X', 'C'])
     check('align reports an inserted row', added == [2] and removed == [],
@@ -564,6 +591,68 @@ def unit_mark_drift(tmp):
           len(d2) == 1 and 'link target' in d2[0] and 'wrong' in d2[0] and 'right' in d2[0], repr(d2))
 
 
+def unit_sync_baseline_marks(tmp):
+    """The sync baseline's second domain.
+
+    substack_sync's baseline recorded hashes of reader-text and nothing else, so a block
+    whose only difference was an <em> hashed identically on both sides and the three-way
+    called it `unchanged`. Same false pass as substack_verify and substack_repatch had, one
+    tool over — and worse here, because a seal writes the mistake down and every later sync
+    measures against a state that was never true.
+    """
+    print("\n-- sync baseline: marks are recorded and aligned ------------------")
+    d = os.path.join(tmp, 'syncmarks'); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'publish.yaml'), 'w') as f:
+        f.write('title: A Piece\nsubtitle: With one italic\n')
+    with open(os.path.join(d, 'draft.md'), 'w') as f:
+        f.write('*Draft*\n\n---\n\nHe sat in the *satsang* and listened.[^1]\n\n'
+                '[^1]: A note with *emphasis*.\n')
+
+    st = draft_state(d)
+    check('draft_state carries the mark runs beside the text',
+          len(st['bodyMarks']) == len(st['body']) and len(st['fnsMarks']) == len(st['fns'])
+          and st['bodyMarks'][0], f"{st['bodyMarks']} {st['fnsMarks']}")
+
+    # the hash must move when only the formatting does
+    plain = os.path.join(tmp, 'syncplain'); os.makedirs(plain, exist_ok=True)
+    shutil.copy2(os.path.join(d, 'publish.yaml'), plain)
+    with open(os.path.join(plain, 'draft.md'), 'w') as f:
+        f.write('*Draft*\n\n---\n\nHe sat in the satsang and listened.[^1]\n\n'
+                '[^1]: A note with emphasis.\n')
+    sp = draft_state(plain)
+    check('the TEXT hash is identical across a formatting-only difference',
+          [H(t) for t in st['body']] == [H(t) for t in sp['body']]
+          and [H(t) for t in st['fns']] == [H(t) for t in sp['fns']])
+    check('a non-empty footnote list is actually under test',
+          len(st['fns']) == 1 and len(sp['fns']) == 1, f"{len(st['fns'])} {len(sp['fns'])}")
+    check('the MARK hash is not, in the body',
+          [HM(r) for r in st['bodyMarks']] != [HM(r) for r in sp['bodyMarks']])
+    check('the MARK hash is not, in a footnote',
+          [HM(r) for r in st['fnsMarks']] != [HM(r) for r in sp['fnsMarks']])
+    check('an unformatted block hashes to the empty signature',
+          all(x == HM([]) for x in [HM(r) for r in sp['bodyMarks']]))
+
+    # a sealed baseline records both; a legacy one records neither and says so
+    write_baseline(d, st['title'], st['subtitle'],
+                   [H(t) for t in st['body']], [H(t) for t in st['fns']], 'test',
+                   body_m=[HM(r) for r in st['bodyMarks']], fns_m=[HM(r) for r in st['fnsMarks']])
+    base = load_baseline(d)
+    check('a sealed baseline records the mark hashes', baseline_has_marks(base), str(sorted(base)))
+
+    write_baseline(d, st['title'], st['subtitle'],
+                   [H(t) for t in st['body']], [H(t) for t in st['fns']], 'legacy')
+    check('a text-only baseline is detectable as such', not baseline_has_marks(load_baseline(d)))
+
+    # MISALIGNED mark lists are refused rather than written: a mark list one row short would
+    # attach every block's formatting to its neighbour's, which is the precise failure the
+    # row alignment exists to prevent.
+    write_baseline(d, st['title'], st['subtitle'],
+                   [H(t) for t in st['body']], [H(t) for t in st['fns']], 'misaligned',
+                   body_m=[], fns_m=[])
+    check('a mark list that does not line up 1:1 with the rows is not recorded',
+          not baseline_has_marks(load_baseline(d)))
+
+
 def unit_manifest_gate(tmp):
     print("\n-- manifest gate: a post needs a title and a subtitle ---------------")
     d = os.path.join(tmp, 'gate'); os.makedirs(d, exist_ok=True)
@@ -878,7 +967,7 @@ def corpus_baselines():
     pieces_dir = PIECES
     if not os.path.isdir(pieces_dir):
         skip('corpus baselines', f'no corpus at {pieces_dir}'); return
-    pub, behind, ahead = 0, [], []
+    pub, behind, ahead, textonly = 0, [], [], []
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
@@ -893,6 +982,16 @@ def corpus_baselines():
             continue
         body, fns, _r, _i = render_reader(d)
         differs = [H(t) for t in body] != base['body'] or [H(t) for t in fns] != base['fns']
+        # The second domain. A baseline sealed before marks were tracked cannot answer, and
+        # is listed rather than quietly passed -- an unanswerable check that reports success
+        # is the thing this whole change is about.
+        if baseline_has_marks(base):
+            bm, fm, _ok = render_marks(d)
+            if ([HM(r) for r in bm] != base['bodyMarks']
+                    or [HM(r) for r in fm] != base['fnsMarks']):
+                differs = True
+        else:
+            textonly.append(p)
         # A draft may be DELIBERATELY ahead of its live post: a rewrite is drafted and is
         # waiting on the author to read it before anything touches a public page. That is a
         # normal, intended state on this desk, and reporting it as a failure for as long as it
@@ -924,6 +1023,12 @@ def corpus_baselines():
         elif differs:
             behind.append(p)
     check(f'all {pub} published pieces are in sync', not behind, '; '.join(behind))
+    if textonly:
+        print(f"  note  {len(textonly)} baseline(s) predate mark tracking, so FORMATTING is not "
+              f"checked for them: {', '.join(textonly[:6])}"
+              + (' …' if len(textonly) > 6 else ''))
+        print(f"        (they seal with marks on the next completed sync; until then only their "
+              f"text is held to the baseline)")
     for name, since, age, note in ahead:
         print(f"  note  {name}: draft deliberately ahead of the live post since {since}{age} "
               f"(declared in publish.yaml; a re-sync or recompose clears it)"
@@ -949,10 +1054,17 @@ def engine_suite(tmp):
     repatch = os.path.join(HERE, 'substack_repatch.py')
     runner = os.path.join(HERE, 'test_substack_repatch.js')
     srunner = os.path.join(HERE, 'test_substack_structural.js')
+    scanner = os.path.join(HERE, 'test_substack_scan.js')
     if subprocess.run(['node', '--version'], capture_output=True).returncode != 0:
         skip('engine suite', 'node not available')
         return
-    failures, ran, skipped = [], 0, 0
+    # SCAN_JS carries no per-piece content, so it is generated once and run against every
+    # piece's document below.
+    scan_js = os.path.join(tmp, 'scan.js')
+    subprocess.run([sys.executable, os.path.join(HERE, 'substack_sync.py'),
+                    'scan', os.path.join(PIECES, os.listdir(PIECES)[0]), scan_js],
+                   capture_output=True, text=True)
+    failures, ran, skipped, scan_ok = [], 0, 0, 0
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
@@ -980,8 +1092,38 @@ def engine_suite(tmp):
         if sr.returncode != 0:
             failures.append(f'{p} [structural]: ' + '; '.join(l.strip() for l in sr.stdout.splitlines()
                                                               if l.startswith('FAIL')))
+
+        # THE CROSS-THE-WIRE ASSERTION, and the one the sync baseline rests on. SCAN_JS
+        # computes a mark signature in the browser; mark_sig() computes one in Python. They
+        # are the same string derived on two sides of a wire, and a hash of two strings that
+        # can disagree is not a baseline. Run the real scan snippet against this piece's own
+        # document and require both domains to match digest for digest.
+        if os.path.isfile(scan_js):
+            cr = subprocess.run(['node', scanner, scan_js, sjs], capture_output=True, text=True)
+            if cr.returncode != 0:
+                failures.append(f'{p} [scan]: runner failed ({cr.stderr.strip()[:120]})')
+            else:
+                try:
+                    live = json.loads(cr.stdout)
+                except Exception as e:                            # noqa: BLE001
+                    failures.append(f'{p} [scan]: unparseable output ({e})')
+                    continue
+                st = draft_state(d)
+                want_t = ([H(t) for t in st['body']], [H(t) for t in st['fns']])
+                want_m = ([HM(r) for r in st['bodyMarks']], [HM(r) for r in st['fnsMarks']])
+                if (list(want_t[0]), list(want_t[1])) != (live['body'], live['fns']):
+                    failures.append(f'{p} [scan]: the browser and Python disagree on TEXT hashes')
+                elif (list(want_m[0]), list(want_m[1])) != (live['bodyMarks'], live['fnsMarks']):
+                    bad = next((i for i, (x, y) in enumerate(zip(want_m[0], live['bodyMarks']))
+                                if x != y), None)
+                    failures.append(f'{p} [scan]: the browser and Python disagree on MARK '
+                                    f'signatures (first body row {bad})')
+                else:
+                    scan_ok += 1
     check(f'JS patcher suite passes for all {ran} pieces', not failures,
           ' | '.join(failures[:3]))
+    check(f'the browser and Python agree on text AND mark digests for all {scan_ok} pieces',
+          scan_ok == ran, f'{scan_ok}/{ran}')
     if skipped:
         print(f"        ({skipped} inapplicable check(s) skipped across the corpus)")
 
@@ -1037,6 +1179,7 @@ def main():
         unit_images()
         unit_live_extraction()
         unit_mark_drift(tmp)
+        unit_sync_baseline_marks(tmp)
         unit_manifest_gate(tmp)
         unit_pronouns(tmp)
         unit_talk(tmp)

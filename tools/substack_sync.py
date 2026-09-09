@@ -32,7 +32,19 @@ WHY THIS EXISTS (and why it is not just "repatch, but both ways")
 THE BASELINE
 
   `<piece>/sync-baseline.json` — HASHES ONLY (sha256/16 of the flattened reader-text),
-  never the text itself. Two reasons: the file stays a couple of KB next to a 40 KB draft,
+  never the text itself.
+
+  TWO hashes per row, not one. The reader-text hash answers "did the words change"; the
+  MARK hash answers "did the formatting change", and until 2026-09-09 nothing asked. A
+  block whose only difference is an `<em>` hashes identically as text, so the three-way
+  classified it `unchanged` and both directions of sync ran straight past it — the same
+  false pass measured on `rising-after-falls` in substack_verify and substack_repatch,
+  one tool over. `bodyMarks` / `fnsMarks` close it.
+
+  A baseline written before that has NO mark hashes, and 34 of them exist. Their rows
+  classify as `unknown`, never as `unchanged`: a tool that reports "no formatting change"
+  when it has nothing to compare against is worse than one that says it cannot tell. Seal
+  after the next sync and the row starts being checked. Two reasons: the file stays a couple of KB next to a 40 KB draft,
   and the text is already in draft.md, which is the point. Hashes are enough to CLASSIFY
   every block; the text needed to RESOLVE a pull is fetched from the live post, and only
   for the handful of blocks that actually need it.
@@ -56,6 +68,11 @@ PHASES (each browser step is one JS eval in the live post's editor)
 
 SCOPE LIMIT (deliberate)
 
+  A MARK PULL is described, never applied. Bringing an italic back from Substack means
+  writing `*` into the markdown at a mapped offset, and the run can straddle syntax that is
+  already there; the report names the block and the exact runs so a human edits draft.md.
+  The PUSH direction is fully handled — substack_repatch applies em/strong as real marks.
+
   Structural divergence — a block or footnote added, removed or reordered on either side —
   is DESCRIBED precisely and never auto-merged. Same guardrail as substack_repatch.py: a
   live public essay is not the place for a machine to guess at a paragraph it invented or
@@ -68,7 +85,8 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from md_to_substack import (render_reader, read_manifest, flatten_quotes,
-                            render_block, render_footnote_block, strip_to_reader)
+                            render_block, render_footnote_block, strip_to_reader,
+                            render_marks, mark_sig, mark_keys)
 from substack_repatch import JS_HELPERS
 
 BASELINE = 'sync-baseline.json'
@@ -95,12 +113,21 @@ def H(s):
     return hashlib.sha256(re.sub(r'\s+', ' ', flatten_quotes(s)).strip().encode('utf-8')).hexdigest()[:16]
 
 
+def HM(runs):
+    """Hash of one block's MARKS. Same digest function as H, over the mark signature, so the
+    two domains are stored and compared the same way and neither can be mistaken for the
+    other."""
+    return H(mark_sig(runs))
+
+
 def draft_state(piece_dir):
     body, fns, residual, fn_issues = render_reader(piece_dir)
+    body_m, fns_m, _offsets_ok = render_marks(piece_dir)
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
     return {
         'title': man.get('title', ''), 'subtitle': man.get('subtitle', ''),
         'body': body, 'fns': fns, 'residual': residual, 'fn_issues': fn_issues,
+        'bodyMarks': body_m, 'fnsMarks': fns_m,
         'post_url': man.get('post_url', ''),
     }
 
@@ -110,14 +137,29 @@ def load_baseline(piece_dir):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def write_baseline(piece_dir, title, subtitle, body_h, fns_h, note):
+def write_baseline(piece_dir, title, subtitle, body_h, fns_h, note,
+                   body_m=None, fns_m=None):
+    """Seal a baseline. `body_m`/`fns_m` are the per-row MARK hashes; omitting them writes a
+    text-only baseline, which every reader must then treat as `unknown` formatting rather
+    than as unchanged. They are written only when they line up 1:1 with the text rows,
+    because a mark list that has drifted out of alignment would attach one block's
+    formatting to another's — the exact failure the row alignment exists to prevent."""
     p = os.path.join(piece_dir, BASELINE)
-    json.dump({
+    out = {
         'note': note,
         'title': H(title), 'subtitle': H(subtitle),
         'body': body_h, 'fns': fns_h,
-    }, open(p, 'w'), indent=1)
+    }
+    if body_m is not None and fns_m is not None \
+            and len(body_m) == len(body_h) and len(fns_m) == len(fns_h):
+        out['bodyMarks'], out['fnsMarks'] = body_m, fns_m
+    json.dump(out, open(p, 'w'), indent=1)
     return p
+
+
+def baseline_has_marks(base):
+    """Does this baseline record formatting at all? 34 predate the question."""
+    return bool(base) and 'bodyMarks' in base and 'fnsMarks' in base
 
 
 # ---------------------------------------------------------------- alignment
@@ -146,11 +188,31 @@ def align(base, side):
     return pairs, added, removed
 
 
-def three_way(kind, base_h, draft_h, live_h, draft_texts=None):
+def _classify(b, d, l):
+    if d == b and l == b:
+        return 'unchanged'
+    if d != b and l == b:
+        return 'push'
+    if d == b and l != b:
+        return 'pull'
+    if d == l:
+        return 'converged'
+    return 'conflict'
+
+
+def three_way(kind, base_h, draft_h, live_h, draft_texts=None,
+              base_m=None, draft_m=None, live_m=None):
     """Classify every row of one list (body or footnotes) against the baseline.
     Takes HASH lists for all three sides — at plan time the live side is hashes only,
     which is the whole point: classification never needs the live text, and the text
     for the few rows that do need it is fetched afterwards.
+
+    Each row carries TWO verdicts. `state` is the text one and means what it always meant.
+    `markState` is the same classification over the row's formatting, and it is `unknown`
+    whenever any of the three sides has no mark data — a baseline sealed before marks were
+    tracked, or a scan JSON captured by an older snippet. UNKNOWN IS NOT UNCHANGED: the
+    whole failure being fixed here is a tool reporting no difference when it never looked.
+
     Returns (rows, structural)."""
     d_pairs, d_added, d_removed = align(base_h, draft_h)
     l_pairs, l_added, l_removed = align(base_h, live_h)
@@ -165,18 +227,14 @@ def three_way(kind, base_h, draft_h, live_h, draft_texts=None):
                                'side': 'draft' if di is None else 'live',
                                'what': 'block present at last sync is gone'})
             continue
-        b, d, l = base_h[bi], draft_h[di], live_h[li]
-        if d == b and l == b:
-            state = 'unchanged'
-        elif d != b and l == b:
-            state = 'push'
-        elif d == b and l != b:
-            state = 'pull'
-        elif d == l:
-            state = 'converged'
+        state = _classify(base_h[bi], draft_h[di], live_h[li])
+        if base_m is not None and draft_m is not None and live_m is not None \
+                and bi < len(base_m) and di < len(draft_m) and li < len(live_m):
+            mark_state = _classify(base_m[bi], draft_m[di], live_m[li])
         else:
-            state = 'conflict'
-        rows.append({'kind': kind, 'baseIdx': bi, 'draftIdx': di, 'liveIdx': li, 'state': state})
+            mark_state = 'unknown'
+        rows.append({'kind': kind, 'baseIdx': bi, 'draftIdx': di, 'liveIdx': li,
+                     'state': state, 'markState': mark_state})
 
     for j in d_added:
         structural.append({'kind': kind, 'side': 'draft', 'draftIdx': j,
@@ -267,19 +325,25 @@ SCAN_JS = """await (async () => {
     const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
     return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
   };
-  const body = [], fns = [];
+  // TWO domains per node. The text hash is what this tool has always compared; the mark
+  // signature is the formatting, which no hash of reader-text can ever carry. `markSig`
+  // must produce exactly what mark_sig() produces in Python — the same string computed on
+  // the two sides of the wire.
+  const body = [], fns = [], bodyM = [], fnsM = [];
+  const markSig = n => marksOf(n).map(markKey).join('\u0001');
   root.editor.state.doc.forEach(n => {
-    if (n.type.name === 'footnote') fns.push(n.textContent);
-    else if (isBodyNode(n)) body.push(n.textContent);
+    if (n.type.name === 'footnote') { fns.push(n.textContent); fnsM.push(markSig(n)); }
+    else if (isBodyNode(n)) { body.push(n.textContent); bodyM.push(markSig(n)); }
   });
   const hash = async a => Promise.all(a.map(t => sha(sameText(t))));   // comparison domain
   const T = document.querySelector('textarea[placeholder="Title"]');
   const S = document.querySelector('textarea[placeholder="Add a subtitle\\u2026"]');
   return JSON.stringify({
-    url: location.href,
+    url: location.href, marksVersion: 1,
     title: T ? T.value : '', subtitle: S ? S.value : '',
     counts: { body: body.length, fns: fns.length },
-    body: await hash(body), fns: await hash(fns)
+    body: await hash(body), fns: await hash(fns),
+    bodyMarks: await hash(bodyM), fnsMarks: await hash(fnsM)
   });
 })()"""
 
@@ -288,13 +352,17 @@ FETCH_JS = """(() => {
   const root = document.querySelector('.ProseMirror');
   if (!root || !root.editor) return JSON.stringify({ error: 'no editor found' });
 %HELPERS%
-  const body = [], fns = [];
+  const body = [], fns = [], bodyM = [], fnsM = [];
+  // the RUNS, not a hash: a mark pull is resolved by a human editing draft.md, and
+  // "footnote 9 wants em 'My voice'" is the only form of that report anyone can act on.
+  const runs = n => marksOf(n).map(r => ({ kind: r.kind, text: r.text, href: r.href || '' }));
   root.editor.state.doc.forEach(n => {
-    if (n.type.name === 'footnote') fns.push(n.textContent);
-    else if (isBodyNode(n)) body.push(n.textContent);
+    if (n.type.name === 'footnote') { fns.push(n.textContent); fnsM.push(runs(n)); }
+    else if (isBodyNode(n)) { body.push(n.textContent); bodyM.push(runs(n)); }
   });
   const pick = (a, idx) => Object.fromEntries(idx.map(i => [i, a[i]]));
-  return JSON.stringify({ body: pick(body, WANT_BODY), fns: pick(fns, WANT_FNS) });
+  return JSON.stringify({ body: pick(body, WANT_BODY), fns: pick(fns, WANT_FNS),
+                          bodyMarks: pick(bodyM, WANT_BODY), fnsMarks: pick(fnsM, WANT_FNS) });
 })()"""
 
 
@@ -335,10 +403,21 @@ def cmd_plan(piece_dir, live_json, out_plan):
         print(f"  fns   draft={len(d['fns'])}   live={live['counts']['fns']}")
         sys.exit(3)
 
+    # Marks are classified only when ALL THREE sides can speak: a baseline sealed before
+    # marks were tracked, or a scan JSON from an older snippet, yields `unknown` rows rather
+    # than a comfortable `unchanged`.
+    have_marks = baseline_has_marks(base) and 'bodyMarks' in live and 'fnsMarks' in live
+    bm = (base.get('bodyMarks'), [HM(r) for r in d['bodyMarks']], live.get('bodyMarks')) \
+        if have_marks else (None, None, None)
+    fm = (base.get('fnsMarks'), [HM(r) for r in d['fnsMarks']], live.get('fnsMarks')) \
+        if have_marks else (None, None, None)
+
     b_rows, b_struct = three_way('body', base['body'],
-                                 [H(t) for t in d['body']], live['body'], d['body'])
+                                 [H(t) for t in d['body']], live['body'], d['body'],
+                                 base_m=bm[0], draft_m=bm[1], live_m=bm[2])
     f_rows, f_struct = three_way('footnote', base['fns'],
-                                 [H(t) for t in d['fns']], live['fns'], d['fns'])
+                                 [H(t) for t in d['fns']], live['fns'], d['fns'],
+                                 base_m=fm[0], draft_m=fm[1], live_m=fm[2])
     rows = b_rows + f_rows
     structural = b_struct + f_struct
 
@@ -353,6 +432,9 @@ def cmd_plan(piece_dir, live_json, out_plan):
 
     plan = {
         'piece': os.path.basename(piece_dir), 'post_url': d['post_url'],
+        'marksTracked': have_marks,
+        'draftMarks': {'body': [mark_keys(r) for r in d['bodyMarks']],
+                       'fns': [mark_keys(r) for r in d['fnsMarks']]},
         'title': {'state': title_state, 'draft': d['title'], 'live': live['title']},
         'subtitle': {'state': sub_state, 'draft': d['subtitle'], 'live': live['subtitle']},
         'rows': rows, 'structural': structural,
@@ -368,27 +450,49 @@ def cmd_plan(piece_dir, live_json, out_plan):
     print(f"  subtitle {sub_state}" + ('' if sub_state in ('unchanged', 'converged')
                                         else f"   draft={d['subtitle']!r} live={live['subtitle']!r}"))
     print(f"  blocks   " + '  '.join(f"{k}={v}" for k, v in sorted(tally.items())))
+    mtally = {}
     for r in rows:
-        if r['state'] in ('pull', 'conflict', 'push'):
-            print(f"    {r['state']:9} {r['kind']:8} draft#{r['draftIdx']} live#{r['liveIdx']}")
+        mtally[r['markState']] = mtally.get(r['markState'], 0) + 1
+    print(f"  marks    " + '  '.join(f"{k}={v}" for k, v in sorted(mtally.items()))
+          + ('' if have_marks else
+             "   (this baseline predates mark tracking — formatting is NOT being checked; "
+             "seal after this sync to start)"))
+    for r in rows:
+        if r['state'] in ('pull', 'conflict', 'push') or r['markState'] in ('pull', 'conflict', 'push'):
+            mk = '' if r['markState'] in ('unchanged', 'unknown') else f"  marks:{r['markState']}"
+            print(f"    {r['state']:9} {r['kind']:8} draft#{r['draftIdx']} live#{r['liveIdx']}{mk}")
     if structural:
         print(f"  STRUCTURAL ({len(structural)}) — not auto-merged, resolve by hand:")
         for s in structural:
             print(f"    {s['side']:5} {s['kind']:8} {s.get('what')}"
                   + (f"  {s['text']!r}" if s.get('text') else ''))
-    need = [r for r in rows if r['state'] in ('pull', 'conflict')]
+    need = [r for r in rows if r['state'] in ('pull', 'conflict')
+            or r['markState'] in ('pull', 'conflict')]
+    mark_push = [r for r in rows if r['markState'] == 'push']
     print(f"\nwrote {out_plan}")
     if need:
         print(f"{len(need)} row(s) need live text: fetch <piece> {out_plan} <out.js>")
-    elif any(r['state'] == 'push' for r in rows) or title_state == 'push' or sub_state == 'push':
-        print("push-only: run substack_repatch.py to stage the edits.")
+        if any(r['markState'] in ('pull', 'conflict') for r in rows):
+            print("  NOTE: a formatting PULL is reported, never applied — bringing an italic back "
+                  "means writing `*` into the markdown at a mapped offset, and the run can "
+                  "straddle syntax already there. `pull` will name the block and the runs; you "
+                  "edit draft.md.")
+    elif (any(r['state'] == 'push' for r in rows) or mark_push
+          or title_state == 'push' or sub_state == 'push'):
+        print("push-only: run substack_repatch.py to stage the edits."
+              + (f"  ({len(mark_push)} of them {'is' if len(mark_push) == 1 else 'are'} "
+                 f"FORMATTING-only — invisible to reader-text, applied as real marks by the "
+                 f"repatch engines)" if mark_push else ''))
     else:
-        print("nothing to do.")
+        print("nothing to do." + ('' if have_marks else
+              "  (…as far as TEXT goes; this baseline records no marks, so formatting was "
+              "not compared. Seal to start checking it.)"))
 
 
 def cmd_fetch(piece_dir, plan_json, out_js):
     plan = json.load(open(plan_json))
-    need = [r for r in plan['rows'] if r['state'] in ('pull', 'conflict')]
+    need = [r for r in plan['rows'] if r['state'] in ('pull', 'conflict')
+            or r.get('markState') in ('pull', 'conflict')]
     bidx = sorted({r['liveIdx'] for r in need if r['kind'] == 'body'})
     fidx = sorted({r['liveIdx'] for r in need if r['kind'] == 'footnote'})
     js = (FETCH_JS.replace('%HELPERS%', JS_HELPERS)
@@ -402,11 +506,24 @@ def _summarize(old, new):
     return '; '.join(f'{o[:40]!r} -> {n[:40]!r}' for o, n in d[:3]) + (' …' if len(d) > 3 else '')
 
 
+def _fmt_marks(plan, lt, row):
+    """One row's formatting, both sides, in the only form a human can act on: the words."""
+    kind = 'fns' if row['kind'] == 'footnote' else 'body'
+    live_runs = (lt.get('fnsMarks' if kind == 'fns' else 'bodyMarks') or {}).get(str(row['liveIdx']))
+    draft_runs = (plan.get('draftMarks', {}).get(kind) or [None] * (row['draftIdx'] + 1))[row['draftIdx']]
+    fmt = lambda rs: ('  '.join(
+        f"{(r['kind'] if isinstance(r, dict) else r[0])}"
+        f"{(r['text'] if isinstance(r, dict) else r[1])!r}"
+        for r in rs) or '(none)') if rs is not None else '(not fetched)'
+    return f"live {fmt(live_runs)}  |  draft {fmt(draft_runs)}"
+
+
 def cmd_pull(piece_dir, plan_json, livetext_json):
     plan = json.load(open(plan_json))
     lt = json.load(open(livetext_json))
     d = draft_state(piece_dir)
-    conflicts = [r for r in plan['rows'] if r['state'] == 'conflict']
+    conflicts = [r for r in plan['rows'] if r['state'] == 'conflict'
+                 or r.get('markState') == 'conflict']
     if conflicts:
         print(f"REFUSING: {len(conflicts)} conflict(s) — the same block moved on both sides.")
         for r in conflicts:
@@ -415,13 +532,35 @@ def cmd_pull(piece_dir, plan_json, livetext_json):
             print(f"\n  {r['kind']} draft#{r['draftIdx']} / live#{r['liveIdx']}")
             print(f"    draft: {mine[:200]}")
             print(f"    live : {src[:200]}")
+            if r.get('markState') == 'conflict':
+                print(f"    FORMATTING also conflicts: {_fmt_marks(plan, lt, r)}")
         print("\nResolve each by hand in draft.md (or in Substack), then re-run scan/plan.")
         sys.exit(5)
 
     pulls = [r for r in plan['rows'] if r['state'] == 'pull']
+    # A FORMATTING pull is never applied, and that is a decision, not a gap. Bringing an
+    # italic back from Substack means writing `*` into the markdown at a mapped offset, and
+    # the run can straddle a link, a footnote marker or emphasis that is already there --
+    # the same class of edit `edit_block_source` refuses when it cannot map cleanly. So the
+    # report names the block and the exact runs, and a human writes the asterisks. The PUSH
+    # direction needs none of this: substack_repatch applies em/strong as real marks.
+    mark_pulls = [r for r in plan['rows'] if r.get('markState') == 'pull']
+    if mark_pulls:
+        print(f"{len(mark_pulls)} FORMATTING pull(s) — reported, NOT applied. Substack holds "
+              f"formatting draft.md does not:")
+        for r in mark_pulls:
+            print(f"  {r['kind']:8} draft#{r['draftIdx']} live#{r['liveIdx']}   {_fmt_marks(plan, lt, r)}")
+        print("  Add the emphasis to draft.md by hand (`*word*` / `**word**`), then re-run "
+              "scan/plan. Nothing above was changed for you.")
+
     if not pulls and plan['title']['state'] != 'pull' and plan['subtitle']['state'] != 'pull':
-        print("no pulls to apply.")
-        return
+        if not mark_pulls:
+            print("no pulls to apply.")
+            return
+        # draft.md still does NOT match the live post. Returning 0 here would tell a caller
+        # that reads only the status that the pull is finished, which is the whole family of
+        # bug this work exists to remove.
+        sys.exit(6)
 
     path = os.path.join(piece_dir, 'draft.md')
     src = open(path).read()
@@ -463,6 +602,10 @@ def cmd_pull(piece_dir, plan_json, livetext_json):
         print(f"\n{len(manual)} edit(s) could NOT be placed safely — apply by hand:")
         for r, msg in manual:
             print(f"  {r['kind']:8} draft#{r['draftIdx']}  {msg}")
+        sys.exit(6)
+    if mark_pulls:
+        # Exit non-zero: draft.md does NOT yet match the live post, and a caller that reads
+        # only the status must not be told the pull is finished.
         sys.exit(6)
 
 
@@ -600,7 +743,9 @@ def _render_at(piece_dir, rev, top):
                 shutil.copy2(src, tmp)
         open(os.path.join(tmp, 'draft.md'), 'w').write(blob)
         body, fns, _res, _iss = render_reader(tmp)
-        return [H(t) for t in body], [H(t) for t in fns]
+        bm, fm, _ok = render_marks(tmp)
+        return ([H(t) for t in body], [H(t) for t in fns],
+                [HM(r) for r in bm], [HM(r) for r in fm])
     finally:
         shutil.rmtree(tmp)
 
@@ -780,21 +925,34 @@ def cmd_detect(piece_dir, live_json):
     if not revs:
         print("no commits touch this draft — nothing to detect.")
         sys.exit(1)
-    print(f"{'rev':10} {'body':>14} {'footnotes':>14}   subject")
+    live_bm, live_fm = live.get('bodyMarks'), live.get('fnsMarks')
+    print(f"{'rev':10} {'body':>14} {'footnotes':>14} {'marks':>14}   subject")
     best, best_score = None, -1
     for rev in revs:
         try:
-            bh, fh = _render_at(piece_dir, rev, top)
+            bh, fh, bmh, fmh = _render_at(piece_dir, rev, top)
         except Exception as e:
             print(f"{rev:10} (render failed: {e})")
             continue
         bm = sum(1 for x, y in zip(bh, live['body']) if x == y)
         fm = sum(1 for x, y in zip(fh, live['fns']) if x == y)
         exact = (len(bh) == len(live['body']) and len(fh) == len(live['fns']))
-        score = bm + fm + (10000 if exact and bm == len(bh) else 0)
+        # Marks break the tie, and only the tie. Two revisions can match the live post on
+        # every word while only one of them matches its italics -- and the one that does is
+        # the state that was actually pushed. Weighted below a single text row so a scan with
+        # no mark data (an older snippet) changes nothing about which rev is chosen.
+        if live_bm is not None and live_fm is not None:
+            mm = (sum(1 for x, y in zip(bmh, live_bm) if x == y)
+                  + sum(1 for x, y in zip(fmh, live_fm) if x == y))
+            mtot = len(bmh) + len(fmh)
+            mcol = f'{mm:>6}/{mtot:<7}'
+            mbonus = (mm / mtot) if mtot else 0
+        else:
+            mm, mcol, mbonus = 0, f'{"-":>14}', 0
+        score = bm + fm + (10000 if exact and bm == len(bh) else 0) + mbonus
         subj = subprocess.run(['git', '-C', top, 'log', '-1', '--format=%s', rev],
                               capture_output=True, text=True).stdout.strip()[:54]
-        print(f"{rev:10} {bm:>6}/{len(bh):<7} {fm:>6}/{len(fh):<7}   {subj}")
+        print(f"{rev:10} {bm:>6}/{len(bh):<7} {fm:>6}/{len(fh):<7} {mcol}   {subj}")
         if score > best_score:
             best, best_score = rev, score
     print(f"\nbest match: {best}")
@@ -825,7 +983,10 @@ def cmd_resolve(piece_dir, live_json, args):
     d = draft_state(piece_dir)
     draft_h = {'body': [H(t) for t in d['body']], 'footnote': [H(t) for t in d['fns']]}
     live_h = {'body': live['body'], 'footnote': live['fns']}
+    draft_m = {'body': [HM(r) for r in d['bodyMarks']], 'footnote': [HM(r) for r in d['fnsMarks']]}
+    live_m = {'body': live.get('bodyMarks'), 'footnote': live.get('fnsMarks')}
     key = {'body': 'body', 'footnote': 'fns'}
+    mkey = {'body': 'bodyMarks', 'footnote': 'fnsMarks'}
     done = []
     i = 0
     while i < len(args):
@@ -840,6 +1001,12 @@ def cmd_resolve(piece_dir, live_json, args):
             sys.exit(1)
         base[key[kind]][idx] = (live_h[kind][idx] if mode == '--take-draft'
                                 else draft_h[kind][idx])
+        # A row is one row in both domains. Moving its text hash and leaving its mark hash
+        # behind would resolve the words and quietly re-open the formatting as a fresh
+        # conflict on the next plan.
+        if baseline_has_marks(base) and live_m[kind] is not None:
+            base[mkey[kind]][idx] = (live_m[kind][idx] if mode == '--take-draft'
+                                     else draft_m[kind][idx])
         done.append(f"{mode[7:]:5} {kind}#{idx}")
         i += 2
     base['note'] = base.get('note', '') + f" | resolved by hand: {', '.join(done)}"
@@ -851,15 +1018,18 @@ def cmd_resolve(piece_dir, live_json, args):
 
 
 def cmd_seed(piece_dir, mode, arg):
+    body_m = fns_m = None
     if mode == '--from-draft':
         d = draft_state(piece_dir)
         title, subtitle = d['title'], d['subtitle']
         body_h, fns_h = [H(t) for t in d['body']], [H(t) for t in d['fns']]
+        body_m, fns_m = [HM(r) for r in d['bodyMarks']], [HM(r) for r in d['fnsMarks']]
         note = 'seeded from draft.md as it stands'
     elif mode == '--from-live':
         live = json.load(open(arg))
         title, subtitle = live['title'], live['subtitle']
         body_h, fns_h = live['body'], live['fns']
+        body_m, fns_m = live.get('bodyMarks'), live.get('fnsMarks')
         note = 'seeded from the live post'
     elif mode == '--from-git':
         # git must run in the PIECE's repo, not the framework submodule this file lives in
@@ -876,6 +1046,7 @@ def cmd_seed(piece_dir, mode, arg):
                     shutil.copy2(s, tmp)
             open(os.path.join(tmp, 'draft.md'), 'w').write(blob)
             body, fns, _res, _iss = render_reader(tmp)
+            bmarks, fmarks, _ok = render_marks(tmp)
         finally:
             shutil.rmtree(tmp)
         # publish.yaml AS AT THAT REV too: the title/subtitle pushed then are the baseline,
@@ -893,12 +1064,16 @@ def cmd_seed(piece_dir, mode, arg):
             man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
         title, subtitle = man.get('title', ''), man.get('subtitle', '')
         body_h, fns_h = [H(t) for t in body], [H(t) for t in fns]
+        body_m, fns_m = [HM(r) for r in bmarks], [HM(r) for r in fmarks]
         note = f'seeded from draft.md + publish.yaml at {arg}'
     else:
         print("seed needs --from-git <rev> | --from-draft | --from-live <live.json>")
         sys.exit(1)
-    p = write_baseline(piece_dir, title, subtitle, body_h, fns_h, note)
-    print(f"wrote {p} — {note} (body={len(body_h)} fns={len(fns_h)})")
+    p = write_baseline(piece_dir, title, subtitle, body_h, fns_h, note,
+                       body_m=body_m, fns_m=fns_m)
+    print(f"wrote {p} — {note} (body={len(body_h)} fns={len(fns_h)}"
+          + (")" if body_m is not None else
+             ", NO MARKS — the source carried none, so formatting will read `unknown`)"))
 
 
 def _warn_if_draft_uncommitted(piece_dir):
@@ -939,6 +1114,29 @@ def cmd_seal(piece_dir, live_json):
     live = json.load(open(live_json))
     d = draft_state(piece_dir)
     db, df = [H(t) for t in d['body']], [H(t) for t in d['fns']]
+    dbm, dfm = [HM(r) for r in d['bodyMarks']], [HM(r) for r in d['fnsMarks']]
+
+    # A seal says "these two are the same now". Before marks were compared it could say that
+    # while an italic was missing, and then the baseline made the lie permanent: every future
+    # plan measured against a state that was never true. So formatting is a sealing condition,
+    # not a footnote to one.
+    if 'bodyMarks' in live and 'fnsMarks' in live:
+        if dbm != live['bodyMarks'] or dfm != live['fnsMarks']:
+            print("REFUSING to seal: the words agree but the FORMATTING does not.")
+            for kind, a, b, runs in (('body', dbm, live['bodyMarks'], d['bodyMarks']),
+                                     ('footnote', dfm, live['fnsMarks'], d['fnsMarks'])):
+                for i, (x, y) in enumerate(zip(a, b)):
+                    if x != y:
+                        print(f"    {kind} #{i}  draft marks: "
+                              + (', '.join(f'{k}{t!r}' for k, t, _h in mark_keys(runs[i])) or '(none)'))
+            print("  Push it (substack_repatch applies em/strong), or bring the live formatting")
+            print("  into draft.md by hand, then seal. Sealing now would record a state that is")
+            print("  not true and hide the difference from every later sync.")
+            sys.exit(7)
+    else:
+        print("NOTE: this scan carries no mark data (an older scan snippet). Sealing the text")
+        print("      only; formatting will read as `unknown` until a fresh scan is sealed.")
+
     if db != live['body'] or df != live['fns']:
         print("REFUSING to seal: draft and live still differ — sync is not complete.")
         print(f"  body  draft={len(db)} live={len(live['body'])}  "
@@ -950,8 +1148,14 @@ def cmd_seal(piece_dir, live_json):
         print("REFUSING to seal: title/subtitle still differ between publish.yaml and live.")
         sys.exit(7)
     _warn_if_draft_uncommitted(piece_dir)
-    p = write_baseline(piece_dir, d['title'], d['subtitle'], db, df, 'sealed: draft and live agree')
-    print(f"sealed {p} (body={len(db)} fns={len(df)})")
+    marks_ok = 'bodyMarks' in live and 'fnsMarks' in live
+    p = write_baseline(piece_dir, d['title'], d['subtitle'], db, df,
+                       'sealed: draft and live agree' + (' (text and marks)' if marks_ok else
+                                                         ' (text only — scan carried no marks)'),
+                       body_m=dbm if marks_ok else None, fns_m=dfm if marks_ok else None)
+    print(f"sealed {p} (body={len(db)} fns={len(df)}"
+          + (f" marks={sum(len(r) for r in d['bodyMarks']) + sum(len(r) for r in d['fnsMarks'])})"
+             if marks_ok else ", no marks recorded)"))
 
 
 def main():

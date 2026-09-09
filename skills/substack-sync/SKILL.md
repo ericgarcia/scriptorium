@@ -35,6 +35,34 @@ Conflicts need the same block edited on both sides between syncs, so they should
 exceedingly rare. Rare is not never, and the baseline exists so that when one happens it is
 **reported** rather than silently resolved in whichever direction the tool ran.
 
+### Every row is classified TWICE: text, and marks
+
+The table above ran on reader-text alone until 2026-09-09, and reader-text cannot see
+formatting. A block whose only difference is an `<em>` hashes identically on both sides, so
+it classified as **unchanged** and sync ran straight past it — the same false pass that
+`substack_verify` and `substack_repatch` had, one tool over, and worse here because a
+**seal writes the mistake down** and every later sync then measures against a state that was
+never true.
+
+So a row now carries `state` (the words) and `markState` (the `em`/`strong`/link runs),
+classified by the same five rules. Read them together:
+
+- `plan` prints a **`marks`** tally beside `blocks`, and flags any row whose formatting
+  moved even when its text did not.
+- A **formatting push** needs nothing special — `substack_repatch` applies `em`/`strong` as
+  real ProseMirror marks.
+- A **formatting pull is reported, never applied.** Bringing an italic back from Substack
+  means writing `*` into the markdown at a mapped offset, and the run can straddle a link, a
+  footnote marker, or emphasis already there. `pull` names the block and the exact runs
+  (`live em'satsang' em'kirtan' | draft (none)`) and **exits non-zero**; you edit `draft.md`.
+- `seal` **refuses** while the words agree and the formatting does not.
+
+**`unknown` is not `unchanged`.** A baseline sealed before this existed has no mark hashes —
+34 of them did — and its rows report `unknown`, with `plan` saying in as many words that
+formatting was not compared. A tool that answers "no change" when it never looked is the
+failure being fixed, wearing a different hat. Those baselines start carrying marks at their
+next completed `seal`; nothing needs re-sealing on purpose.
+
 ## Preconditions
 
 - The piece is live and `publish.yaml` carries **`post_url`** (the *editor* address,
@@ -245,7 +273,9 @@ temporary directory — so it can never touch a live post. It replaced a bash lo
   Seal afterwards as usual. It still never guesses: every refusal names the block.
 - **Never pass a flag to force past a refusal.** The refusals here exist because each one
   has already been the failure mode once.
-- **Seal every completed sync.** The baseline is the whole mechanism.
+- **Seal every completed sync.** The baseline is the whole mechanism. A seal now records
+  **both** domains, and refuses while either disagrees — including the case where every word
+  matches and an italic does not.
 - **A draft that is deliberately ahead of its post gets declared, not sealed.** A rewrite
   drafted and waiting on the author's read is a normal state on this desk, and the corpus
   baseline check would otherwise report it as a failure for as long as it lasts — which is how
@@ -287,5 +317,17 @@ damaged.
   is now flattened (curly → straight, a length-preserving substitution so offsets stay
   valid), and any run actually inserted is smartened to match the document it lands in.
 
-The lesson both share: **a guard that cannot see the failure it is named for is worse than
-no guard**, because it reads as coverage. A count cannot see a permutation.
+A third, found 2026-09-09 and the same shape:
+
+- **Formatting was invisible to every domain this desk compares.** Reader-text is tags
+  stripped, so wrapping an existing word in `<em>` produced **zero diff** everywhere:
+  `substack_repatch` reported `unchanged` and applied nothing, `substack_verify` reported
+  MATCH, and the sync baseline recorded a text hash that could not tell the two apart.
+  Measured on `rising-after-falls`: the regenerated patch was **byte-identical in size to
+  the previous one (29,782 bytes)**. Marks are now a second domain everywhere — enumerated
+  from both sides by one scanner, hashed into the baseline, applied by the repatch engines.
+  The corresponding guardrail is above; the detail is in the `publish` skill's **0b-marks**.
+
+The lesson all three share: **a guard that cannot see the failure it is named for is worse
+than no guard**, because it reads as coverage. A count cannot see a permutation, and a hash
+of the words cannot see the italics.

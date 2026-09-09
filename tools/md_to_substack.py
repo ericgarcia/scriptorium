@@ -615,6 +615,18 @@ def mark_keys(runs):
     return [(k, re.sub(r'\s+', ' ', flatten_quotes(t)).strip(), h) for _s, _e, k, t, h in runs]
 
 
+def mark_sig(runs):
+    """One block's marks as a single canonical string, for hashing.
+
+    Must agree BYTE FOR BYTE with the JS `marksOf(node).map(markKey).join('\u0001')` in
+    substack_repatch's JS_HELPERS — the two are the same signature computed on the two sides
+    of the wire, and a baseline hash is worthless if they can disagree. `\u0001` separates
+    runs because it is not whitespace, so the normalization H() applies to the whole string
+    cannot merge two runs into one.
+    """
+    return '\u0001'.join(f'{k} {t} {h}' for k, t, h in mark_keys(runs))
+
+
 def render_marks(piece_dir):
     """(body_marks, fn_marks, offsets_ok) — the mark layer of render_reader.
 

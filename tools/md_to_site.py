@@ -15,8 +15,10 @@ WHAT IT REFUSES TO DO
   best-effort export — guessing at that boundary is how an editorial note reaches a
   reader.
 
-  Publish a piece nobody opted in. `site: true` in publish.yaml is required. A
-  directory copy would eventually ship a draft; an allowlist cannot.
+  Publish a piece nobody opted in. A piece must DECLARE its destinations in
+  publish.yaml -- `outlets:` naming this outlet, or the legacy `site: true`. A
+  directory copy would eventually ship a draft; an allowlist cannot. There is no
+  default and no inference: a piece that names no outlet is exported nowhere.
 
 USAGE
   python3 md_to_site.py <bundle-dir> <piece-dir>... [options]
@@ -27,7 +29,9 @@ USAGE
     --max-width PX         longest edge of a derived image (default 1600)
     --quality N            WebP quality (default 82)
     --image-store NAME     repo (default) | s3 — recorded in bundle.json
-    --force                export even pieces without `site: true`
+    --outlet NAME          export only pieces whose publish.yaml `outlets:` names NAME
+    --include-unpublished  export pieces with no `published_at` (held back by default)
+    --force                export even pieces that opted into nothing
     --apply                write. Dry run by default.
 
 EXIT
@@ -273,17 +277,48 @@ def main():
     ap.add_argument('--max-width', type=int, default=1600)
     ap.add_argument('--quality', type=int, default=82)
     ap.add_argument('--image-store', default='repo', choices=('repo', 's3'))
+    ap.add_argument('--include-unpublished', action='store_true',
+                    help='export pieces with no published_at (default: hold them back)')
+    ap.add_argument('--outlet', default=None,
+                    help='export only pieces whose publish.yaml `outlets:` names this outlet')
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--apply', action='store_true')
     o = ap.parse_args()
 
-    selected, skipped = [], []
+    def opted_in(piece):
+        m = load_manifest(piece)
+        outlets = m.get('outlets')
+        if isinstance(outlets, list):
+            # `outlets:` is the explicit declaration of where a piece goes. When the
+            # caller names an outlet, membership in that list is the only thing that
+            # counts -- a piece that does not name it is not exported here, even if a
+            # legacy `site: true` is still sitting in the manifest.
+            if o.outlet:
+                return o.outlet in outlets
+            return bool(outlets)
+        return m.get('site') is True      # legacy: pre-outlets manifests
+
+    selected, skipped, unpublished = [], [], []
     for p in o.pieces:
-        (selected if (load_manifest(p).get('site') is True or o.force)
-         else skipped).append(p)
+        if not (opted_in(p) or o.force):
+            skipped.append(p); continue
+        # An outlet declaration is INTENT; publication is FACT. A piece that has not
+        # been published must not reach a public host just because it named one --
+        # that ships an unfinished draft, and on a piece whose first outlet is still
+        # pending it publishes out of order. Caught 2026-09-09, when a composed-but-
+        # unpublished piece entered a bundle bound for a live site.
+        if not load_manifest(p).get('published_at') and not o.include_unpublished:
+            unpublished.append(p); continue
+        selected.append(p)
+    if unpublished:
+        names = ', '.join(os.path.basename(x.rstrip('/')) for x in unpublished)
+        print(f"  held back, not published yet ({len(unpublished)}): {names}", file=sys.stderr)
+        print(f"  -> pass --include-unpublished only if this outlet is meant to carry drafts",
+              file=sys.stderr)
     if not selected:
-        die(3, f"no piece has `site: true` in publish.yaml "
-               f"({len(skipped)} skipped). Add it, or pass --force.")
+        want = f"`outlets:` naming {o.outlet!r}" if o.outlet else "`outlets:` (or legacy `site: true`)"
+        die(3, f"no piece declares {want} in publish.yaml "
+               f"({len(skipped)} skipped). Declare it, or pass --force.")
 
     rows = [export_piece(p, o.bundle, o) for p in selected]
 

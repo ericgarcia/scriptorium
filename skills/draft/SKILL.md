@@ -13,6 +13,30 @@ the loop — write freely, revise later, let git remember old versions.
 1. Identify the **piece** and its **target style** from `pieces/<name>/README.md`
    (the `Style:` line). If the piece or style is ambiguous, ask — don't guess a
    voice.
+1a. **When the piece is NEW, settle its outlets before drafting, and confirm them with
+   the author.** A piece declares where it will be published in `publish.yaml`:
+
+   ```yaml
+   outlets:
+     - substack
+     - <other outlet>
+   ```
+
+   **Never select an outlet silently, and never leave the list empty.** Read the
+   instance's outlet registry (`publishing/outlets.md`), **propose** a set with a
+   one-line reason, and get an explicit yes — the same way a target style is settled.
+   Where a piece goes is an editorial decision about audience, not a deployment
+   detail, and the author is the one who makes it.
+
+   *Why this is here rather than in `publish`:* a piece that reaches the publish step
+   without a declared destination has already been written for nobody in particular,
+   and the pressure at that point is to pick the obvious one and move on. The desk did
+   exactly that — it published to a single outlet for weeks while a second live host
+   sat unfed, because nothing had ever asked. `publish` now **refuses** a manifest with
+   no `outlets:` rather than defaulting, so the question cannot be skipped; this step
+   is where it gets answered while it is still cheap. (Eric, 2026-09-09: *"the skill for
+   creating a piece should define which outlets it will go to and confirm with the user.
+   we should not silently select one."*)
 2. Load the style as steering, in this order:
    - `styles/<style>/style.md` — the constitution (voice, do/don't).
    - `styles/<style>/config.yaml` — mechanical knobs. Honor them literally

@@ -12,10 +12,32 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 ## Preconditions
 
 - The piece is finished (`pieces/<name>/draft.md`) and has a **manifest**
-  `pieces/<name>/publish.yaml` — `title`, `subtitle`, `footnotes` (native|endnotes|none),
-  `send_email` (default false), optional `cover`, optional **`post_url`** (record it once the
-  piece is live; its presence switches this skill into **republish mode** — see below), and
-  optional **`public_url`**.
+  `pieces/<name>/publish.yaml` — **`outlets`** (see below), `title`, `subtitle`, `footnotes`
+  (native|endnotes|none), `send_email` (default false), optional `cover`, optional **`post_url`**
+  (record it once the piece is live; its presence switches this skill into **republish mode** —
+  see below), and optional **`public_url`**.
+- **`outlets:` says where the piece goes, and this skill NEVER picks one.** It is a list of
+  instance-defined outlet names (`publishing/outlets.md` in the instance):
+
+  ```yaml
+  outlets:
+    - substack
+    - <other outlet>
+  ```
+
+  **A missing or empty `outlets:` is a STOP, not a default.** Do not publish to "the obvious
+  one"; ask the author which outlets this piece is for, write the answer into the manifest, then
+  continue. The set is normally settled when the piece is created (the `draft` skill asks), so an
+  absent list means the question was never put — which is exactly the case where guessing is
+  worst. **Publish to every outlet named, and verify each one separately.** A piece that is live
+  on one outlet and missing from another is *not* published; it is half-published, and nothing
+  will tell you unless you look.
+
+  *Measured 2026-09-09:* the desk ran for weeks publishing to Substack alone while a second live
+  host stood unfed, because this skill named only one destination and nothing ever compared the
+  two. The piece published that morning was HTTP 200 on one host and **404 on the other**, and it
+  took a hand-run `curl` to notice. (Legacy manifests may still carry `site: true` instead of an
+  outlets list; treat it as the site outlet and migrate it when you touch the piece.)
 - **`post_url` and `public_url` are different URLs and both are needed.** `post_url` is the
   **editor** address (`/publish/post/<id>`) that republish drives. `public_url` is the
   **canonical reader** address (`/p/<slug>`) — the only one that may appear in another essay's
@@ -566,6 +588,44 @@ python3 framework/tools/substack_verify.py --archive --fresh
 > **403 to Azure IP ranges** on every path — page, API, and RSS, with any user agent. It
 > is an IP block, so there is no header that fixes it. Run it locally, or from a
 > self-hosted runner.
+
+## The other outlets — export the bundle, hand it over, verify the reader URL
+
+Substack is bespoke because Substack has no write API. **Nothing else has to be**, and the rest
+of `outlets:` is served by one neutral artifact rather than one bespoke integration per host.
+
+**Do this as part of publishing, not afterwards.** A piece is published when every outlet it
+names has it. Run this once the piece is confirmed live on the outlets that need a human click,
+so the exported text is the text readers actually got.
+
+1. **Export the bundle** — the piece must declare the outlet, or it is not exported:
+
+   ```
+   python3 framework/tools/md_to_site.py <bundle-dir> pieces/<name> --outlet <outlet> --apply
+   ```
+
+   `md_to_site.py` strips the same things the Substack converter strips — the scaffold above the
+   first `---`, HTML comments, and anything after a `†` in a footnote — and **refuses** a draft
+   with no `---` rather than guessing where the desk ends and the essay begins. Pass
+   `--canonical-base` and `--syndicated substack` so the bundle records which URL is canonical
+   and which is syndication; getting that backwards is an SEO decision made by accident.
+
+2. **Hand the bundle to the destination.** How is instance-specific and lives in the instance's
+   `publishing/` notes — never here. The framework's job ends at the bundle; the instance's note
+   says where it goes and what builds it.
+
+3. **Verify on the reader URL, exactly as with Substack.** A build that succeeded is not a page
+   that exists. Fetch the piece's public address on that outlet and confirm it returns 200 and
+   contains the text — the same *check, don't infer* rule the Substack half of this skill is
+   built on. **A 404 here is the normal failure**, because a piece can be absent from a bundle
+   for a quiet reason (it never declared the outlet) and every step will still report success.
+
+4. **Record the outlet's URL** in `publish.yaml` beside `public_url`, so a sibling essay's
+   cross-link can reach for the right host.
+
+**Half-published is the failure to design against.** Live on one outlet and missing from another
+is the state nothing reports, because each half looks complete from inside itself. Check every
+outlet in the list, every time, and say which ones you confirmed.
 
 ## How it works (re-probe here if Substack changes)
 

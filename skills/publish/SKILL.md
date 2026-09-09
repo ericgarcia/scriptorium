@@ -627,6 +627,30 @@ so the exported text is the text readers actually got.
 is the state nothing reports, because each half looks complete from inside itself. Check every
 outlet in the list, every time, and say which ones you confirmed.
 
+5. **Audit the outlets against each other** — the check that looks across, rather than each
+   outlet checking itself:
+
+   ```
+   python3 framework/tools/outlet_audit.py            # after any publish
+   ```
+
+   It reads the instance's outlet registry (`publishing/outlets.yaml`; the framework holds no
+   URLs), and for every piece that is **published and declares an outlet** it fetches that
+   outlet's reader URL cache-busted and expects 200. It also runs the **reverse** direction from
+   each outlet's sitemap — every live URL must be a piece the desk knows — which is the only
+   direction that can see a page the desk never produced. **Exit 3 is drift; exit 2 is "could not
+   reach", which never wears the same face as a pass.**
+
+   Two things it deliberately does *not* treat as failures: a piece that declares an outlet but
+   **is not published yet** (reported and skipped — declaration is intent, publication is fact),
+   and a legacy manifest that opts in with `site: true` instead of an `outlets:` list (counted,
+   and reported as a migration count).
+
+   **Record the outlet's URL in the manifest** (`site_url`, `public_url`) rather than relying on
+   the audit to guess it. A guessed URL is derived from a slug, and slugs diverge: one piece
+   publishes as `theythem` on one outlet and `they-them` on another, and a retitled piece keeps
+   its old directory name for ever. A recorded URL always wins over a derived one.
+
 ## How it works (re-probe here if Substack changes)
 
 - Substack's editor is **Tiptap** over ProseMirror, reachable at

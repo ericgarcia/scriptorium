@@ -60,6 +60,9 @@ USAGE
     # any text payload the same way (the base64 footnote carrier):
     python3 framework/tools/md_to_clipboard.py --text-file payload.b64 --paste --expect-url publish/post/<id>
 
+    # an inline HTML fragment over the editor's current selection (a link or italic added to a live run):
+    python3 framework/tools/md_to_clipboard.py --html-file run.html --paste --expect-url publish/post/<id>
+
     # legacy two-step (load now, ⌘V from the browser tool later) — still lease-guarded:
     python3 framework/tools/md_to_clipboard.py <piece-dir> [--fn-out notes.js]   # holds the lease
     python3 framework/tools/md_to_clipboard.py <piece-dir> --verify                # right before ⌘V
@@ -373,6 +376,32 @@ def text_mode(path: str, paste: bool, expect_url: str, app: str, wait: float) ->
             drop_pasteboard()
 
 
+def html_mode(path: str, paste: bool, expect_url: str, app: str, wait: float) -> None:
+    """Paste an inline HTML fragment over the editor's current selection, lease-guarded, one
+    process. Select the old run in the editor first; the paste replaces it.
+
+    MEASURED 2026-09-09 (In Vain, a live post): Substack's paste handler, given an inline-only
+    fragment over a text selection, keeps the TEXT and DROPS EVERY MARK — `<a><em>…</em></a>`
+    landed as plain text with `marks: []`. So this mode carries the words; the marks are then
+    applied through the editor's own transaction API (`tr.addMark(from, to,
+    schema.marks.link.create({href}))`, likewise `italic`), which is a URL and a range, not
+    prose. A whole-body paste (block-level HTML) keeps its marks; only the inline-over-selection
+    case strips them. There is no `setLink` command in Substack's Tiptap build."""
+    html = open(path, encoding='utf-8').read().strip()
+    take_pasteboard('html fragment %s (%s)' % (os.path.basename(path), _sha(html)), wait)
+    try:
+        set_clipboard_html(html)
+        print('clipboard: %d chars of text/html  sha256=%s  (read back off the pasteboard)' % (len(html), _sha(html)))
+        if paste:
+            do_paste(read_clipboard_html, html, expect_url, app, 'html fragment')
+        else:
+            print('holding the pasteboard lease; press ⌘V in the editor, then --release.')
+            return
+    finally:
+        if paste:
+            drop_pasteboard()
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     paste = '--paste' in sys.argv
@@ -385,6 +414,10 @@ def main():
         print('released the pasteboard lease' if ok and rec else
               ('no pasteboard lease held' if ok else 'pasteboard lease is %s\'s, not this session\'s' % rec.get('session')))
         return
+
+    html_file = _opt('--html-file')
+    if html_file:
+        return html_mode(html_file, paste, expect_url, app, wait)
 
     text_file = _opt('--text-file')
     if text_file:

@@ -65,6 +65,18 @@ landed on shared singletons**, so those are the things with rules.
   the corpus against itself and reports any slug labelled with two different titles, using each
   README's H1 to say which side is right. **`log/` and `corrections.md` are exempt** — they are
   append-only records of what was true when written, and an old title there is history, not rot.
+- **The manifest is the witness; the prose is written by hand.** `publish.yaml` is kept
+  current by the sync tools against the live post — a doc calling a piece unpublished is
+  therefore a claim about the past, and four times in one week it was wrong (*In Vain*,
+  *The Mask Comes Off Last*, *Rising After Falls*, all still described as drafts after they
+  went live). `python3 framework/tools/check_status.py --outlets publishing/outlets.yaml`
+  reports prose that contradicts a manifest, and `--prefer <outlet>` finds links still
+  pointing at an old home. **Exempt, on the same grounds as `check_refs.py`:** `log/`,
+  `corrections.md`, anything under a dated heading, any line marking its own supersession,
+  and the generated `DASHBOARD.md`. **It cannot see a stale DECISION** — the charter went on
+  calling the Fellowship's domain "open, and Eric's call" after the site shipped, and no
+  file records that a decision was made, so nothing disagrees. That one still needs a human
+  re-reading.
 - **Never hard-code a localhost port.** Use `framework/tools/session_port.py`, which derives one
   from the session and **fails loudly** when it is taken. A fixed port plus a swallowed bind error
   once served one session's code to another session's browser. And **identify fetched bytes at the

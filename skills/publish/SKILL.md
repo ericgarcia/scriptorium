@@ -133,6 +133,38 @@ first.
    advance; a recompose still drops the embed and it must be **re-added by hand in the composer
    afterwards.** Never resolve the refusal by deleting the embed from the post.
 
+0b-marks. **A formatting-only edit was invisible to the entire chain — the same shape as
+   0b-embeds, one layer down.** `substack_verify` and both `substack_repatch` engines compared
+   READER-TEXT: tags stripped, entities unescaped, whitespace collapsed. Wrapping a word that is
+   already in the post in `<em>` changes none of that, so it produced **zero diff**.
+
+   Measured on `rising-after-falls`, 2026-09-09: after italicising *satsang* and *kirtan*, the
+   regenerated surgical patch was **byte-identical in size to the previous one (29,782 bytes)**.
+   The failure mode was the dangerous one — a **false pass**: the patcher reported `unchanged`
+   and applied nothing, and the digest then reported **MATCH** with the italic simply not there.
+
+   The tools now enumerate the **marked runs** — `em`, `strong`, and `link` with its href — from
+   both sides and compare them for count, string and order:
+
+   * `substack_verify` reports a formatting-only difference as **`DRIFT-MARKS`**, distinct from
+     text drift, and prints a `marks` column beside `body` and `fn`. Read the kind: DRIFT means a
+     word changed, DRIFT-MARKS means the words are right and the formatting is not.
+   * `substack_repatch` (both engines) **applies** a missing or stray `em`/`strong` as a real
+     ProseMirror mark — the block located by text, its text nodes walked to map string offsets to
+     absolute positions (a block is split into several runs by its footnote anchors), the range
+     **read back and asserted** to equal the exact string before `addMark` is dispatched. The
+     report carries `marks: {applied, review, failed, unchanged}`.
+   * **Link marks are reported, never applied.** A link mark carries Substack's own attributes;
+     the safe repair is the structural engine re-inserting that block from the converter's HTML.
+   * A run is a **span of formatting, not an element**: Substack serves `**a _b_ c**` back as
+     three `<strong>` elements around the `<em>`, so contiguous spans of the same kind are
+     coalesced before anything is compared. Skipping that reported drift on every
+     bold-containing-an-italic in the corpus — 8 pieces of 34, none of them real.
+
+   The first full sweep after this landed (2026-09-09, 34 live posts) found **7 pieces with real
+   formatting drift** that every previous run had passed. The lesson is 0b-embeds' lesson again:
+   **the scrape defines what can be checked, and what it does not collect cannot be verified.**
+
 0b-links. **Status-check the in-body cross-links:**
    `python3 framework/tools/check_links.py pieces/<name>` — exits non-zero and names any link
    that does not resolve. A cross-link URL copied out of the scaffold is **unverified by

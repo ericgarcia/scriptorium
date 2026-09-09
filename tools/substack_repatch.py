@@ -16,7 +16,21 @@ JS snippet that, run once in the OPEN editor of the *live* post, will:
   4. otherwise replace only the changed run inside each changed node — preserving the
      surrounding text, the node, and the marks (bold/italic/links) across the edit —
      plus the title/subtitle if they changed;
-  5. return a JSON report (applied / unchanged / footnoteChanges / structural / failed).
+  5. reconcile the MARKS themselves, which no text comparison can see: the em/strong runs
+     the draft has and the live post lacks are added, the ones it no longer has are
+     removed, and link drift is reported rather than guessed at;
+  6. return a JSON report (applied / unchanged / marks / footnoteChanges / structural / failed).
+
+Step 5 exists because steps 1-4 were measurably blind. Everything they compare is
+READER-TEXT, and wrapping a word that is already in the post in <em> changes none of it:
+on `rising-after-falls`, 2026-09-09, italicising two words produced a regenerated patch
+byte-identical in size to the previous one (29,782 bytes), which reported `unchanged` and
+applied nothing — a FALSE PASS, the one result a re-sync tool must never be able to give.
+Applying a mark is not a text replacement, so it does not go through the hunk machinery:
+the block is located by text, its text nodes walked to map string offsets to absolute
+ProseMirror positions (a block is split into several runs by its footnote anchors), the
+range read back and asserted to equal the exact string the draft marks, and only then is
+`addMark` dispatched.
 
 It never clicks anything. After it stages the edits, the "Continue" button lights up and
 a HUMAN reviews and clicks Continue -> Publish (choosing not to resend email). Same
@@ -57,7 +71,7 @@ the baseline, and only the delta to the current draft is applied.
 import sys, os, json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from md_to_substack import render_reader, read_manifest, flatten_quotes
+from md_to_substack import render_reader, read_manifest, flatten_quotes, render_marks
 
 
 def main():
@@ -71,8 +85,12 @@ def main():
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
     post_url = man.get('post_url', '')
     body, fns, residual, fn_issues = render_reader(piece_dir)
-
-    if residual:
+    body_marks, fn_marks, offsets_ok = render_marks(piece_dir)
+    if not (len(body_marks) == len(body) and len(fn_marks) == len(fns)):
+        print("Refusing: the mark scanner and render_reader disagree on how many blocks this "
+              "draft has. They walk the same list and must not diverge; fix that before "
+              "trusting either.")
+        sys.exit(5)
         print(f"WARNING: {len(residual)} footnote(s) still carry verify or clearance language (an ISO date, 'consulted …') after cleaning: "
               f"{residual}. Resolve the note (verify -> move behind a †, or delete) before republishing.")
         print("Refusing to write output.")
@@ -84,15 +102,19 @@ def main():
               f"footnote indexing the surgical diff aligns on.")
         sys.exit(4)
 
-    print(f"target body-blocks~{len(body)}  footnotes~{len(fns)}  "
+    n_marks = sum(len(r) for r in body_marks) + sum(len(r) for r in fn_marks)
+    print(f"target body-blocks~{len(body)}  footnotes~{len(fns)}  marked-runs~{n_marks}  "
           f"post_url~{post_url or '(none — set it in publish.yaml before republishing)'}")
+    if not offsets_ok:
+        print("NOTE: a block's scanned text did not reproduce its reader-text, so mark offsets "
+              "are advisory here; runs are still located in the live doc by their text.")
     if not post_url:
         print("NOTE: publish.yaml has no post_url. Republish mode targets the editor of an existing "
               "post; open https://<pub>.substack.com/publish/post/<id> for the live post, and record "
               "that post_url in publish.yaml so future runs are unambiguous.")
 
     if structural:
-        js = build_structural(piece_dir, man, body, fns)
+        js = build_structural(piece_dir, man, body, fns, body_marks, fn_marks)
         open(out_js, 'w').write(js)
         print(f"wrote {out_js} ({len(js)} bytes) — STRUCTURAL engine: run once in the live editor; "
               f"read `refused` and `ok` in the report; nothing is applied on a refusal")
@@ -103,9 +125,20 @@ def main():
           .replace('%TITLE%', json.dumps(man.get('title', '')))
           .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
           .replace('%BODY%', json.dumps(body))
-          .replace('%FNS%', json.dumps(fns)))
+          .replace('%FNS%', json.dumps(fns))
+          .replace('%BODYMARKS%', json.dumps(jsonable(body_marks)))
+          .replace('%FNMARKS%', json.dumps(jsonable(fn_marks))))
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} ({len(js)} bytes)")
+
+
+def jsonable(marks):
+    """render_marks' tuples as the shape the engines read: {start,end,kind,text,href}.
+
+    The offsets travel even though nothing compares them: they are the tiebreak that lets
+    the engine place a mark when the run's text occurs more than once in its block."""
+    return [[{'start': s_, 'end': e_, 'kind': k, 'text': t, 'href': h}
+             for s_, e_, k, t, h in runs] for runs in marks]
 
 
 # JS helpers shared by the full-document patcher below and by substack_sync's
@@ -222,11 +255,163 @@ JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe
     });
     if (out === null) out = nodeStartPos + node.nodeSize - 1;   // offset at the very end
     return out;
+  };
+
+  // ---------------------------------------------------------------- marks
+  // The layer reader-text cannot see. Everything above this line compares TEXT, and a
+  // formatting-only edit -- wrapping a word already in the post in <em> -- changes none of
+  // it. Measured on `rising-after-falls` 2026-09-09: after italicising two words the
+  // regenerated patch was byte-identical in size to the previous one, the engine reported
+  // `unchanged`, and it applied nothing. A no-op reported as success is the one failure
+  // mode a re-sync tool must not have, so marks are scraped, planned and applied as their
+  // own pass, after the text pass has finished.
+  const MARKKIND = { em: 'em', italic: 'em', strong: 'strong', bold: 'strong', link: 'link' };
+  const canonHref = h => { h = (h || '').trim(); return (h.endsWith('/') && (h.split('/').length - 1) > 3) ? h.slice(0, -1) : h; };
+
+  // A RUN IS A SPAN OF FORMATTING, NOT AN ELEMENT. ProseMirror stores `**a _b_ c**` as
+  // three text nodes each carrying the strong mark; the converter emits it as one <strong>
+  // wrapping an <em>, and Substack serves it back as three <strong> elements. Compared
+  // span-by-span those disagree on every bold-containing-an-italic in the corpus -- 8
+  // pieces of 34 on the first sweep, 2026-09-09, not one of them a real difference. So
+  // contiguous spans of the same kind (and, for a link, the same href) are merged before
+  // anything is compared. Merge first, trim after: a span is contiguous with its neighbour
+  // only while it still owns the space between them.
+  const marksOf = node => {
+    const raw = []; let acc = 0;
+    node.descendants(c => {
+      if (!c.isText) return true;
+      const len = c.text.length;
+      for (const m of (c.marks || [])) {
+        const kind = MARKKIND[m.type && m.type.name];
+        if (!kind) continue;
+        raw.push({ start: acc, end: acc + len, kind,
+                   href: kind === 'link' ? canonHref(m.attrs && m.attrs.href) : '' });
+      }
+      acc += len;
+      return true;
+    });
+    const text = flat(node.textContent);
+    raw.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1
+                        : a.href < b.href ? -1 : a.href > b.href ? 1 : a.start - b.start));
+    const merged = [];
+    for (const r of raw) {
+      const last = merged[merged.length - 1];
+      if (last && last.kind === r.kind && last.href === r.href && r.start <= last.end) last.end = Math.max(last.end, r.end);
+      else merged.push({ start: r.start, end: r.end, kind: r.kind, href: r.href });
+    }
+    const out = [];
+    for (const r of merged) {
+      let start = r.start, end = r.end;
+      while (start < end && /\s/.test(text[start])) start++;
+      while (end > start && /\s/.test(text[end - 1])) end--;
+      // Two spans, and the difference matters. The TRIMMED one is the run's identity --
+      // `<em>word </em>` and `<em>word</em>` are the same italic and must compare equal.
+      // The RAW one is what the mark actually occupies, and it is what a removal has to
+      // clear: strip only the trimmed range and the mark survives on the trailing space,
+      // invisible to a reader and invisible to the next scan, but still in the document.
+      if (end > start) out.push({ start, end, rawStart: r.start, rawEnd: r.end,
+                                  kind: r.kind, href: r.href, text: text.slice(start, end) });
+    }
+    out.sort((a, b) => a.start - b.start || b.end - a.end || (a.kind < b.kind ? -1 : 1));
+    return out;
+  };
+
+  // the EQUALITY domain for marks: kind, whitespace-collapsed text, href. Never offsets --
+  // an offset says where a run is, not what it is, and a block whose text merely moved
+  // would otherwise report drift that is not there.
+  const markKey = r => r.kind + ' ' + sameText(r.text) + ' ' + (r.href || '');
+
+  const lcsPairs = (A, B) => {
+    const n = A.length, m = B.length;
+    const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const pairs = []; let i = 0, j = 0;
+    while (i < n && j < m) { if (A[i] === B[j]) { pairs.push([i, j]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++; }
+    return pairs;
+  };
+
+  // Plan one node's mark reconciliation. LINKS ARE NEVER PLANNED FOR APPLICATION: a link
+  // mark carries Substack's own attributes, and guessing them onto a live public essay is
+  // the class of blind write this engine refuses everywhere else. Link drift is REPORTED
+  // so a human can see it; the structural engine restores a link the safe way, by
+  // re-inserting the block from the converter's own HTML.
+  const planMarks = (liveRuns, targetRuns) => {
+    const add = [], remove = [], links = [];
+    const paired = lcsPairs(liveRuns.map(markKey), targetRuns.map(markKey));
+    const liveMatched = new Set(paired.map(p => p[0])), targetMatched = new Set(paired.map(p => p[1]));
+    liveRuns.forEach((r, i) => { if (!liveMatched.has(i)) (r.kind === 'link' ? links : remove).push(r); });
+    targetRuns.forEach((r, j) => { if (!targetMatched.has(j)) (r.kind === 'link' ? links : add).push(r); });
+    return { add, remove, links };
+  };
+
+  // Where does a run the live doc lacks belong? By its TEXT, in the live doc's own
+  // coordinates -- the draft's offsets are into COLLAPSED reader-text and cannot index a
+  // live node that may hold a double space. The draft offset is used only to break a tie
+  // between repeated occurrences, and an unbroken tie REFUSES rather than guessing which
+  // "faith" in the paragraph was the one meant to go italic.
+  const locateRun = (liveFlat, runText, hint, taken) => {
+    const idxs = []; for (let i = liveFlat.indexOf(runText); i >= 0; i = liveFlat.indexOf(runText, i + 1)) idxs.push(i);
+    const free = idxs.filter(x => !taken.some(t => x < t.end && x + runText.length > t.start));
+    if (free.length === 1) return free[0];
+    if (!free.length) return -1;
+    const scored = free.map(x => ({ x, d: Math.abs(x - hint) })).sort((a, b) => a.d - b.d);
+    return (scored.length > 1 && scored[0].d === scored[1].d) ? -1 : scored[0].x;
+  };
+
+  const markTypeFor = (schema, kind) =>
+    (schema.marks && (schema.marks[kind] || schema.marks[{ em: 'italic', strong: 'bold', link: 'link' }[kind]])) || null;
+
+  // Apply one node's plan. Every range is READ BACK AND ASSERTED to equal the exact string
+  // the draft marks before a transaction is dispatched -- the same discipline the hand-made
+  // edit used on 2026-09-09, and the only thing standing between "italicise satsang" and
+  // "italicise whatever happens to sit at that offset".
+  const applyMarksTo = (ed, rec, targetRuns, label, out) => {
+    const liveRuns = marksOf(rec.node);
+    const plan = planMarks(liveRuns, targetRuns);
+    for (const r of plan.links)
+      out.review.push({ where: label, kind: 'link', text: r.text.slice(0, 60), href: r.href || null,
+                        why: 'link marks are not applied automatically -- recompose the block or fix it by hand' });
+    if (!plan.add.length && !plan.remove.length) { out.unchanged++; return; }
+    const liveFlat = flat(rec.node.textContent);
+    const ops = [];
+    for (const r of plan.remove)
+      ops.push({ op: 'remove', kind: r.kind, start: r.rawStart, end: r.rawEnd,
+                 text: liveFlat.slice(r.rawStart, r.rawEnd), label: r.text });
+    for (const r of plan.add) {
+      // occurrences already covered by a live run of the SAME kind are spoken for: that
+      // italic is already there, and it is not the one the draft is asking for.
+      const taken = liveRuns.filter(l => l.kind === r.kind).map(l => ({ start: l.start, end: l.end }));
+      const at = locateRun(liveFlat, r.text, r.start, taken);
+      if (at < 0) {
+        out.review.push({ where: label, kind: r.kind, text: r.text.slice(0, 60),
+                          why: 'the run text is absent from the live block, or repeated in it with no way to tell which occurrence is meant' });
+        continue;
+      }
+      ops.push({ op: 'add', kind: r.kind, start: at, end: at + r.text.length, text: r.text });
+    }
+    ops.sort((a, b) => b.start - a.start);
+    for (const o of ops) {
+      try {
+        const st = ed.state;
+        const type = markTypeFor(st.schema, o.kind);
+        if (!type) { out.review.push({ where: label, kind: o.kind, text: o.text.slice(0, 60), why: 'the editor schema has no mark of this kind' }); continue; }
+        const from = offsetToPos(rec.node, rec.pos, o.start), to = offsetToPos(rec.node, rec.pos, o.end);
+        const got = flat(st.doc.textBetween(from, to));
+        if (got !== o.text) throw new Error(label + ': the range holds ' + JSON.stringify(got.slice(0, 40)) + ', not ' + JSON.stringify(o.text.slice(0, 40)));
+        ed.view.dispatch(o.op === 'add' ? st.tr.addMark(from, to, type.create())
+                                        : st.tr.removeMark(from, to, type));
+        out.applied.push({ where: label, op: o.op, kind: o.kind, text: (o.label || o.text).slice(0, 60) });
+      } catch (e) {
+        out.failed.push(String(e));
+      }
+    }
   };"""
 
 # The engine. Runs in the live post's editor. Stages edits only; never publishes.
 REPATCH_JS = r"""(() => {
   const TITLE = %TITLE%, SUBTITLE = %SUBTITLE%, BODY = %BODY%, FNS = %FNS%;
+  const BODYMARKS = %BODYMARKS%, FNMARKS = %FNMARKS%;
   const root = document.querySelector('.ProseMirror');
   if (!root || !root.editor) return JSON.stringify({ error: 'no editor found — open the live post at /publish/post/<id>' });
   const ed = root.editor;
@@ -263,7 +448,8 @@ REPATCH_JS = r"""(() => {
     titleChanged, subtitleChanged, structural: false,
     bodyBlocks: { live: liveBody.length, target: BODY.length },
     footnotes: { live: liveFns.length, target: FNS.length },
-    applied: [], unchanged: 0, footnoteChanges: [], failed: [], reviewMarks: []
+    applied: [], unchanged: 0, footnoteChanges: [], failed: [], reviewMarks: [],
+    marks: { applied: [], review: [], failed: [], unchanged: 0 }
   };
 
   // structural guard: counts must match 1:1, else this is a rewrite — refuse.
@@ -360,12 +546,31 @@ REPATCH_JS = r"""(() => {
       report.failed.push({ kind: t.kind, block: t.idx, error: String(e) });
     }
   }
-  report.stagedEdits = report.applied.length;
+  // --- marks, after the text is settled -----------------------------------------------
+  // Runs last on purpose: a text hunk carries the marks of the run it replaces, so the
+  // document has to have stopped moving before "which words are italic" can be answered.
+  // `unchanged` above counts blocks whose TEXT did not change -- which is exactly the
+  // number that used to be reported as a clean no-op while an italic was missing.
+  const reMark = (targets, kind) => {
+    const recs = []; ed.state.doc.forEach((node, pos) => {
+      if (node.type.name === 'footnote') { if (kind === 'footnote') recs.push({ node, pos }); }
+      else if (isBodyNode(node) && kind === 'body') recs.push({ node, pos });
+    });
+    if (recs.length !== targets.length) {
+      report.marks.review.push({ where: kind, why: 'block count moved during the text pass -- marks not reconciled' });
+      return;
+    }
+    recs.forEach((rec, i) => applyMarksTo(ed, rec, targets[i] || [], kind + ' ' + i, report.marks));
+  };
+  reMark(BODYMARKS, 'body');
+  reMark(FNMARKS, 'footnote');
+
+  report.stagedEdits = report.applied.length + report.marks.applied.length;
   return JSON.stringify(report);
 })()
 """
 
-def build_structural(piece_dir, man, body, fns):
+def build_structural(piece_dir, man, body, fns, body_marks, fn_marks):
     """Bake the draft as a TARGET the structural engine can align against a live doc:
     per body block its reader-text, its HTML (quotes smartened outside tags), the names of
     the footnote anchors it carries, whether a divider precedes it, and a sha256/16 of the
@@ -387,16 +592,19 @@ def build_structural(piece_dir, man, body, fns):
         if not txt:
             continue
         tbody.append({'text': txt, 'html': smart(b), 'anchors': re.findall(r'\[\[FN(\w+)\]\]', b),
-                      'hrBefore': hr_before, 'hash': H(txt)})
+                      'hrBefore': hr_before, 'hash': H(txt),
+                      'marks': jsonable([body_marks[len(tbody)]])[0]})
         hr_before = False
     if [t['text'] for t in tbody] != list(body):
         print("Refusing: the structural builder's block list does not match render_reader's — "
               "the two walk the draft differently; fix that before trusting either.")
         sys.exit(5)
-    tfns = [{'name': str(n), 'text': t, 'hash': H(t)} for (n, _c), t in zip(ordered, fns)]
+    tfns = [{'name': str(n), 'text': t, 'hash': H(t), 'marks': jsonable([m])[0]}
+            for (n, _c), t, m in zip(ordered, fns, fn_marks)]
     target = {'title': man.get('title', ''), 'subtitle': man.get('subtitle', ''),
               'body': tbody, 'fns': tfns}
     print(f"structural target: {len(tbody)} body block(s), {len(tfns)} footnote(s), "
+          f"{sum(len(t['marks']) for t in tbody) + sum(len(t['marks']) for t in tfns)} marked run(s), "
           f"{sum(len(t['anchors']) for t in tbody)} anchor(s), "
           f"{sum(1 for t in tbody if '<a ' in t['html'])} block(s) with links")
     return (STRUCTURAL_JS.replace('%HELPERS%', JS_HELPERS)
@@ -419,6 +627,7 @@ STRUCTURAL_JS = r"""(async () => {
   const T = TARGET;
   const report = { mode: 'structural', refused: null, ok: false, applied: [], failed: [],
                    titleChanged: false, subtitleChanged: false,
+                   marks: { applied: [], review: [], failed: [], unchanged: 0 },
                    plan: { replace: 0, insert: 0, delete: 0, hunk: 0, fnHunk: 0, dropAnchor: 0 } };
   const refuse = (why, extra) => { report.refused = why; Object.assign(report, extra || {}); return JSON.stringify(report); };
 
@@ -453,16 +662,7 @@ STRUCTURAL_JS = r"""(async () => {
   // --- 1. align live body against target body by text (LCS on normalized block text) ---
   const live = scrape();
   const eqL = live.body.map(b => sameText(b.text)), eqT = T.body.map(b => sameText(b.text));
-  const lcsPairs = (A, B) => {
-    const n = A.length, m = B.length;
-    const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
-      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    const pairs = []; let i = 0, j = 0;
-    while (i < n && j < m) { if (A[i] === B[j]) { pairs.push([i, j]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++; }
-    return pairs;
-  };
-  const pairs = lcsPairs(eqL, eqT);
+  const pairs = lcsPairs(eqL, eqT);                    // lcsPairs comes from JS_HELPERS
   const ranges = []; let pi = 0, pj = 0;
   for (const [i, j] of [...pairs, [live.body.length, T.body.length]]) {
     if (i > pi || j > pj) ranges.push({ i1: pi, i2: i, j1: pj, j2: j });
@@ -587,6 +787,22 @@ STRUCTURAL_JS = r"""(async () => {
     }
   } catch (e) { report.failed.push(String(e)); }
 
+  // --- 3b. marks, once the blocks have stopped moving ---
+  // A block replaced whole came in as the converter's own HTML and already carries its
+  // marks; running the reconciliation over it anyway is free and turns into a second,
+  // independent check that the HTML landed with its formatting intact. A block edited by
+  // text hunk did NOT get its marks from anywhere, and this is the only pass that gives
+  // them to it.
+  if (!report.failed.length) {
+    const M = scrape();
+    if (M.body.length === T.body.length && M.fns.length === T.fns.length) {
+      M.body.forEach((rec, i) => applyMarksTo(ed, rec, T.body[i].marks || [], 'block ' + i, report.marks));
+      M.fns.forEach((rec, k) => applyMarksTo(ed, rec, T.fns[k].marks || [], 'footnote ' + k, report.marks));
+    } else {
+      report.marks.review.push({ where: 'document', why: 'block or footnote count still differs after the text pass -- marks not reconciled' });
+    }
+  }
+
   // --- 4. title / subtitle, only if changed ---
   const setField = (sel, v) => {
     const el = document.querySelector(sel);
@@ -603,6 +819,13 @@ STRUCTURAL_JS = r"""(async () => {
   const bodyMismatch = []; for (let i = 0; i < Math.max(F.body.length, T.body.length); i++) if (!F.body[i] || !T.body[i] || sameText(F.body[i].text) !== eqT[i]) bodyMismatch.push(i);
   const fnMismatch = []; for (let k = 0; k < Math.max(F.fns.length, T.fns.length); k++) if (!F.fns[k] || !T.fns[k] || sameText(F.fns[k].text) !== sameText(T.fns[k].text)) fnMismatch.push(k);
   const anchors = F.body.reduce((n, b) => n + b.anchors.length, 0), wantAnchors = T.body.reduce((n, b) => n + b.anchors.length, 0);
+  // Read the marks back too. The block digest cannot see them, so without this the final
+  // report would certify a document it had only half looked at.
+  const markMismatch = [];
+  const runKeys = runs => runs.map(r => r.kind + ' ' + sameText(r.text) + ' ' + (r.href || ''));
+  const wantKeys = t => runKeys((t.marks || []).map(r => ({ kind: r.kind, text: r.text, href: r.href })));
+  F.body.forEach((b, i) => { if (T.body[i] && JSON.stringify(runKeys(marksOf(b.node))) !== JSON.stringify(wantKeys(T.body[i]))) markMismatch.push('block ' + i); });
+  F.fns.forEach((f, k) => { if (T.fns[k] && JSON.stringify(runKeys(marksOf(f.node))) !== JSON.stringify(wantKeys(T.fns[k]))) markMismatch.push('footnote ' + k); });
   const linksMissing = [], dividersOff = [];
   F.body.forEach((b, i) => {
     const t = T.body[i]; if (!t) return;
@@ -610,9 +833,10 @@ STRUCTURAL_JS = r"""(async () => {
     if (!!b.hrBefore !== !!t.hrBefore) dividersOff.push(i);
   });
   report.final = { body: F.body.length + '/' + T.body.length, footnotes: F.fns.length + '/' + T.fns.length,
-                   anchors: anchors + '/' + wantAnchors, bodyMismatch, fnMismatch, linksMissing, dividersOff,
+                   anchors: anchors + '/' + wantAnchors, bodyMismatch, fnMismatch, markMismatch, linksMissing, dividersOff,
                    firstNode: ed.state.doc.firstChild ? ed.state.doc.firstChild.type.name : null };
-  report.ok = !report.failed.length && !bodyMismatch.length && !fnMismatch.length && anchors === wantAnchors && !linksMissing.length;
+  report.ok = !report.failed.length && !report.marks.failed.length && !bodyMismatch.length
+              && !fnMismatch.length && !markMismatch.length && anchors === wantAnchors && !linksMissing.length;
   return JSON.stringify(report);
 })()
 """

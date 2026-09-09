@@ -11,6 +11,16 @@ HTTP — no browser, no credentials, the same bytes a reader gets — pulls the 
 the `window._preloads` blob the page ships, renders the local draft, and compares them
 block for block and footnote for footnote.
 
+It compares TWO domains, and the second one exists because the first was blind. Reader-text
+(tags stripped) is what every digest on this desk has ever compared -- and wrapping a word
+that is already in the post in <em> changes none of it. Measured on `rising-after-falls`
+2026-09-09: after italicising two words, the regenerated surgical patch was byte-identical in
+size to the previous one, the patcher reported `unchanged`, and a digest check would have
+said MATCH with the italic absent from the live post. So the marked RUNS -- em, strong, and
+link with its href -- are enumerated from both sides and compared for count, string and
+order, and formatting drift is reported as DRIFT-MARKS, distinct from text drift, because
+the fix for it is different.
+
 It is deliberately NOT part of test_suite.py. That suite promises no network calls, and
 that promise is worth more than the convenience of one runner.
 
@@ -37,7 +47,8 @@ from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from md_to_substack import read_manifest, render_reader          # noqa: E402
+from md_to_substack import (read_manifest, render_reader, render_marks,   # noqa: E402
+                            MarkRuns, mark_keys)
 from substack_sync import H                                      # noqa: E402
 
 UA = 'writing-desk-verify/1.0 (+repo consistency check)'
@@ -61,9 +72,11 @@ class Extract(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.body, self.fns = [], []
+        self.body_marks, self.fn_marks = [], []
         self.depth = 0
         self.skip_to = self.fn_to = self.cap_to = self.anchor_to = None
         self.buf = self.buf_depth = self.buf_tag = None
+        self.marks = MarkRuns()          # the second domain: which words are marked
 
     def _enter(self, tag, attrs):
         cls = set(dict(attrs).get('class', '').split())
@@ -72,11 +85,19 @@ class Extract(HTMLParser):
         if 'footnote-anchor' in cls:                 # superscript marker: drop its text
             self.anchor_to = self.depth; return
         if 'footnote-content' in cls:
-            self.cap_to = self.depth; self.buf = []; self.buf_depth = None; return
+            self.cap_to = self.depth; self.buf = []; self.buf_depth = None
+            self.marks = MarkRuns(); return
         if 'footnote' in cls:
             self.fn_to = self.depth; return
         if tag in SKIP_TAG or (cls & SKIP_CLASS):
             self.skip_to = self.depth; return
+        # Marks are collected only inside an OPEN block, and only after every skip above
+        # has had its say -- which is what keeps the two <a> tags that are not links out of
+        # the link list: `footnote-anchor` returned above, `footnote-number` and
+        # `image-link` are SKIP_CLASS. A footnote superscript counted as a link would put a
+        # phantom run in every footnoted block of every piece.
+        if self.buf is not None:
+            self.marks.enter(tag, attrs)
         if self.cap_to is not None or self.fn_to is not None:
             return
         if tag in BLOCK and self.buf is None:
@@ -95,14 +116,21 @@ class Extract(HTMLParser):
         if self.cap_to is not None:
             if self.depth == self.cap_to:
                 self.cap_to = None
-                self.fns.append(''.join(self.buf or [])); self.buf = None
+                runs, _txt = self.marks.take()
+                self.fns.append(''.join(self.buf or [])); self.fn_marks.append(runs)
+                self.buf = None
+            elif self.buf is not None:
+                self.marks.leave(tag)
             return
         if self.fn_to is not None:
             if self.depth == self.fn_to: self.fn_to = None
             return
+        if self.buf is not None:
+            self.marks.leave(tag)
         if tag in BLOCK and self.buf is not None and self.depth == self.buf_depth:
             t = ''.join(self.buf)
-            if t.strip(): self.body.append((self.buf_tag, t))
+            runs, _txt = self.marks.take()
+            if t.strip(): self.body.append((self.buf_tag, t)); self.body_marks.append(runs)
             self.buf = self.buf_depth = self.buf_tag = None
 
     def handle_starttag(self, tag, attrs):
@@ -118,19 +146,26 @@ class Extract(HTMLParser):
 
     def handle_data(self, d):
         if self.skip_to is not None or self.anchor_to is not None: return
-        if self.buf is not None: self.buf.append(d)
+        if self.buf is not None: self.buf.append(d); self.marks.data(d)
 
 
 def live_blocks(body_html):
+    """(body_texts, footnote_texts, body_marks, footnote_marks) as the reader gets them.
+
+    Two domains, one parse. The texts are what every digest on this desk compares; the
+    marks are the layer those digests cannot see (see MarkRuns in md_to_substack)."""
     p = Extract(); p.feed(body_html); p.close()
     # The draft renderer merges adjacent blockquotes; Substack keeps them separate.
-    out = []
-    for tag, text in p.body:
+    # The marks merge with them: order is preserved by concatenation, which is all the
+    # equality domain uses (offsets are never compared).
+    out, marks = [], []
+    for (tag, text), runs in zip(p.body, p.body_marks):
         if tag == 'blockquote' and out and out[-1][0] == 'blockquote':
             out[-1] = (tag, out[-1][1] + text)
+            marks[-1] = marks[-1] + runs
         else:
-            out.append((tag, text))
-    return [t for _, t in out], p.fns
+            out.append((tag, text)); marks.append(runs)
+    return [t for _, t in out], p.fns, marks, p.fn_marks
 
 
 def fetch_public(url, fresh=False, attempts=ATTEMPTS):
@@ -266,6 +301,51 @@ def header_drift(post, man):
     return out
 
 
+def _fmt_runs(runs, limit=4):
+    """Runs as a reader can check them: em'satsang'  strong'seventeen'  link'text'->url"""
+    out = []
+    for k, t, h in runs[:limit]:
+        t = t if len(t) <= 34 else t[:31] + '...'
+        out.append(f"{k}{t!r}" + (f'->{h}' if k == 'link' and h else ''))
+    if len(runs) > limit:
+        out.append(f'+{len(runs) - limit} more')
+    return '[' + ' '.join(out) + ']' if out else '[none]'
+
+
+def mark_drift(live, draft, live_text, draft_text, label, base=0):
+    """Formatting drift, reported apart from text drift, because the fix is different.
+
+    Only blocks whose TEXT already agrees are compared. A block whose words changed will
+    of course have different marks, and saying so twice buries the finding that matters.
+
+    Emphasis and links are separated for the same reason: an absent italic is a house-style
+    slip, a wrong href is a dead link, and one message covering both tells the reader which
+    to go fix. Link TARGETS are compared last and named as their own kind of drift."""
+    out = []
+    for i, (lr, dr) in enumerate(zip(live, draft)):
+        if i >= len(live_text) or i >= len(draft_text):
+            break
+        if H(live_text[i]) != H(draft_text[i]):
+            continue                                   # text drift already explains this one
+        lk, dk = mark_keys(lr), mark_keys(dr)
+        if lk == dk:
+            continue
+        le = [r for r in lk if r[0] != 'link']
+        de = [r for r in dk if r[0] != 'link']
+        ll = [r for r in lk if r[0] == 'link']
+        dl = [r for r in dk if r[0] == 'link']
+        n = i + base                     # blocks are 0-based, footnotes 1-based, as above
+        if le != de:
+            out.append(f'{label} #{n} emphasis: live {_fmt_runs(le)} vs draft {_fmt_runs(de)}')
+        if [(k, t) for k, t, _h in ll] != [(k, t) for k, t, _h in dl]:
+            out.append(f'{label} #{n} linked text: live {_fmt_runs(ll)} vs draft {_fmt_runs(dl)}')
+        elif ll != dl:
+            bad = [f'{t!r}: live {a or "(none)"} vs draft {b or "(none)"}'
+                   for (_k, t, a), (_k2, _t2, b) in zip(ll, dl) if a != b]
+            out.append(f'{label} #{n} link target: ' + '; '.join(bad[:2]))
+    return out
+
+
 def walk_archive(base, fresh=False, page=50):
     """Every post the publication serves publicly, via its archive API, newest first.
 
@@ -329,14 +409,26 @@ def verify(name, piece_dir, url, fresh):
     if not post:
         return ('UNREACHABLE', 'no _preloads in page (login wall or layout change?)', {})
 
-    lb, lf = live_blocks(post.get('body_html') or '')
+    lb, lf, lbm, lfm = live_blocks(post.get('body_html') or '')
     body, fns, _residual, _iss = render_reader(piece_dir)
+    dbm, dfm, _offsets_ok = render_marks(piece_dir)
+    n_marks = sum(len(r) for r in lbm) + sum(len(r) for r in lfm)
+    n_want = sum(len(r) for r in dbm) + sum(len(r) for r in dfm)
     facts = {'audience': post.get('audience'),
              'emailed': post.get('email_sent_at'),
-             'blocks': f'{len(lb)}/{len(body)}', 'fns': f'{len(lf)}/{len(fns)}'}
+             'blocks': f'{len(lb)}/{len(body)}', 'fns': f'{len(lf)}/{len(fns)}',
+             'marks': f'{n_marks}/{n_want}'}
     header = header_drift(post, read_manifest(os.path.join(piece_dir, 'publish.yaml')))
-    if (not header and [H(x) for x in lb] == [H(x) for x in body]
-            and [H(x) for x in lf] == [H(x) for x in fns]):
+    text_ok = ([H(x) for x in lb] == [H(x) for x in body]
+               and [H(x) for x in lf] == [H(x) for x in fns])
+    # Marks are compared only when the two sides are structurally alignable at all. If the
+    # block counts differ, index i is not the same block on both sides and every mark
+    # comparison after the first insertion is noise.
+    marks = []
+    if len(lb) == len(body) and len(lf) == len(fns):
+        marks = (mark_drift(lbm, dbm, lb, body, 'block')
+                 + mark_drift(lfm, dfm, lf, fns, 'footnote', base=1))
+    if not header and text_ok and not marks:
         return ('MATCH', '', facts)
 
     detail = list(header)
@@ -350,7 +442,15 @@ def verify(name, piece_dir, url, fresh):
         if a != b:
             detail.append(f'first differing footnote #{i + 1}: live {lf[i][:70]!r}')
             break
-    return ('DRIFT', '; '.join(detail), facts)
+    detail += marks[:3]
+    if len(marks) > 3:
+        detail.append(f'(+{len(marks) - 3} more formatting difference(s))')
+    # A formatting-only drift gets its OWN status. It is invisible to every text digest on
+    # this desk, so a run that reported it as plain DRIFT would send the reader looking for
+    # a word that changed and find none -- and the surgical patcher, asked to fix it, would
+    # report `unchanged` and apply nothing. Naming the kind is what makes it actionable.
+    status = 'DRIFT-MARKS' if (marks and text_ok and not header) else 'DRIFT'
+    return (status, '; '.join(detail), facts)
 
 
 def main():
@@ -458,13 +558,15 @@ def main():
             break
         status, detail, facts = verify(name, d, url, a.fresh)
         line = f"  {name:<{w}}  {status:<12}"
-        if facts.get('blocks'): line += f" {facts['blocks']:>10} body {facts['fns']:>8} fn"
+        if facts.get('blocks'):
+            line += (f" {facts['blocks']:>10} body {facts['fns']:>8} fn"
+                     f" {facts.get('marks', '-'):>9} marks")
         print(line + (f"   {detail}" if detail else ''))
         if status == 'MATCH':
             ok += 1
             if facts.get('emailed'): emailed.append(f"{name} ({facts['emailed']})")
-        elif status == 'DRIFT':
-            drift.append(name)
+        elif status.startswith('DRIFT'):
+            drift.append(name + ('  (formatting only)' if status == 'DRIFT-MARKS' else ''))
         else:
             unreachable.append(f'{name}: {detail}')
         time.sleep(0.3)                                # be a polite client

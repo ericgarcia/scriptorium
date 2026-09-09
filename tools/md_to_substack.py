@@ -55,6 +55,7 @@ INTERNAL EDITORIAL NOTES (never publish):
     where the author reviews it.
 """
 import sys, os, re, json, base64, mimetypes
+from html.parser import HTMLParser
 
 def read_manifest(path):
     """Flat key: value, plus ONE level of nesting so `images:` can carry a map of
@@ -448,6 +449,197 @@ def strip_to_reader(html_fragment):
     s = re.sub(r'<[^>]+>', '', s)
     s = s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
     return re.sub(r'\s+', ' ', s).strip()
+
+# --- marks: the layer reader-text cannot see ---------------------------------
+# Every comparison on this desk — the surgical diff, the structural aligner, the
+# per-block digest in substack_verify — runs on READER-TEXT: tags stripped, entities
+# unescaped, whitespace collapsed. That domain is deliberate and it is right for text.
+# It is also, by construction, BLIND TO FORMATTING. Wrapping a word that is already in
+# the post in <em> changes zero reader-text, so it produces zero diff.
+#
+# Measured on `rising-after-falls`, 2026-09-09: after italicising *satsang* and *kirtan*
+# in a composed draft, the regenerated surgical patch was byte-identical in size to the
+# previous one (29,782 bytes). The failure mode is the dangerous one — a FALSE PASS: the
+# patcher reports `unchanged` and applies nothing, and the digest check then reports MATCH
+# while the italic is simply not there. Same shape as the youtube2 embed blindness in the
+# publish skill's 0b-embeds: THE SCRAPE DEFINES WHAT CAN BE CHECKED, and what it does not
+# collect cannot be verified.
+#
+# `MarkRuns` is the second domain, collected alongside the first: the marked RUNS of a
+# block — em / strong / link — as (kind, text, href), in document order, with their
+# character offsets into that block's reader-text. One scanner, fed by both sides, so the
+# draft and the live post can never be compared by two different definitions of a mark.
+MARK_TAGS = {'em': 'em', 'i': 'em', 'strong': 'strong', 'b': 'strong', 'a': 'link'}
+
+def canon_href(h):
+    """The comparison domain for a link target.
+
+    Measured against the live publication 2026-09-09 (`the-kingdom-that-isnt`): Substack
+    serves authored hrefs back VERBATIM — no utm parameters, no redirect wrapper — so this
+    stays deliberately minimal. It exists to absorb the one difference that is not content
+    (a trailing slash), and nothing else: a normalizer that rewrites more than it must is
+    how a real broken link gets normalized into looking fine."""
+    h = (h or '').strip()
+    return h[:-1] if h.endswith('/') and h.count('/') > 3 else h
+
+
+class MarkRuns:
+    """Collect marked runs from a stream of HTML events, with offsets into reader-text.
+
+    Fed by md_to_substack (the draft's own converter output) and by substack_verify's
+    live-page extractor, so both sides answer "which words are italic" the same way.
+
+    Two properties are load-bearing:
+
+      * `text` is built with the SAME normalization `strip_to_reader` applies — markers
+        dropped, whitespace runs collapsed, ends stripped — so a run's (start, end) are
+        real offsets into the reader-text everything else compares. `assert_text` is the
+        check that this stayed true; nothing should trust an offset without it.
+      * runs are emitted in OPEN order (sorted by start, longest-first on a tie), not
+        close order. `<strong><em>x</em></strong>` and `<em><strong>x</strong></em>` are
+        the same formatting, and the draft's own regexes can emit either nesting; close
+        order would report that as drift forever.
+    """
+    _MARKER = re.compile(r'\[\[FN\w+\]\]')
+
+    def __init__(self):
+        self.stack = []          # [kind, href, start]
+        self.out = []
+        self.text = ''
+
+    def data(self, s):
+        s = re.sub(r'\s+', ' ', self._MARKER.sub('', s))
+        if s.startswith(' ') and (not self.text or self.text.endswith(' ')):
+            s = s.lstrip()
+        self.text += s
+
+    def enter(self, tag, attrs):
+        kind = MARK_TAGS.get(tag)
+        if kind is None:
+            return False
+        href = canon_href(dict(attrs).get('href', '')) if kind == 'link' else ''
+        self.stack.append([kind, href, len(self.text)])
+        return True
+
+    def leave(self, tag):
+        kind = MARK_TAGS.get(tag)
+        if kind is None:
+            return False
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == kind:
+                k, href, start = self.stack.pop(i)
+                self.out.append([start, len(self.text), k, href])   # UNTRIMMED; take() finishes
+                break
+        return True
+
+    def take(self):
+        """The block's coalesced runs, in reader order; resets for the next block.
+
+        A RUN IS A SPAN OF FORMATTING, NOT AN ELEMENT, and the difference is not academic.
+        The converter emits `**a _b_ c**` as one `<strong>` wrapping an `<em>`; Substack
+        stores the same formatting as THREE strong elements around the em and serves it
+        back that way. Compared element-by-element, every bold-containing-an-italic in the
+        corpus reported drift -- 8 pieces of 34 on the first sweep, 2026-09-09, none of
+        them a real difference. Contiguous spans of the same kind (and, for a link, the
+        same href) are therefore merged before anything is compared.
+
+        Merging happens on the UNTRIMMED spans and the trim comes after, in that order:
+        `<strong>There is no </strong><em><strong>toward</strong></em>` is contiguous only
+        while the first span still owns its trailing space. Trim first and the two spans
+        no longer touch, which is the artifact this method exists to remove.
+
+        A gap of real text is never bridged: `_a_ plain _b_` stays two italics on both
+        sides, so a draft that merged them into one would still be reported.
+        """
+        merged = []
+        for start, end, k, h in sorted(self.out, key=lambda r: (r[2], r[3], r[0])):
+            if merged and merged[-1][2] == k and merged[-1][3] == h and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end, k, h])
+        runs = []
+        for start, end, k, h in merged:
+            # trim inward past whitespace: `<em>word </em>` and `<em>word</em> ` are the
+            # same italic, and a run ending on a space cannot be addressed as a mark range
+            # without also claiming the space.
+            while start < end and self.text[start] == ' ':
+                start += 1
+            while end > start and self.text[end - 1] == ' ':
+                end -= 1
+            if end > start:
+                runs.append((start, end, k, self.text[start:end], h))
+        runs.sort(key=lambda r: (r[0], -r[1], r[2]))
+        text = self.text.rstrip()
+        self.stack, self.out, self.text = [], [], ''
+        return runs, text
+
+
+class _FragmentMarks(HTMLParser):
+    """MarkRuns over a standalone HTML fragment — one body block, or one footnote."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.runs = MarkRuns()
+
+    def handle_starttag(self, tag, attrs):
+        self.runs.enter(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        pass
+
+    def handle_endtag(self, tag):
+        self.runs.leave(tag)
+
+    def handle_data(self, d):
+        self.runs.data(d)
+
+
+def marks_in(html_fragment):
+    """(runs, reader_text) for one block or footnote of the converter's own HTML.
+
+    `runs` are (start, end, kind, text, href) with kind in {em, strong, link}. The
+    caller is expected to check `reader_text == strip_to_reader(html_fragment)`
+    before using an offset — see `render_marks`."""
+    p = _FragmentMarks()
+    p.feed(html_fragment)
+    p.close()
+    return p.runs.take()
+
+
+def mark_keys(runs):
+    """The EQUALITY domain for a list of runs: kind, flattened text, href — no offsets.
+
+    Offsets are for locating a run in a document; they are not part of what a mark IS.
+    Comparing them would report drift on a block whose text merely moved, which is the
+    false-drift direction this desk has already paid for once."""
+    return [(k, re.sub(r'\s+', ' ', flatten_quotes(t)).strip(), h) for _s, _e, k, t, h in runs]
+
+
+def render_marks(piece_dir):
+    """(body_marks, fn_marks, offsets_ok) — the mark layer of render_reader.
+
+    Parallel to `render_reader`, filtered identically, so index i means the same block in
+    both. `offsets_ok` is False for any block whose scanned text did not reproduce
+    `strip_to_reader`'s: the run STRINGS are still comparable there, but the offsets are
+    not to be trusted, and the patcher falls back to locating a run by its text."""
+    blocks, ordered, _stripped, _residual, _unverified, _fn_issues, _sources = parse_blocks(piece_dir)
+    body, offsets_ok = [], True
+    for b in blocks:
+        if b.strip() == '<hr>':
+            continue
+        txt = strip_to_reader(b)
+        if not txt:
+            continue
+        runs, scanned = marks_in(b)
+        offsets_ok = offsets_ok and scanned == txt
+        body.append(runs)
+    fns = []
+    for _n, c in ordered:
+        runs, scanned = marks_in(c)
+        offsets_ok = offsets_ok and scanned == strip_to_reader(c)
+        fns.append(runs)
+    return body, fns, offsets_ok
+
 
 def render_reader(piece_dir):
     """(title-independent) reader-text view of the piece, for surgical republish:

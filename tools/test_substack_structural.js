@@ -25,6 +25,17 @@
  *   S7 draft adds a footnote        -> REFUSED before anything is dispatched
  *   S8 a baked hash was altered     -> REFUSED (transcription guard), nothing dispatched
  *   S9 a linked block changed       -> replaced whole; the link mark is back; ok
+ *  S10 live is MISSING an italic   -> text matches everywhere; the mark is applied; ok
+ *  S11 live has an italic the       -> the mark is removed; ok
+ *      draft does not
+ *
+ * S10 is the regression that matters most here, because it is the one the whole chain used
+ * to pass. Its live document differs from the draft in NO reader-text at all — only in one
+ * <em> — so every text digest reports MATCH and the surgical patcher reports `unchanged`.
+ * Measured on `rising-after-falls`, 2026-09-09. A checker that cannot fail S10 is the
+ * checker that certified a live post whose italic was simply not there.
+ *
+ * The document model lives in test_editor_stub.js, shared with test_substack_repatch.js.
  *
  * Cases that need a footnote, an anchor or a link the piece does not have are SKIPPED and say
  * so — a green tick for a check that could not run is the kind of coverage that lies.
@@ -35,111 +46,8 @@ if (!snippetPath) { console.error('usage: node test_substack_structural.js <stru
 const src = fs.readFileSync(snippetPath, 'utf8');
 const TARGET = JSON.parse(src.match(/\/\*T\*\/([\s\S]*?)\/\*T\*\//)[1]);
 
-// approximate Substack's smart-quote input rules
-const curl = s => s.replace(/(^|[\s(\[{—–-])"/g, '$1“').replace(/"/g, '”')
-                   .replace(/(^|[\s(\[{—–-])'/g, '$1‘').replace(/'/g, '’');
-const decode = s => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-
-// ---------------------------------------------------------------- tiny HTML -> kids
-// kids: { isText, text, marks:[{name, attrs}] } | { anchor: true, name }
-function parseInline(html) {
-  const kids = [], stack = [];
-  const re = /(<\/?[a-zA-Z][a-zA-Z0-9]*[^>]*>)|(\[\[FN(\w+)\]\])|([^<\[]+|\[)/g;
-  let m;
-  while ((m = re.exec(html))) {
-    if (m[1]) {
-      const tag = m[1], close = tag.startsWith('</');
-      const name = tag.match(/^<\/?([a-zA-Z][a-zA-Z0-9]*)/)[1].toLowerCase();
-      if (close) { const i = stack.map(s => s.tag).lastIndexOf(name); if (i >= 0) stack.splice(i, 1); }
-      else if (!tag.endsWith('/>')) {
-        const href = (tag.match(/href="([^"]*)"/) || [])[1];
-        if (name === 'em' || name === 'i') stack.push({ tag: name, name: 'italic' });
-        else if (name === 'strong' || name === 'b') stack.push({ tag: name, name: 'bold' });
-        else if (name === 'a') stack.push({ tag: name, name: 'link', attrs: { href } });
-        else stack.push({ tag: name });
-      }
-    } else if (m[2]) kids.push({ anchor: true, name: m[3] });
-    else {
-      const text = decode(m[4]);
-      if (text) kids.push({ isText: true, text, marks: stack.filter(s => s.name).map(s => ({ name: s.name, attrs: s.attrs || {} })) });
-    }
-  }
-  return kids;
-}
-function parseTops(html) {
-  const tops = []; const re = /<(p|h1|h2|h3|h4|blockquote|ul|ol|pre)\b[^>]*>([\s\S]*?)<\/\1>/g; let m;
-  while ((m = re.exec(html))) tops.push({ name: m[1] === 'p' ? 'paragraph' : m[1], kids: parseInline(m[2]) });
-  return tops;
-}
-const topText = t => t.kids.filter(k => !k.anchor).map(k => k.text).join('');
-
-// ---------------------------------------------------------------- the document model
-function makeEditor(tops) {
-  const kidSize = k => k.anchor ? 1 : k.text.length;
-  const sizeOf = t => t.kids.reduce((n, k) => n + kidSize(k), 0) + 2;
-  const mark = m => ({ type: { name: m.name }, attrs: m.attrs || {},
-                       eq(o) { return o.type.name === m.name && JSON.stringify(o.attrs || {}) === JSON.stringify(m.attrs || {}); } });
-  const kidNode = k => k.anchor
-    ? { type: { name: 'footnoteAnchor' }, isText: false, isInline: true, nodeSize: 1, marks: [] }
-    : { type: { name: 'text' }, isText: true, isInline: true, text: k.text, nodeSize: k.text.length, marks: k.marks.map(mark) };
-  const wrap = t => ({
-    type: { name: t.name }, isText: false, isInline: false,
-    get textContent() { return topText(t); },
-    get nodeSize() { return sizeOf(t); },
-    descendants(cb) { let rel = 0; for (const k of t.kids) { cb(kidNode(k), rel); rel += kidSize(k); } },
-  });
-  const layout = () => { let pos = 0; return tops.map(t => { const r = { t, pos, size: sizeOf(t) }; pos += r.size; return r; }); };
-  // explode a top into per-character tokens so deletions and insertions are trivial and exact
-  const explode = t => { const a = []; for (const k of t.kids) { if (k.anchor) a.push({ anchor: true, name: k.name }); else for (const ch of k.text) a.push({ ch, marks: k.marks }); } return a; };
-  const implode = (t, a) => { const kids = []; for (const x of a) { if (x.anchor) { kids.push({ anchor: true, name: x.name }); continue; } const last = kids[kids.length - 1]; if (last && !last.anchor && JSON.stringify(last.marks) === JSON.stringify(x.marks)) last.text += x.ch; else kids.push({ isText: true, text: x.ch, marks: x.marks }); } t.kids = kids; };
-  const findTop = pos => layout().find(r => pos >= r.pos + 1 && pos <= r.pos + r.size - 1);
-  let dispatches = 0;
-  const del = (from, to) => {
-    const L = layout();
-    const covered = L.filter(r => from <= r.pos && r.pos + r.size <= to);
-    if (covered.length) { for (const r of covered) tops.splice(tops.indexOf(r.t), 1); return; }
-    const r = findTop(from); if (!r || to > r.pos + r.size - 1) throw new Error('stub: delete crosses a node boundary ' + from + '-' + to);
-    const a = explode(r.t); a.splice(from - (r.pos + 1), to - from); implode(r.t, a);
-  };
-  const insertText = (pos, text, marks) => {
-    const r = findTop(pos); if (!r) throw new Error('stub: insert outside a node ' + pos);
-    const a = explode(r.t); a.splice(pos - (r.pos + 1), 0, ...[...text].map(ch => ({ ch, marks: marks.map(m => ({ name: m.type.name, attrs: m.attrs })) }))); implode(r.t, a);
-  };
-  const mkTr = () => { const ops = []; const tr = {
-    delete(f, t) { ops.push(() => del(f, t)); return tr; },
-    replaceWith(f, t, textNode) { ops.push(() => { del(f, t); insertText(f, textNode.text, textNode.marks || []); }); return tr; },
-    _ops: ops }; return tr; };
-  const docNode = () => {
-    const L = layout();
-    return {
-      forEach(cb) { for (const r of L) cb(wrap(r.t), r.pos); },
-      get firstChild() { return tops.length ? wrap(tops[0]) : null; },
-      get content() { return { size: L.length ? L[L.length - 1].pos + L[L.length - 1].size : 0 }; },
-      descendants(cb) { for (const r of L) { const w = wrap(r.t); cb(w, r.pos); w.descendants((c, rel) => cb(c, r.pos + 1 + rel)); } },
-      resolve(pos) { return { marks() { const r = findTop(pos); if (!r) return []; let rel = 0; for (const k of r.t.kids) { const s = r.pos + 1 + rel, e = s + kidSize(k); if (pos >= s && pos < e) return k.anchor ? [] : k.marks.map(mark); rel += kidSize(k); } const last = r.t.kids[r.t.kids.length - 1]; return last && !last.anchor && pos === r.pos + r.size - 1 ? last.marks.map(mark) : []; } }; },
-      textBetween(from, to) { let out = ''; for (const r of L) { let rel = 0; for (const k of r.t.kids) { const s = r.pos + 1 + rel; if (!k.anchor) for (let i = 0; i < k.text.length; i++) { const p = s + i; if (p >= from && p < to) out += k.text[i]; } rel += kidSize(k); } } return out; },
-      nodesBetween(from, to, cb) { for (const r of L) { let rel = 0; for (const k of r.t.kids) { const s = r.pos + 1 + rel, e = s + kidSize(k); if (e > from && s < to) cb(kidNode(k), s); rel += kidSize(k); } } },
-    };
-  };
-  const editor = {
-    get state() { return { doc: docNode(), tr: mkTr(), schema: { text: (text, marks) => ({ text, marks }) } }; },
-    view: { dispatch(tr) { dispatches++; for (const f of tr._ops) f(); } },
-    commands: { insertContentAt(range, html) {
-      dispatches++;
-      const { from, to } = range; const L = layout();
-      const newTops = parseTops(html);
-      if (from === to) {
-        const idx = L.findIndex(r => r.pos === from); const at = idx >= 0 ? idx : (from >= (L.length ? L[L.length - 1].pos + L[L.length - 1].size : 0) ? tops.length : -1);
-        if (at < 0) throw new Error('stub: insert position is not a node boundary ' + from);
-        tops.splice(at, 0, ...newTops); return true;
-      }
-      const first = L.findIndex(r => r.pos === from), last = L.findIndex(r => r.pos + r.size === to);
-      if (first < 0 || last < first) throw new Error('stub: replace range is not node-aligned ' + from + '-' + to);
-      tops.splice(first, last - first + 1, ...newTops); return true;
-    } },
-  };
-  return { editor, tops, dispatches: () => dispatches };
-}
+const { curl, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install } =
+  require('./test_editor_stub.js');
 
 // ---------------------------------------------------------------- build a live doc from the target
 // anchors are placed where the draft's [[FN]] markers sit; text is curled the way Substack does
@@ -152,16 +60,18 @@ function liveFromTarget(t, opts = {}) {
     top.kids = top.kids.map(k => k.anchor ? k : { ...k, text: curl(k.text) });
     tops.push(top);
   });
-  (opts.fns || t.fns).forEach(f => tops.push({ name: 'footnote', kids: [{ isText: true, text: curl(f.text), marks: [] }] }));
+  (opts.fns || t.fns).forEach(f => {
+    const top = topFromRuns('footnote', f.text, f.marks);
+    top.kids = top.kids.map(k => ({ ...k, text: curl(k.text) }));
+    tops.push(top);
+  });
   return tops;
 }
 
 async function run(tops, source, fields) {
   const { editor, dispatches } = makeEditor(tops);
-  const f = fields || { 'textarea[placeholder="Title"]': { value: TARGET.title }, 'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } };
-  global.document = { querySelector: sel => (sel === '.ProseMirror' ? { editor } : (f[sel] || null)) };
-  global.DOMParser = class { parseFromString(html) { return { body: { children: parseTops(html).map(tp => ({ textContent: topText(tp) })) } }; } };
-  if (!global.crypto || !global.crypto.subtle) global.crypto = require('crypto').webcrypto;
+  install(editor, fields || { 'textarea[placeholder="Title"]': { value: TARGET.title },
+                              'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } });
   const report = JSON.parse(await eval(source || src));
   return { report, dispatches: dispatches(), tops };
 }
@@ -169,7 +79,7 @@ async function run(tops, source, fields) {
 let failures = 0;
 const check = (name, ok, detail) => { console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? '   ' + detail : ''}`); if (!ok) failures++; };
 const skip = (name, why) => console.log(`skip  ${name}   (${why})`);
-const summary = r => `ok=${r.report.ok} refused=${r.report.refused} applied=${JSON.stringify(r.report.applied)} failed=${JSON.stringify(r.report.failed)} final=${JSON.stringify(r.report.final)} dispatches=${r.dispatches}`;
+const summary = r => `ok=${r.report.ok} refused=${r.report.refused} applied=${JSON.stringify(r.report.applied)} failed=${JSON.stringify(r.report.failed)} markFailed=${JSON.stringify(r.report.marks && r.report.marks.failed)} final=${JSON.stringify(r.report.final)} dispatches=${r.dispatches}`;
 const bodyOf = tops => tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name)).map(topText);
 // the engine's own comparison domain: straight quotes, collapsed whitespace
 const norm = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
@@ -250,6 +160,47 @@ const plainIdx = (pred = () => true) => TARGET.body.findIndex((b, i) => !b.ancho
       const r = await run(tops);
       const hasLink = r.tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name))[k].kids.some(x => !x.anchor && x.marks.some(m => m.name === 'link'));
       check('S9 linked block is replaced and keeps its link', r.report.ok && r.report.final.linksMissing.length === 0 && hasLink, summary(r)); } }
+
+  // --- S10 the live doc is missing an italic the draft has -> applied ---------------------
+  // The text is identical on both sides. This is the case every digest on this desk passed.
+  { const k = TARGET.body.findIndex(b => (b.marks || []).some(m => m.kind !== 'link'));
+    if (k < 0) skip('S10 a missing italic is applied', 'no emphasis in any body block');
+    else { const want = TARGET.body[k].marks.filter(m => m.kind !== 'link').map(m => m.kind + ' ' + norm(m.text));
+      const tops = liveFromTarget(TARGET);
+      const bodyTops = tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name));
+      // strip the emphasis off the live copy, leaving every character exactly where it was
+      // (links are left alone: the engine reports those rather than guessing their attrs)
+      bodyTops[k].kids.forEach(x => { if (!x.anchor) x.marks = x.marks.filter(m => m.name === 'link'); });
+      const emphasisOf = top => runsOf(top).map(r => r.kind + ' ' + norm(r.text));
+      const before = emphasisOf(bodyTops[k]);
+      const textBefore = JSON.stringify(bodyOf(tops).map(norm));
+      const r = await run(tops);
+      const after = r.tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name))[k];
+      check('S10 a missing italic is detected and applied',
+            r.report.ok && before.length === 0
+            && JSON.stringify(emphasisOf(after)) === JSON.stringify(want)
+            && r.report.marks.applied.some(a => a.op === 'add')
+            && JSON.stringify(bodyOf(r.tops).map(norm)) === textBefore,
+            summary(r) + ' want=' + JSON.stringify(want) + ' got=' + JSON.stringify(emphasisOf(after))); } }
+
+  // --- S11 the live doc has an italic the draft does not -> removed -----------------------
+  { const k = plainIdx((b) => !(b.marks || []).length);
+    if (k < 0) skip('S11 a stray italic is removed', 'no unmarked plain block');
+    else { const tops = liveFromTarget(TARGET);
+      const bodyTops = tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name));
+      const kid = bodyTops[k].kids.find(x => !x.anchor && x.text.length > 12);
+      // italicise a slice in the middle, touching no character
+      const cut = kid.text.slice(4, 12);
+      bodyTops[k].kids.splice(bodyTops[k].kids.indexOf(kid), 1,
+        { isText: true, text: kid.text.slice(0, 4), marks: [] },
+        { isText: true, text: cut, marks: [{ name: 'em', attrs: {} }] },
+        { isText: true, text: kid.text.slice(12), marks: [] });
+      const r = await run(tops);
+      const after = r.tops.filter(t => !['footnote', 'horizontalRule', 'youtube2'].includes(t.name))[k];
+      check('S11 a stray italic is detected and removed',
+            r.report.ok && !after.kids.some(x => !x.anchor && x.marks.some(m => m.name === 'em'))
+            && r.report.marks.applied.some(a => a.op === 'remove'),
+            summary(r) + ' marks=' + JSON.stringify(r.report.marks)); } }
 
   process.exit(failures ? 1 : 0);
 })().catch(e => { console.log('FAIL  runner crashed   ' + (e.stack || e)); process.exit(1); });

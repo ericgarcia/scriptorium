@@ -153,6 +153,14 @@ def unit_review_artifact(tmp):
     check('review: title and subtitle come from the manifest',
           'A Piece' in h and 'And its claim.' in h)
 
+    # a one-space inline comment leaked into the headline until 2026-09-10
+    open(os.path.join(d, 'publish.yaml'), 'w').write(
+        'title: A Piece # settled by the author\nsubtitle: And its claim.   # from §V\n')
+    h2 = ra.build(d, facts)
+    check('review: inline comment never reaches the title',
+          '<h1>A Piece</h1>' in h2 and 'settled by the author' not in h2)
+    check('review: inline comment never reaches the subtitle', 'from §V' not in h2)
+
     # the two failures a hand-built page hides
     bad = os.path.join(tmp, 'bad'); os.makedirs(bad, exist_ok=True)
     open(os.path.join(bad, 'draft.md'), 'w').write('s\n---\nText.[^ghost]\n\n[^real]: n.\n')

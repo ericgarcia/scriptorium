@@ -52,7 +52,10 @@ def manifest(piece_dir):
         for line in open(path):
             m = re.match(r'\s*(title|subtitle|public_url|post_url)\s*:\s*(.+)', line)
             if m and m.group(1) not in out:
-                out[m.group(1)] = m.group(2).split('   #')[0].strip()
+                # strip a trailing inline comment, however much space precedes it —
+                # `title: X   # settled` and `title: X # settled` both leak otherwise,
+                # and the title band is the first thing an author reads.
+                out[m.group(1)] = re.sub(r'\s+#.*$', '', m.group(2)).strip()
     return out
 
 

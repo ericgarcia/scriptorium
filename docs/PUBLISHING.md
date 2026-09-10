@@ -211,11 +211,27 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
 5. `snapshot.py`, so the portability promise is real before anyone relies on it.
 6. LinkedIn outlet.
 
+## Site hosting is a separate question
+
+The store is the shared asset, and sites read it over HTTPS. **Where a site runs has no
+bearing on where content lives** — which is why consolidating hosting is not a
+prerequisite for any of this, and should be decided on its own merits.
+
+One thing this design does constrain: content fetched at request time needs compute at
+the edge. A site that is a pure static export cannot do it, so the choice of host has to
+be one that renders per request. That is a point in favour of hosts with first-class
+incremental rendering, and a point against any host whose server-side story is shaky.
+
 ## Open questions
 
-- **Which store.** AWS S3 + CloudFront keeps it in the account already running the
-  presenter API; Cloudflare R2 has no egress fees and the alignment site is already on
-  Vercel. Either satisfies "S3-compatible"; the choice is billing and blast radius.
+- ~~Which store.~~ **Decided 2026-09-10: AWS S3 + CloudFront.** At this scale both were
+  free — the store is about 25 MB, and the difference worked out near a tenth of a cent
+  a month — so cost decided nothing and the operational argument won: no second cloud,
+  no second credential set, and the same account that already runs the presenter API.
+  CloudFront's flat-rate plans (Free: 1M requests and 100 GB/month; Pro: $15/month flat
+  to 50 TB, no overages) also blunt the egress risk that used to make R2 the obvious
+  answer. Because the client is written against the S3 API, moving to R2 later is a
+  bucket sync and an endpoint change.
 - **Where the rendering lives.** The exporter is Python; the sites are TypeScript. A
   Python renderer keeps publishing in one language, but a TS one could share the exact
   component set the sites use. Rendering once is the point either way.

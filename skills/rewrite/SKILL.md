@@ -1,6 +1,6 @@
 ---
 name: rewrite
-description: Rewrite a finished or already-published piece in a voice that has moved since it was written — after a tune-style pass, or when the author says "rewrite X in the new voice", "re-voice this", "bring this up to the current constitution". Asks the depth questions first (how deep; are the footnotes kept; which figure is run literally; what the close does; which facts and consent lines are touched), then drafts a full new version into draft.md, gates it with critique, and STOPS for the author's read. Never re-syncs a live post itself; that is publish, invoked separately on the author's word.
+description: Rewrite a finished or already-published piece in a voice that has moved since it was written — after a tune-style pass, or when the author says "rewrite X in the new voice", "re-voice this", "bring this up to the current constitution". Asks the depth questions first (how deep; are the footnotes kept; which figure is run literally; what the close does; which facts and consent lines are touched; whether the title still fits; and it asks the author for a hero image rather than choosing one), then drafts a full new version into draft.md, gates it with critique, RENDERS A REVIEW ARTIFACT the author can actually read, and STOPS for their read. Renames the piece's slug when the title changes. Never re-syncs a live post itself; that is publish, invoked separately on the author's word.
 ---
 
 # Rewrite
@@ -47,12 +47,43 @@ under a constitution that has changed. Most of the work is deciding what stays f
      flagged for the author's read above everything else. A fact the rewrite would restate (a
      chronology, a place, who was in the room) is checked against the ledger first; when the
      author supplies a better fact mid-rewrite, it goes to `facts.md` *before* it goes to the prose.
+   - **Does the title still fit — and if it moves, the slug moves with it.** A re-voiced piece
+     often outgrows the title it was drafted under. Ask. **When the title changes, rename the piece
+     to match** (see *Renaming* below); the slug is the piece's address, and an address that
+     describes the piece it used to be is how a corpus starts lying about itself. Lean: keep a
+     settled title, propose a rename when the title was working or when the rewrite moved the
+     thesis.
+   - **Is there a hero image?** **Ask the author for one, and say the rewrite is holding a slot for
+     it.** Do not choose, generate, or describe an image on their behalf. If they have not got one
+     yet, leave the slot marked in the review artifact and in the draft header — a slot the author
+     can see is a decision waiting; an image you picked is a decision taken from them. Where the
+     piece is already live and has a hero, snapshot it (URL and caption) before anything else, since
+     a recompose drops it.
    - **Which version seams go?** A published piece accumulates sentences about its own earlier
      versions (*the correction I owe*, *for a while I told it as…*). They are process showing
      through; the reader never saw the earlier version. Cut them, or turn them into direct address
      (*You'd like it to be two roads. I'd like that too.*).
 4. **Take the lease** (`lease.py acquire <slug> --what "v<N> rewrite …"`) and **back up the prior
    version** to the scratchpad. Git has it too, but the diff you want later is against the file.
+
+## Name the session after the piece
+
+Once you know which piece you are working on, rename the session to that piece's title, by
+calling `mcp__ccd_session_mgmt__set_session_title` with `session_id: "self"` and the title. The
+app's session list then reads as a shelf of pieces instead of a row of identical entries.
+
+- **Take the title from `pieces/<slug>/publish.yaml` (`title:`), falling back to the README's
+  H1.** Titles on this desk move late and often — one was retitled on Substack at publication and
+  pulled back into the manifest — and `publish.yaml` is what actually ships to a reader.
+- **Re-title whenever the piece changes.** A session that opens on one piece and moves to another
+  should carry the name of the one it is on *now*. That is where the value is; naming it once at
+  the start is the part that goes stale.
+- **Best-effort, and silent when it fails.** The tool lives in the Claude Code desktop app. A
+  terminal session does not have it, and there is no way to test for it except by calling. If it
+  is missing, carry on — do not retry, do not mention it, and never let it block the work.
+- **It will not stomp a title the author chose.** The app asks them to approve a rename over a
+  title they set themselves, and replaces its own generated titles without asking. So propose
+  freely; the guard is on their side of it.
 
 ## Writing it
 
@@ -80,6 +111,48 @@ under a constitution that has changed. Most of the work is deciding what stays f
   voice note names the version, the date, what was rewritten under which rules, what was cut, and
   *not yet re-synced*.
 
+## Renaming: the slug follows the title
+
+**When the author changes the title, change the slug to match.** The desk had drifted the other
+way — *The Fountain and the Cistern* still answers to `made-with-hands`, *I Am a Prophet Also as
+Thou Art* to `hearing-firsthand` — and each of those READMEs had to add a line explaining that the
+address is not the piece. Two such lines is a convention; ten is a corpus that needs a decoder.
+(Eric, 2026-09-10, reversing the older keep-the-slug practice.)
+
+**Derive the slug from the settled title**, not from the thesis: lowercase, hyphens, articles
+dropped where they add nothing (*Not Made of Things That Appear* → `not-made-of-things-that-appear`,
+or a shorter distinctive stem the author approves). **Only rename on a settled title.** A working
+title that is still one of four candidates is not a title, and renaming twice is worse than renaming
+late — say so and hold.
+
+**A rename is one atomic move across six places.** Do all of them, in this order, then prove it:
+
+1. `git mv pieces/<old> pieces/<new>` — the directory. `draft.md` keeps its own filename for life;
+   it is the *directory* that carries the address.
+2. `git mv DASHBOARD.d/<NNN>-<old>.md DASHBOARD.d/<NNN>-<new>.md`, keeping the number. Then
+   `dashboard.py sync`. **Check for a stale duplicate afterwards** — two fragments for one slug
+   render the block twice and neither is wrong on its face.
+3. **Sweep every cross-reference**, which is the part that gets missed: sibling READMEs, `outline.md`
+   and `notes.md` seam notes, the book's `pieces.md` pointer, and any `books/<name>/*.md` that names
+   the piece. `grep -rn '<old>' --include='*.md' .` and read every hit.
+4. **Leave `log/` and `corrections.md` alone.** They are append-only records of what was true when
+   written; an old slug there is history, not rot — the same exemption `check_refs.py` already makes.
+5. Release the lease under the **old** slug and re-acquire under the new one, or the advisory lock
+   points at a directory that no longer exists.
+6. Note the rename in the log and in the README, with the old slug named once so a search for it
+   still lands.
+
+**Prove it:** `check_refs.py` and `dashboard.py check` both clean, and `grep -rn '<old>'` returns
+only `log/`, `corrections.md`, and the one README line that records the rename.
+
+**The one thing that does not follow, and it is not an exception you get to make.** A **published**
+piece's Substack URL is fixed by Substack at publication. `public_url` keeps the slug it was born
+with, every sibling essay's in-text link points at that URL, and renaming the desk directory does not
+and must not touch it. So for a live piece the desk slug and the URL slug **will** diverge — that is
+correct, not drift. Record both in `publish.yaml` and move on. If the author wants the *public* URL
+changed, that is a Substack-side decision with its own consequences for every link already pointing
+at it, and it is theirs to make deliberately, not a side effect of a rewrite.
+
 ## Gate, then stop
 
 1. `check_pronouns.py --strict` with every named figure; justify each hit by naming its referent
@@ -88,10 +161,21 @@ under a constitution that has changed. Most of the work is deciding what stays f
    calls — the close, a paragraph whose last line could read as the old thesis in miniature, a
    chronology rendered from one sentence of the author's — are **flagged for the author, not
    decided**.
-3. Log it (append-only): what the rewrite did, what it held constant, what critique changed, what
+3. **Render a review artifact and give the author the link.** A rewrite asks the author to judge
+   prose, and a `draft.md` full of `[^slug]` markers, scaffold headers and raw markdown is not the
+   thing they are being asked to judge. Publish the piece as an Artifact reading view instead:
+   the title and subtitle as they will appear, the sections in order, **the footnotes rendered as
+   real numbered notes with working jumps**, and the sibling cross-links live. Put the review facts
+   where they can be seen rather than in chat — the word count against the previous version, the
+   section and footnote deltas, which gates passed, and **every open call listed as a call**. Mark
+   the **hero-image slot** explicitly if there is no image yet. **Generate the artifact's content
+   from `draft.md` programmatically** — never retype the prose into the page, for the same reason
+   the composer never retypes it into Substack: a transcription slip becomes an edit nobody can
+   see. Send the link, and send the file too for anyone who would rather read the markdown.
+4. Log it (append-only): what the rewrite did, what it held constant, what critique changed, what
    is flagged, and that it is **not re-synced**. Update the README stage and next move; update the
-   dashboard fragment; `dashboard.py sync`; release the lease. Send the author the file.
-4. **Stop.** The author reads. On their word, `publish` handles the re-sync — and a rewrite is
+   dashboard fragment; `dashboard.py sync`; release the lease.
+5. **Stop.** The author reads. On their word, `publish` handles the re-sync — and a rewrite is
    structural, so it will be a **recompose** of the live post, not a surgical patch: hero and
    caption snapshotted first, the pasteboard verified immediately before the paste, the old range
    deleted after the new body lands, footnotes inserted and checksummed, fidelity digest identical

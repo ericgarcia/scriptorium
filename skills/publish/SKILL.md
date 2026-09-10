@@ -663,6 +663,14 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    >
    > On that post the toggle was off (`aria-checked="false"`, drafts API `should_send_email:
    > false`), it was clicked on Eric's explicit instruction, and `email_sent_at` stayed `null`.
+   >
+   > **REPORT THE BUTTON STATE AS A POSITIVE `enabled`, NEVER AS `disabled`/`dis`.** A negated
+   > boolean in a scraped readout gets inverted on sight: `{t:'Continue', dis:false}` was read as
+   > *disabled* — it means **enabled** — and two rounds of work went into explaining why a live
+   > button "would not respond" before the field was re-read. Emit
+   > `{label, enabled: !b.disabled}`, or the literal words, so the value cannot be misread as its
+   > opposite. Same reason the pronoun and status checkers report what a thing IS rather than what
+   > it is not.
 
    **Then verify against the cache-busted reader URL, not the "Your post is live!" screen** —
    that screen is a claim, not evidence. `substack_verify.py --fresh <piece>` is the evidence.

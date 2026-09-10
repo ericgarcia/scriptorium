@@ -1046,6 +1046,17 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
 
 ## Guardrails
 
+- **NEVER WRITE TO THE DRAFTS API WHILE THE COMPOSER IS OPEN ON THAT POST.** This is the
+  two-editors rule below, one layer down, and the API does not look like an editor — which is
+  exactly why it catches people. Measured 2026-09-10 on `what-was-already-there`: a
+  `PUT /api/v1/drafts/<id>` setting `cover_image`, sent from the editor page's own console while
+  the composer held the document, desynced the two. Substack then **refused to publish** —
+  *"Draft not saved — Post out of date"* — and the cover reverted to `null` when the editor saved
+  its own state back over the write. A fully composed, digest-verified draft sat one stale copy
+  away from being unpublishable, and **nothing warned until the publish button refused.**
+  The recovery is a page reload (the body survives it; verify the counts after). The rule: set the
+  cover **before** opening the composer, or through the composer's own UI, or after publishing
+  with the editor closed — and re-verify the body digest either way.
 - **Never leave two editors open on the same post.** The sync tooling compares `draft.md` against
   **one** live post; it has no concept of two editors racing, and the newer save silently wins.
   On 2026-09-01 the in-app pane and real Chrome both held the same post — the pane still carrying

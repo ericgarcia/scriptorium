@@ -513,6 +513,20 @@ posts carry no `alt` on the hero while the desk holds good alt text for 21 of th
 is the evidence that the converter's `alt` reaches Tiptap intact, so those posts lost it to the
 path they were composed by, not to Substack discarding it.
 
+> **⚠️ If you run a transport test like this, TITLE THE DRAFT SO IT CANNOT BE MISTAKEN FOR WORK.**
+> The 2026-09-10 test composed a real piece under its real title and subtitle, and left it sitting
+> in the Drafts list looking exactly like a finished essay ready to go. The author saw it there and
+> reasonably took it for the real thing. **Nothing was published and no email went anywhere** — the
+> draft was `is_published: false`, `slug: null`, `email_sent_at: null` — but the near-miss was a
+> first publication of a **duplicate** of an already-live post, which is the one click that can mail
+> the subscriber list, and it was created by the test itself.
+>
+> So: set `title` to something like **`TEST — DELETE ME (pane transport)`** before composing, or
+> compose a short fixture rather than a real piece. The fidelity digest does not care what the title
+> says. **And clean up in the same session** — a test artifact left in someone's publication is a
+> loaded gun, not a loose end. Deleting it is the author's click, never the agent's; say plainly
+> that it is waiting and where.
+
 ## Republish — surgically re-sync a live post
 
 > **⚠️ Republish edits a public post. Treat the write as irreversible; do NOT assume it has

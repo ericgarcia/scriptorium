@@ -28,6 +28,7 @@ see.
 |---|---|---|
 | **Stamp** | `version`, `state`, `date` | The live truth, above the title: *not composed*, *Substack holds v1*. An author must never have to ask whether what they are reading has shipped. |
 | **Title + subtitle** | `publish.yaml` | As a reader will meet them, not as the file spells them. |
+| **Images + ALT TEXT** | `![alt](src)` in the draft | Every image the draft references — hero and body alike — rendered in place, **with its alt text shown as prose**. See below. |
 | **Hero + provenance** | `assets/hero.*` | Downscaled to 1400px and embedded. The provenance stamp says **generated** or photograph — load-bearing where a photorealistic image could re-attach a biographical reading the prose dropped. No image yet renders a marked **slot**, because a slot is a decision waiting and a picked image is a decision taken. |
 | **Review strip** | counted + `prior` | Body words, movements, footnotes, each with the delta against the previous version. Counted from the file, never asserted. |
 | **Gates** | `gates` | Which checks ran and what they said. |
@@ -36,6 +37,35 @@ see.
 | **Contents** | headings | Movement numbers with per-movement word counts — where the piece is heavy or thin, at a glance. |
 | **The piece** | `draft.md` | Sticky movement rail, 66ch column, working footnote jumps both ways. **Each finding's span is marked in place, showing the PROPOSED wording, and its note hangs under that paragraph** — so the prose reads as the revised piece and a change is judged next to the sentence it changes. |
 | **Notes** | `[^slug]:` | Real numbered notes, back-linked. |
+
+## Images, and why the alt text is on the page
+
+**Alt text is house prose and this was the only surface that could show it.** It is what a
+screen-reader user gets instead of the picture; WCAG requires any text *inside* an image to be
+available as text; and it lives in `draft.md`, so the ordinary sweeps govern it — but only if
+they run after it was written, which is how a britishism once shipped in one. Nothing else an
+author reads displays it: not the draft (it is buried in `![…](…)` syntax), not Substack, not the
+live post. So the page shows it, labelled, in its own panel under each image. **An empty alt is
+called out in the flag colour rather than left blank**, because a missing alt looks like nothing
+at all. (Eric, 2026-09-10: *"our artifact preview render should show us the alt text somehow."*)
+
+**Every image renders, hero and body alike.** Image blocks used to be skipped outright, so a
+piece's body images were simply absent from its review page — three pieces in this corpus carry
+six, five and two of them. An image the page *cannot* show is **named** (`image not shown — …`),
+never dropped, for the same reason the tool refuses a bad anchor: a page that looks complete and
+is not is the failure this file exists to prevent.
+
+**A CDN url resolves back to its local file.** A published piece often references the uploaded
+url in `draft.md` so the converter reuses the asset rather than re-uploading it. The page reads
+`publish.yaml`'s `images:` block backwards — url → local path — and renders the real picture.
+
+**HTML comments never reach the page.** They are internal notes, the converter drops them before
+a reader sees them, and this page *is* the author reading as a reader. It did not, and 31 of them
+were visible as text on one piece — which also hid that piece's six images, because an image
+sharing a block with a `<!-- slide -->` comment never matched as an image at all.
+
+**Alt text is anchorable.** An image holder's text *is* its alt, so a finding can anchor there,
+propose better alt text in `now`, and `--apply` writes it into the draft like any other change.
 
 ## Facts
 

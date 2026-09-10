@@ -382,6 +382,50 @@ def unit_review_artifact(tmp):
     check('review: gate chips wrap rather than overflow',
           'white-space:nowrap}' not in ra.CSS.split('.gates b{')[0].split('.gates span{')[1])
 
+    # --- images and their ALT TEXT ------------------------------------------
+    # Alt text is house prose, it is the only thing a screen-reader user gets from a
+    # picture, and NOTHING else on this page showed it. Image blocks were skipped
+    # outright, so a piece's body images were simply absent — and an image sharing a
+    # block with an HTML comment was rendered as literal `<!-- slide -->` text.
+    # (Eric, 2026-09-10: "our artifact preview render should show us the alt text".)
+    ip = os.path.join(tmp, 'img'); os.makedirs(os.path.join(ip, 'assets'), exist_ok=True)
+    open(os.path.join(ip, 'publish.yaml'), 'w').write(
+        'title: T\nsubtitle: S\nimages:\n  assets/local.png: https://cdn.example/x_1.png\n')
+    open(os.path.join(ip, 'draft.md'), 'w').write(
+        'scaffold\n---\n![A hero, described](assets/nope.png)\n\n## I. First\n\n'
+        '<!-- slide -->\n<!-- design: internal -->\n![Figure 1: the shape](assets/gone.png)\n\n'
+        'Prose.\n\n![](assets/none.png)\n\n![Remote one](https://cdn.example/x_1.png)\n')
+    # a real (tiny) PNG so the CDN->local mapping is exercised end to end
+    try:
+        from PIL import Image
+        Image.new('RGB', (8, 6), (30, 40, 60)).save(os.path.join(ip, 'assets', 'local.png'))
+        have_pil = True
+    except ImportError:
+        have_pil = False
+    hi = ra.build(ip, {})
+    check('review: an image block renders as a figure, not as skipped text',
+          hi.count('<figure') == 4, 'body images were dropped from the page entirely')
+    check('review: the alt text is shown as prose',
+          'A hero, described' in hi and 'Figure 1: the shape' in hi)
+    check('review: an EMPTY alt is called out, not left blank',
+          'alt-none' in hi and 'MISSING' in hi,
+          'a picture with no alt gives a screen-reader user nothing')
+    check('review: an HTML comment never reaches the page',
+          '&lt;!--' not in hi and 'internal' not in hi,
+          'the converter strips them for the reader; this page is the author reading')
+    check('review: raw image markdown never reaches the page', '![' not in hi)
+    check('review: an image the page cannot show is NAMED, not dropped',
+          hi.count('image not shown') == 3,
+          'three of the four fixture images have no file; the fourth resolves via the map')
+    check('review: a CDN url maps back to its local file via publish.yaml',
+          (not have_pil) or ('no local file for it' not in hi
+                             and hi.count('data:image/jpeg') == 1),
+          'the manifest records which local file each uploaded url came from')
+    check('review: alt text is anchorable like any other prose',
+          'id="a1"' in ra.build(ip, {'findings': [
+              {'anchor': 'A hero, described', 'now': 'A hero, described better', 'title': 'X'}]}),
+          'so a review can propose new alt text and --apply can write it')
+
     # --- --apply: the contract makes applying a review a substitution, not a retyping ---
     ap = os.path.join(tmp, 'apply'); os.makedirs(ap, exist_ok=True)
     src = ('scaffold\n---\n## I. First\n\nThe devil taketh him up, and sheweth him all.[^a]\n\n'

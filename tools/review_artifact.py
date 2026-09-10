@@ -73,6 +73,29 @@ import sys, os, re, json, html, io, base64
 SANS = "IBM Plex Sans"; SERIF = "Spectral"; MONO = "IBM Plex Mono"
 
 
+def image_map(piece_dir):
+    """{uploaded url -> local path} from publish.yaml's `images:` block.
+
+    A published piece often references the CDN url in draft.md rather than the local
+    file, so the converter reuses the asset already in the post. The review page would
+    then have nothing to show — but the manifest records exactly which local file that
+    url came from, so use it and render the real picture instead of a placeholder.
+    """
+    out, path, inblock = {}, os.path.join(piece_dir, 'publish.yaml'), False
+    if not os.path.exists(path):
+        return out
+    for line in open(path, encoding='utf-8'):
+        if re.match(r'^images:\s*$', line):
+            inblock = True; continue
+        if inblock:
+            m = re.match(r'\s+(\S+)\s*:\s*(https?://\S+)', line)
+            if m:
+                out[m.group(2).strip()] = m.group(1).strip()
+            elif line.strip() and not line.startswith((' ', '\t')):
+                inblock = False
+    return out
+
+
 def manifest(piece_dir):
     out, path = {}, os.path.join(piece_dir, 'publish.yaml')
     if os.path.exists(path):
@@ -270,6 +293,22 @@ def rewrap(block, width):
     return unhide(lead + '\n'.join(textwrap.wrap(text, width, subsequent_indent=indent)))
 
 
+def embed_file(piece_dir, rel, width=1400):
+    """Downscale and inline any image the draft references, not only assets/hero.*."""
+    p = rel if os.path.isabs(rel) else os.path.join(piece_dir, rel)
+    if not os.path.exists(p):
+        return None, f'not on disk: {rel}'
+    try:
+        from PIL import Image
+    except ImportError:
+        return None, 'PIL missing — not embedded'
+    im = Image.open(p).convert('RGB')
+    if im.width > width:
+        im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+    buf = io.BytesIO(); im.save(buf, 'JPEG', quality=82, optimize=True, progressive=True)
+    return base64.b64encode(buf.getvalue()).decode(), None
+
+
 def hero(piece_dir, width=1400):
     for name in ('hero.png', 'hero.jpg', 'hero.jpeg'):
         p = os.path.join(piece_dir, 'assets', name)
@@ -319,6 +358,18 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
 .hero figcaption span{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink)}
 .hero figcaption em{font-style:normal;font-family:var(--mono);font-size:10.5px;
   letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+/* --- alt text: house prose that nothing else on this page would show --------- */
+.alt{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:baseline;
+  margin:10px 0 0;padding:9px 11px;background:var(--accent-soft);border-left:2px solid var(--accent)}
+.alt b{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  font-weight:500;color:var(--accent)}
+.alt span{font-family:var(--sans);font-size:13.5px;line-height:1.55;color:var(--ink)}
+.alt em{font-style:italic}
+.alt-none{background:var(--flag-soft);border-left-color:var(--flag)}
+.alt-none b,.alt-none span{color:var(--flag)}
+.alt-none span{font-family:var(--mono);font-size:12px;letter-spacing:.04em}
+.fig{margin:26px 0;padding:0}
+.fig img{width:100%;height:auto;display:block;border:1px solid var(--rule)}
 .slot{border:1px dashed var(--flag);background:var(--flag-soft);color:var(--flag);
   font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
   padding:34px 18px;text-align:center;margin:30px 0 0}
@@ -467,11 +518,28 @@ def build(piece_dir, facts):
     # sit inside an emphasis run without the inline pass having to know about it.
     # The sentinels are private-use codepoints: html.escape leaves them alone and
     # none of the markdown regexes can match them.
+    # An HTML comment is an internal note. The converter drops it before a reader ever
+    # sees it (the `0c` convention), and this page IS the author reading the piece as a
+    # reader — so it drops them too. It did not, and 31 of them were visible as text on
+    # one piece's review page, which also hid that piece's six images: an image sharing a
+    # block with a `<!-- slide -->` comment never matched as an image at all.
+    COMMENT = re.compile(r'<!--.*?-->', re.S)
+
     def split_blocks(md, kind='mv'):
         out = []
-        for b in re.split(r'\n\s*\n', md):
+        for b in re.split(r'\n\s*\n', COMMENT.sub('', md)):
             b = b.strip()
-            if not b or b.startswith('!['):
+            if not b:
+                continue
+            im = re.fullmatch(r'!\[([^\]]*)\]\(([^)\s]+)\)', ' '.join(b.split()))
+            if im:
+                # An image block used to be SKIPPED, so a piece's body images simply were
+                # not on the page — three pieces in this corpus carry 6, 5 and 2 of them.
+                # The holder's text is the ALT, because that is the prose a review is for:
+                # it is house writing, it is what a screen reader gets, and it is the one
+                # string that reaches a reader without any sweep having looked at it.
+                out.append({'q': False, 'kind': 'img', 'src': im.group(2),
+                            'cards': [], 'marks': [], 'text': im.group(1)})
                 continue
             if b.startswith('>'):
                 out.append({'q': True, 'kind': kind, 'cards': [], 'marks': [],
@@ -481,11 +549,36 @@ def build(piece_dir, facts):
                             'text': ' '.join(b.split())})
         return out
 
+    imgmap = image_map(piece_dir)
+
+    def embed(rel):
+        local = imgmap.get(rel, rel)          # a CDN url maps back to the file it came from
+        b64, why = embed_file(piece_dir, local)
+        if b64:
+            return f'<img src="data:image/jpeg;base64,{b64}" alt="">'
+        # An image the page cannot show is NAMED, never dropped: a review page that
+        # silently omits part of the piece is the one failure this file refuses.
+        if re.match(r'https?://', rel) and rel not in imgmap:
+            why = f'remote image, and no local file for it in publish.yaml `images:` — {rel[:60]}…'
+        return f'<div class="slot">image not shown &mdash; {html.escape(why or rel)}</div>'
+
+    def alt_block(h):
+        """Show the alt text as prose, because it IS prose and nothing else shows it."""
+        body = demark(inline(h['text'], num, notes=False))
+        if not h['text'].strip():
+            return ('<div class="alt alt-none"><b>alt</b><span>MISSING &mdash; a reader on a '
+                    'screen reader gets nothing here</span></div>')
+        return f'<div class="alt"><b>alt</b><span>{body}</span></div>'
+
     def render_blocks(hs):
         out = []
         for h in hs:
-            body = demark(inline(h['text'], num, notes=(h['kind'] != 'note')))
-            out.append(f'<blockquote><p>{body}</p></blockquote>' if h['q'] else f'<p>{body}</p>')
+            if h['kind'] == 'img':
+                out.append(f'<figure class="fig">{embed(h["src"])}{alt_block(h)}</figure>')
+            else:
+                body = demark(inline(h['text'], num, notes=(h['kind'] != 'note')))
+                out.append(f'<blockquote><p>{body}</p></blockquote>' if h['q']
+                           else f'<p>{body}</p>')
             out.extend(card(i) for i in h['cards'])
         return '\n'.join(out)
 
@@ -496,6 +589,7 @@ def build(piece_dir, facts):
         # README, log, dashboard and three commit messages, and the artifact is the one
         # surface an author checks the number on.  This regex is the one the rest of the
         # desk counts with, so the artifact and the scaffold now agree by construction.
+        md = re.sub(r'<!--.*?-->', '', md, flags=re.S)   # internal notes are not prose
         md = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', md)   # images
         md = re.sub(r'\[\^[^\]]+\]', '', md)             # footnote references
         md = re.sub(r'^\s*>\s?', '', md, flags=re.M)      # blockquote markers
@@ -506,6 +600,7 @@ def build(piece_dir, facts):
     # --- findings, anchored into the prose ----------------------------------
     findings = facts.get('findings', [])
     lead_h = split_blocks(lead, 'lead')
+    hero_h = next((h for h in lead_h if h['kind'] == 'img'), None)   # rendered in the masthead
     mv_h = [split_blocks(md) for _, md in movements]
     note_h = {k: {'q': False, 'kind': 'note', 'cards': [], 'marks': [],
                   'text': ' '.join(defs[k].split())} for k in order}
@@ -535,9 +630,10 @@ def build(piece_dir, facts):
         return ''.join(out)
 
     toc, essay = [], []
-    if lead_h:
+    lead_rest = [h for h in lead_h if h is not hero_h]     # the hero renders once, above
+    if lead_rest:
         essay.append(f'<section class="mv"><div class="rail"></div>'
-                     f'<div class="col">{render_blocks(lead_h)}</div></section>')
+                     f'<div class="col">{render_blocks(lead_rest)}</div></section>')
     for i, (head, md) in enumerate(movements, 1):
         n = re.match(r'([IVXLC]+|\d+)\.', head)
         label = n.group(1) if n else str(i)
@@ -585,17 +681,15 @@ def build(piece_dir, facts):
         callsblk = (f'<section class="calls"><h3>Open &mdash; {len(calls)} '
                     f'call{"s" if len(calls)!=1 else ""} for you</h3>{items}</section>')
 
-    b64, warn = hero(piece_dir, )
     cover = facts.get('cover') or {}
-    if b64:
-        alt = re.search(r'!\[([^\]]*)\]', prose)
-        figure = (f'<figure class="hero"><img src="data:image/jpeg;base64,{b64}" '
-                  f'alt="{html.escape(alt.group(1)) if alt else ""}"><figcaption>'
+    if hero_h:
+        figure = (f'<figure class="hero">{embed(hero_h["src"])}<figcaption>'
                   f'<span>{cover.get("caption","")}</span>'
                   f'<em>{cover.get("provenance","provenance not recorded")}</em>'
-                  f'</figcaption></figure>')
+                  f'</figcaption>{alt_block(hero_h)}</figure>'
+                  + ''.join(card(i) for i in hero_h['cards']))
     else:
-        figure = f'<div class="slot">Hero image slot &mdash; {warn or "none supplied yet"}</div>'
+        figure = ('<div class="slot">Hero image slot &mdash; the draft references no image</div>')
 
     notes = ''.join(
         f'<li id="n{num[k]}"><div class="fnn">{num[k]}</div><div>'

@@ -374,10 +374,33 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    would corrupt raw JSON). Read it back out of the DOM with `atob`, **checksum it against the
    file**, delete the carrier node, then insert. **Insert in batches of ~8–9** — thirty-five in one call also exceeds the 45s
    timeout. Prove the transfer with a checksum computed on both sides before inserting anything.
+   **Two failures measured on this path, 2026-09-10, and both are silent.**
+   **(a) `--paste` raises the window but does not put the caret in the editor.** It reported
+   *"pasted body … the lease is released"* into a document that stayed empty — the report is a claim
+   about the keystroke, not evidence about the doc (`hasFocus:false`, `editorFocused:false` on the
+   page afterwards). **Always a real coordinate click into the body first**, then the ⌘V, then the
+   count check. **(b) A carrier ⌘V that appears to have failed may have landed in the wrong place.**
+   One went into the *middle of a paragraph*, splitting it mid-word and burying 8,796 characters
+   inside the remainder, with no error anywhere; a top-node count of 80 against an expected 79 was
+   the only tell. **Check the node count against the converter's, not just the marker count.**
+
+   **And when you strip a base64 carrier back out of prose, bound the match by the payload's known
+   length — never by charset greed.** `/^[A-Za-z0-9+/=]{4000,}/` removed 8,797 characters instead of
+   8,796, because **`e` is a base64 character**: it ate the *e* of *"a long time"* and left *"a long
+   tim taking pictures down"* mid-essay. Use `text.slice(0, text.length - knownB64Len)`, or splice at
+   the exact count. **That is a transcription-class corruption introduced by a repair — the precise
+   class this whole transport exists to prevent — and no contraction, link or pronoun sweep can see
+   it. Only the fidelity digest can.**
+
 5. **Post-check (JS):** title/subtitle set · block counts match · **0 empty paragraphs** ·
    heading/divider/image counts · footnotes == manifest count · **0 `[[FN` markers left** ·
    in-body sibling links present. Report the numbers; don't say "done" without them.
-6. **Fidelity check — do this, it is the whole point.** Hash every live block's flattened text,
+6. **Fidelity check — do this, it is the whole point.** **Read a mismatch before repairing it.**
+   An intermediate run mismatched on exactly the blocks carrying `[[FN]]` markers — the live text
+   still held them while `render_reader` strips them, so the mismatch was *expected at that point*
+   rather than damage, and treating it as damage would have caused a second, needless repair. Run the
+   digest **after** the footnotes are in; if it mismatches before that, check whether the differing
+   blocks are precisely the marker-bearing ones. Hash every live block's flattened text,
    digest the list, and compare against the same digest computed from `draft.md` via
    `render_reader`. **The two digests must be identical.** A clipboard paste cannot introduce a
    transcription error, so this is cheap and should pass first time; if it does *not*, something

@@ -1188,6 +1188,41 @@ def unit_store(tmp):
     check('a talk with no outlets is refused, not published everywhere',
           r2.returncode != 0 and 'outlets' in (r2.stdout + r2.stderr), (r2.stdout + r2.stderr).strip())
 
+    # ---- bundle_pieces: markdown bundle -> the JSON the store serves ----
+    content = os.path.join(tmp, 'vendored')
+    os.makedirs(content, exist_ok=True)
+    imgs = os.path.join(tmp, 'vendored-images', 'a-piece')
+    os.makedirs(imgs, exist_ok=True)
+    with open(os.path.join(imgs, 'hero.webp'), 'wb') as f:
+        f.write(b'RIFF____WEBP')
+    with open(os.path.join(content, 'a-piece.md'), 'w', encoding='utf-8') as f:
+        f.write('---\nslug: a-piece\ntitle: A Piece\npublished_at: 2026-05-04\n'
+                'digest: sha256:abc123def456\nhero:\n  src: /images/a-piece/hero.webp\n'
+                '  alt: A hero\n---\n\nBody with an ![inline](/images/a-piece/hero.webp).\n')
+
+    b2 = os.path.join(tmp, 'bundle-pieces')
+    r3 = subprocess.run([sys.executable, os.path.join(HERE, 'bundle_pieces.py'), content, b2,
+                         '--outlet', 'alignmentfellowship', '--images',
+                         os.path.join(tmp, 'vendored-images')], capture_output=True, text=True)
+    check('a vendored bundle converts to store JSON', r3.returncode == 0,
+          (r3.stdout + r3.stderr).strip())
+    if r3.returncode != 0:
+        return
+    with open(os.path.join(b2, 'pieces', 'a-piece.json'), encoding='utf-8') as f:
+        conv = json.load(f)
+    # A destination rewrote ../images to /images so it could serve from /public. The
+    # store needs that undone, in the front matter AND in the prose.
+    check('a destination image rewrite is undone in front matter',
+          conv['hero']['src'] == '../images/a-piece/hero.webp', str(conv.get('hero')))
+    check('and undone in the body too',
+          '../images/a-piece/hero.webp' in conv['body'] and '](/images/' not in conv['body'],
+          conv['body'])
+    check('the digest is carried over, never recomputed',
+          conv['digest'] == 'sha256:abc123def456', conv['digest'])
+    check('images travel with the piece',
+          os.path.exists(os.path.join(b2, 'images', 'a-piece', 'hero.webp')))
+
+
 
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():

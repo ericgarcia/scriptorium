@@ -218,7 +218,13 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
    `infra/`), quire's `quire/store` client, and muffinlabs reading its talk from the
    store. `talk_bundle.py` assembles a bundle; `store_publish.py` uploads it,
    idempotently, and invalidates what moved.
-4. Move the second site; retire the vendored-bundle path.
+4. ~~Move the second site; retire the vendored-bundle path.~~ **Done 2026-09-10.**
+   alignmentfellowship reads all 32 writings and their images from the store;
+   `content/writings`, `public/images`, velite and `import-bundle.sh` are gone.
+   `bundle_pieces.py` did the conversion. It cost `output: 'export'` — a static export
+   can only read the store at build time, which takes the dependency and gains none of
+   the speed — so **item 5 is now load-bearing**, not optional: the portability promise
+   that flag used to keep now rests entirely on the bundle and a snapshot.
 5. `snapshot.py`, so the portability promise is real before anyone relies on it.
 6. LinkedIn outlet.
 
@@ -266,9 +272,10 @@ incremental rendering, and a point against any host whose server-side story is s
   orgs: a public repo consumed as a git dependency, or a published package. A private
   registry would add an auth story to three repos to protect components that contain
   nothing secret.
-- **Velite's remaining role.** With content coming from the store and rendering coming
-  from the package, velite has no live job on either site. It could stay as the
-  schema validator for snapshots, or retire in favour of validating in the exporter.
+- ~~**Velite's remaining role.**~~ **Settled 2026-09-10: retired.** Its job was
+  validating front matter against the bundle spec, and quire's `validatePiece` does
+  that now — at the point of reading, for every site rather than one. alignmentfellowship
+  no longer depends on it.
   Keeping both means two schemas that can disagree, which is the failure the bundle
   exists to prevent.
 - **Migration of 42 pieces.** Re-export is mechanical, but every published URL must keep

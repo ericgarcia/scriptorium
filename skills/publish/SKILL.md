@@ -715,6 +715,42 @@ path they were composed by, not to Substack discarding it.
 > loaded gun, not a loose end. Deleting it is the author's click, never the agent's; say plainly
 > that it is waiting and where.
 
+## Pages — the same machinery, three differences
+
+**A Substack PAGE is a post with `type: "page"`.** Measured 2026-09-10 by clicking *Add page* in
+Settings → Custom pages: it opens at **`/publish/post/<id>`**, in the **same Tiptap composer**, with
+the same toolbar and the same *Continue* button. So **every transport in this skill works
+unchanged** — `md_to_substack.py`, the `pane_carry.py` carry, the footnote pass, the fidelity
+digest against `render_reader`. Do not build a second pipeline; there is only one.
+
+**What a page is for.** Standing information that is not news: a colophon, a disclosure, an
+editorial policy. A post is dated and filed in the archive, which is wrong for something that
+governs everything published before and after it. A page is undated and sits in the nav bar.
+
+**Declare it in the manifest**, because nothing about the composer will tell you which you are in:
+
+```yaml
+substack_type: page      # default `post`; a page is undated, un-archived, never emailed
+public_url: https://<pub>.substack.com/<slug>   # RECORD it — never derive it
+```
+
+**The three differences, and each one turns a check off rather than on:**
+
+1. **It never emails.** `should_send_email` is `false` on a fresh page and must stay false. The
+   first-publication rule — *a first publication sends the subscriber email* — is about posts. A
+   page going live mails nobody, and the delivery section must be **provably off**, exactly as on
+   the re-sync path.
+2. **It is not in the post archive.** `substack_verify --archive` walks the archive API, so a page
+   will never appear there; the audit excludes a piece that declares `substack_type: page` rather
+   than reporting it missing from a list it was never going to be in.
+3. **It needs no cover.** `cover_image` drives the drafts-list thumbnail, the archive card and the
+   social preview — a page is in none of those, so step 8 does not apply and `NO COVER` is not a
+   finding against it.
+
+**Everything else still holds**, and that is the point of it being the same machinery: the
+verification gate, the scripture check, the pronoun and link sweeps, the fidelity digest, and the
+rule that the author decides and this skill clicks.
+
 ## Republish — surgically re-sync a live post
 
 > **⚠️ Republish edits a public post. Treat the write as irreversible; do NOT assume it has

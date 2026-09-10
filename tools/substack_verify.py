@@ -377,6 +377,13 @@ def audit_archive(repo, fresh):
         u = man.get('public_url', '')
         if u:
             known[u.rstrip('/').rsplit('/', 1)[-1]] = (name, man)
+    # A Substack PAGE is a post with `type: "page"` (measured 2026-09-10): same editor
+    # route, same composer, same transport — but it is NOT in the post archive, has no
+    # post_date, never emails and needs no cover. So a piece that declares itself a page
+    # is excluded from this audit rather than reported missing from a list it was never
+    # going to be in.
+    pages = {k: v for k, v in known.items() if v[1].get('substack_type') == 'page'}
+    known = {k: v for k, v in known.items() if v[1].get('substack_type') != 'page'}
     if not known:
         return [], ['no piece records a public_url, so the publication cannot be located']
     base = re.match(r'https?://[^/]+', next(iter(known.values()))[1]['public_url']).group(0)
@@ -403,6 +410,8 @@ def audit_archive(repo, fresh):
             flags += [f for f in header_drift(p, man) if 'differs' in f]
         rows.append((slug, name or '-', (p.get('post_date') or '')[:10], flags))
         problems += [f'{slug}: {f}' for f in flags]
+    for slug, (name, _man) in sorted(pages.items()):
+        rows.append((slug, name, 'page', ['(page — not in the post archive)']))
     return rows, problems
 
 

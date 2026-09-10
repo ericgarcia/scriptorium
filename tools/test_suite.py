@@ -112,6 +112,34 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: substack pages
+def unit_pages(tmp):
+    """A page is a post with type "page" — the checks that must NOT fire on one.
+
+    Measured 2026-09-10: clicking Add page opens /publish/post/<id> in the same composer,
+    and the draft object differs only by `type`. So the transport is shared and the risk
+    is the other direction — a post-shaped check reporting a page as broken because it is
+    absent from a list it was never going to be in.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'sv', os.path.join(os.path.dirname(__file__), 'substack_verify.py'))
+    sv = importlib.util.module_from_spec(spec); spec.loader.exec_module(sv)
+
+    repo = os.path.join(tmp, 'pagerepo'); pieces = os.path.join(repo, 'pieces')
+    for slug, extra in (('an-essay', ''), ('a-colophon', 'substack_type: page\n')):
+        d = os.path.join(pieces, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(
+            f"title: T\nsubtitle: S\n{extra}"
+            f"public_url: https://example.substack.com/p/{slug}\n")
+    man_page = sv.read_manifest(os.path.join(pieces, 'a-colophon', 'publish.yaml'))
+    man_post = sv.read_manifest(os.path.join(pieces, 'an-essay', 'publish.yaml'))
+    check('pages: substack_type is read from the manifest',
+          man_page.get('substack_type') == 'page')
+    check('pages: a post does not accidentally declare itself one',
+          man_post.get('substack_type') is None)
+
+
 # ---------------------------------------------------------------- unit: scripture check
 def unit_scripture(tmp):
     """The scripture checker's conventions, which are where it can go wrong.
@@ -1582,6 +1610,7 @@ def main():
         unit_link_extraction()
         unit_review_artifact(tmp)
         unit_scripture(tmp)
+        unit_pages(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()

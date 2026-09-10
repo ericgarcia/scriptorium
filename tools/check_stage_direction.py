@@ -62,7 +62,9 @@ SHAPES = {
  'architecture': [
    r"\bthis essay\b", r"\bthe rest of this essay\b", r"\bmy other essays\b",
    r"\bsection (?:one|two|three|four|five|six|seven|eight|nine|[IVX]+)\b",
-   r"\bPart [IVX]+\b", r"\bthe whole argument turns on\b", r"\bthe whole of this essay\b",
+   # case-SENSITIVE: `\bpart I\b` under re.I matches "the part I have come to believe",
+   # which is English, not a section reference. Two false positives in one piece.
+   r"(?-i:\bPart [IVX]+\b)", r"\bthe whole argument turns on\b", r"\bthe whole of this essay\b",
    r"\bwhich is the last thing\b",
  ],
 }

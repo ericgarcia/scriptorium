@@ -11,6 +11,7 @@ what gets composed and refuses when the piece is not ready to go there.
 
   OUT   <out>/article.html    the body, LinkedIn-safe, ready to paste
         <out>/article.json    title, canonical, and the images in upload order
+        <out>/fig<N>.json     one per figure: {n, alt, name, dataUri}, for pane_carry.py
 
 WHAT LINKEDIN CANNOT CARRY, AND WHAT THIS DOES INSTEAD
 
@@ -19,11 +20,11 @@ WHAT LINKEDIN CANNOT CARRY, AND WHAT THIS DOES INSTEAD
                  composer inserts them, so the two copies number alike.
   rel=canonical  LinkedIn emits none. "Link to the canonical" is a visible line at the
                  top — *Originally published at <url>* — not a tag.
-  Images         Not inlined. Where a figure sits, the body carries a marked slot, and
-                 article.json lists each file with its alt text in order. Nothing here
-                 has measured what LinkedIn's editor does with a pasted data: image, and
-                 a paste that silently drops five figures is worse than a slot that says
-                 where each one goes.
+  Images         A marked slot in the body, and a fig<N>.json per figure. Measured
+                 2026-09-10: a pasted data: image lands as a figure and LinkedIn uploads
+                 it to its CDN ON SAVE — but the paste DROPS THE ALT TEXT, so each figure
+                 is pasted over its own slot and its alt set afterwards from the payload.
+                 One figure at a time keeps a 2 MB image off the body's paste.
   Subtitle       An Article has a title and nothing else, so the subtitle becomes an
                  italic lede under the canonical line.
 
@@ -233,7 +234,18 @@ def main():
         json.dump({'title': title, 'canonical': canonical, 'images': images},
                   fh, indent=2, ensure_ascii=False)
         fh.write('\n')
-    print(f"\nwrote      {out}/article.html, article.json")
+    # One carry payload per figure. The bytes and the alt text travel together, so the
+    # page that pastes the image is also the page that restores its alt — which the paste
+    # drops — and neither is ever retyped.
+    import base64, mimetypes
+    for img in images:
+        mime = mimetypes.guess_type(img['file'])[0] or 'image/png'
+        with open(img['file'], 'rb') as fh:
+            data = base64.b64encode(fh.read()).decode()
+        with open(os.path.join(out, f"fig{img['n']}.json"), 'w', encoding='utf-8') as fh:
+            json.dump({'n': img['n'], 'alt': img['alt'], 'name': os.path.basename(img['file']),
+                       'dataUri': f'data:{mime};base64,{data}'}, fh, ensure_ascii=False)
+    print(f"\nwrote      {out}/article.html, article.json, fig1..{len(images)}.json")
     print("next       compose in LinkedIn's Article editor; a human clicks Publish")
     return 0
 

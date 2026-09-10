@@ -232,14 +232,16 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
    alignmentfellowship's 32 vendored files, recovered from git, match the snapshot
    exactly once the documented `/images` → `../images` rewrite is accounted for.
    `--verify-only` re-checks an existing snapshot and exits non-zero on a fault.
-6. ~~LinkedIn outlet.~~ **Built 2026-09-10; not yet driven.** `tools/md_to_linkedin.py`
+6. ~~LinkedIn outlet.~~ **Built and driven 2026-09-10**, against a labelled test draft. `tools/md_to_linkedin.py`
    composes the Article copy and refuses without a recorded, live canonical;
    `skills/linkedin-article` carries the flow; `outlet_audit.py` now refuses to guess a
    LinkedIn URL (`derive: false`), reports a published piece whose copy was never recorded,
    and knows LinkedIn's not-found page when a dead Article redirects to it. What is left is
-   measured, not built: the first real compose in the Article editor, which needs a piece
-   whose canonical is live — none is yet — and the author's word that automating the
-   editor is in scope. The instance's outlet entry:
+   measured, not built — and on 2026-09-10 it was measured: the whole compose ran in the
+   built-in pane (Eric's decision that day: the Article editor is in scope, pane preferred),
+   59/59 blocks byte-identical, a figure uploaded to LinkedIn's CDN with its 740-character
+   alt text surviving a reload. What remains is a real piece, whose canonical is live — none
+   is yet. The instance's outlet entry:
 
    ```yaml
    linkedin:

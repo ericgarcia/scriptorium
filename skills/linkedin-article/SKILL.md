@@ -57,28 +57,50 @@ Then, without `--check`, it writes `pieces/<name>/linkedin/article.html` and
 | native footnotes | `[1]` in the text, **Notes** at the end | LinkedIn has no footnotes; numbered in first-reference order, as Substack numbers them |
 | figures | a marked slot per figure, uploaded by hand | unmeasured what the editor does with a pasted data: image |
 
-## Composing — and the parts not yet measured
+## Composing — measured 2026-09-10, end to end, in the built-in pane
 
-**This path has not been driven end to end yet.** What follows is the plan; replace each
-*unmeasured* with what actually happened, the way the Substack skill records its traps.
+Driven once, against a draft titled `[TEST — do not publish]`, and every step below is what
+actually happened. **The pane is the default surface** (Eric, 2026-09-10); it holds none of the
+author's sessions, so they sign in there themselves.
 
-1. Open `https://www.linkedin.com/article/new/` in the author's Chrome (they are logged in;
-   automation never enters credentials).
-2. Title: `article.json` → `title`. Click the title field and **type** it. The profile
-   skill measured that pasting through the extension mangles non-ASCII — em dashes arrive
-   as `‚Äî` — and typing does not.
-3. Body: load `article.html` onto the pasteboard as HTML and paste with a real ⌘V into the
-   body after a real click — `md_to_clipboard.py`'s lease and `--expect-url` guard exist
-   precisely for this, and the agent never retypes the essay. *Unmeasured: whether the
-   editor keeps h2, em, strong and links from a native HTML paste.* Screenshot and zoom to
-   confirm before going further.
-4. Figures: for each slot in order, delete the slot paragraph, use the editor's image
-   button, upload `article.json` → `images[k].file`, and set its alt text from
-   `images[k].alt`. *Unmeasured: where the image control is and whether alt text is
-   settable at upload.*
-5. Cover image: optional; ask.
-6. **Stop.** Say what was composed and where, and that the author reviews it, writes the
-   announcing post in the publish dialog, and clicks Publish.
+1. **Sign-in is the author's.** LinkedIn answers a new device with an *app challenge* ("Check
+   your LinkedIn app… tap Yes"). Never touch Resend, SMS, or "Recognize this device". Then
+   **confirm it took before navigating** — read `document.title`/`location.pathname` and stop on
+   `sign in|login|challenge|checkpoint`. On 2026-09-10 "done, I'm signed in" arrived while the
+   pane was still on the challenge; navigating then started a second challenge.
+2. **Carry the body.** `python3 framework/tools/pane_carry.py <out>/article.html`, navigate the
+   pane to the carry URL, then to `https://www.linkedin.com/article/new/`. `window.name` crosses
+   intact — and survives a sign-in round trip and a reload. Verify the sha256 in the page.
+3. **Title first, and wait for the draft to exist.** `textarea#article-editor-headline__textarea`,
+   set by its native value setter plus an `input` event (it is short and not prose). **Setting
+   it creates the draft: the URL becomes `/article/edit/<id>/` and the body editor REMOUNTS.** A
+   paste sent straight after the title went into the discarded editor and vanished — the first
+   attempt landed zero of 3,271 words. Wait for the `/edit/` URL, re-query the editor, then paste.
+4. **Body.** `div.ProseMirror[aria-label="Article editor content"]` is **Tiptap** (`el.editor`).
+   Refuse if it is not empty, then dispatch a synthetic `ClipboardEvent('paste')` carrying the
+   `text/html` — the same transport as the Substack pane path. Measured against the sent HTML:
+   **59/59 blocks byte-identical**. Unlike Substack, **no smart-quote rewriting**. Two changes to
+   expect, neither a fault: **every `h2` becomes `h3`** (LinkedIn demotes headings a level), and
+   an `em` wrapping a link **splits around it** (the canonical line: 23 `em` sent, 25 counted).
+5. **Figures, one at a time.** For figure *N*: carry `<out>/fig<N>.json`, find the paragraph
+   whose text starts `[Figure N — upload here]`, `E.commands.setNodeSelection(pos)`, and paste an
+   `<img>` **built with `document.createElement`** so its alt is escaped properly (the shared
+   renderer's `esc()` does not escape quotes). It lands as `figureImage` → `inlineImage` +
+   `figcaption`. Then:
+   - **It is uploaded ON SAVE, not on paste.** For the first 25 seconds the `src` is still a
+     `data:` URI and `urn` is empty; after the autosave and a reload it is
+     `media.licdn.com/dms/image/…` with `urn:li:digitalmediaAsset:…`. Verify after a reload —
+     reading it straight after the paste says "not uploaded", which was wrong.
+   - **The paste drops the alt text** (740 characters in, 0 kept). Restore it from the payload:
+     `tr.setNodeMarkup(pos, undefined, {...attrs, alt})` on the `inlineImage`. Measured: 740/740,
+     exact, still there after a reload.
+6. **The onboarding modal** ("Say hello to a smoother editing and publishing experience") opens
+   on first use and closes on its own. Nothing needs clicking.
+7. **Stop.** The draft autosaves ("Draft - saved"). Say what was composed and where; the author
+   reviews it, writes the announcing post in the publish dialog, and clicks Publish.
+
+**The agent cannot delete a LinkedIn draft**: permanent deletion is the author's. A test draft
+stays until they remove it or it is overwritten by the real compose.
 
 ## After the author publishes
 

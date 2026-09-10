@@ -1792,6 +1792,13 @@ def unit_linkedin(tmp):
               j['images'][0]['alt'] == quoted_alt, repr(j['images'][0]['alt']))
         check('the figure is listed with the file to upload',
               j['images'][0]['file'].endswith('assets/fig.png'))
+        # The paste drops alt text (measured 2026-09-10), so the payload that carries the
+        # image must carry the alt with it, whole.
+        fp = os.path.join(out, 'fig1.json')
+        f1 = json.load(open(fp, encoding='utf-8')) if os.path.exists(fp) else {}
+        check('each figure gets a carry payload with its bytes and its alt together',
+              f1.get('alt') == quoted_alt and str(f1.get('dataUri', '')).startswith('data:image/png;base64,'),
+              str({k: (v[:40] if isinstance(v, str) else v) for k, v in f1.items()}))
 
     # --- the refusals ---------------------------------------------------------------
     def refuses(mutate, why_fragment, label):

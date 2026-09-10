@@ -68,46 +68,46 @@ hosted service today.
 ```
 <store>/
   index.json                     # every published piece, per outlet
-  pieces/<slug>.json             # one piece: metadata + rendered html + plain text
+  pieces/<slug>.json             # one piece: front matter + markdown body + plain text
   talks/<slug>/deck.html         # standalone deck
   talks/<slug>/notes.json        # per-slide speaker notes
   talks/<slug>/assets/…
   images/<slug>/…webp
 ```
 
-### Bundles carry rendered HTML, not just markdown
+### Rendering: one shared component package, markdown in the bundle
 
-This is the substantive change to [`BUNDLE.md`](BUNDLE.md), and it is what makes the
-whole thing simpler rather than more complex.
+**Decided 2026-09-10.** The bundle carries markdown, and every site renders it through
+a single shared React package rather than each site owning a renderer.
 
-Today a bundle carries markdown and every destination renders it. That means every
-destination needs a markdown pipeline, and they disagree: alignmentfellowship renders
-through velite with `remark-gfm`, and muffinlabs has a hand-rolled renderer that
-handles headings, lists and whole-line bold **and nothing else** — no images, no links,
-no inline emphasis, no footnotes. The same bundle would render differently on the two
-sites, and badly on one.
+The problem is real either way. Today alignmentfellowship renders through velite with
+`remark-gfm`, and muffinlabs has a hand-rolled renderer that handles headings, lists and
+whole-line bold **and nothing else** — no images, no links, no inline emphasis, no
+footnotes. The same bundle renders correctly on one site and badly on the other.
 
-So: **the exporter renders once.** A piece is markdown on the desk and HTML in the
-store. Consequences worth stating plainly:
+Two ways to fix that: render once in the exporter and ship HTML, or render in one place
+that every site imports. The shared package wins because every consumer is now React on
+Vercel — including the member app — so rendering can use real components (`next/image`,
+internal link handling, footnote markup) instead of injected HTML. Markdown also stays
+the only stored form, which keeps a future non-React destination possible.
 
-- Both sites display identical output, because it is literally the same bytes.
-- Neither site needs a markdown pipeline at all — which dissolves the muffinlabs
-  blocker without adding velite to it.
-- Footnotes, images and links are settled at publish time, where they can be validated
-  once, rather than at render time in two places.
-- The markdown stays in the bundle beside the HTML. It is the portable form and the
-  thing a future destination re-renders from.
+The cost is cross-repo versioning: three consumers in two GitHub orgs, so the package
+needs a real home and a real release, not a copied file.
 
-The trade: a rendering change means re-publishing pieces rather than redeploying a site.
-That is a batch job over the store, and it is the correct direction — content updates
-should not require a deploy, and rendering is content.
+Consequences worth stating plainly:
 
-### Freshness
+- Every site displays identical output, because it is literally the same components.
+- The muffinlabs blocker is dissolved without adding velite to it, and without either
+  site keeping a renderer of its own.
+- Footnotes, images and links are settled in one place, so a fix lands everywhere at
+  once instead of being fixed twice and drifting a third time.
+- Markdown remains the only stored form. A future destination that is not React — an
+  email, a print edition, an archive — still has something to render from.
 
-The CDN serves with a short TTL and `stale-while-revalidate`; publishing purges the
-paths it wrote. A reader sees new content within seconds, and the origin is not hit per
-request. Sites fetch at request time (Next: `revalidate` short, or on-demand
-revalidation triggered by the same purge).
+The trade: a rendering change now means a package release and a redeploy of each site,
+where shipping HTML from the exporter would have meant re-publishing pieces instead.
+That is the honest cost of choosing components over bytes, and it is the reason the
+package needs a real home and a version, not a file copied between repos.
 
 ## Snapshots: keeping the thumb-drive property
 
@@ -205,11 +205,28 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
 ## Sequence
 
 1. Agree this document.
-2. Bundle spec v2: rendered HTML alongside markdown; talks as a content type.
+2. Bundle spec v2: talks as a content type, and a `pieces/<slug>.json` shape the
+   shared renderer and the sites agree on.
 3. Stand up the store and the shared read client; point one site at it.
 4. Move the second site; retire the vendored-bundle path.
 5. `snapshot.py`, so the portability promise is real before anyone relies on it.
 6. LinkedIn outlet.
+
+## The properties this has to serve
+
+As of 2026-09-10 the web outlets are all Next.js on Vercel, which is what makes a single
+shared renderer and on-demand revalidation practical:
+
+| property | repo | role |
+|---|---|---|
+| muffinlabs.ai | `muffin-labs/muffinlabs-web` | canonical for professional pieces; carries talks |
+| alignmentfellowship.org | `alignmentfellowship/website` | canonical for theological pieces; the record |
+| the member app | `alignmentfellowship/app` | not a publishing target yet, but a third consumer of the renderer |
+
+muffinlabs was on AWS Amplify until 2026-09-10 and is now on Vercel, which is the change
+that made the delivery decision above available. The member app is listed because it
+will want the same prose components, and a package with three consumers is designed
+differently from one with two.
 
 ## Site hosting is a separate question
 
@@ -232,11 +249,17 @@ incremental rendering, and a point against any host whose server-side story is s
   to 50 TB, no overages) also blunt the egress risk that used to make R2 the obvious
   answer. Because the client is written against the S3 API, moving to R2 later is a
   bucket sync and an endpoint change.
-- **Where the rendering lives.** The exporter is Python; the sites are TypeScript. A
-  Python renderer keeps publishing in one language, but a TS one could share the exact
-  component set the sites use. Rendering once is the point either way.
-- **Does muffinlabs keep velite at all?** If content comes from the store, velite has no
-  live role. It could stay as the snapshot-time validator, or the schema could move into
-  the exporter and velite retire. Keeping both means two schemas that can disagree.
+- ~~Where the rendering lives.~~ **Decided 2026-09-10: a shared React package**, since
+  every consumer is now React on Vercel. What is still open is where that package lives
+  and how it ships. The consumers span two GitHub orgs — `muffin-labs` and
+  `alignmentfellowship` — plus the member app, so it needs to be installable across
+  orgs: a public repo consumed as a git dependency, or a published package. A private
+  registry would add an auth story to three repos to protect components that contain
+  nothing secret.
+- **Velite's remaining role.** With content coming from the store and rendering coming
+  from the package, velite has no live job on either site. It could stay as the
+  schema validator for snapshots, or retire in favour of validating in the exporter.
+  Keeping both means two schemas that can disagree, which is the failure the bundle
+  exists to prevent.
 - **Migration of 42 pieces.** Re-export is mechanical, but every published URL must keep
   resolving, and some slugs already diverge between outlets.

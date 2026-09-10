@@ -34,14 +34,27 @@ its two paths are the two ways this corpus's answer comes out *God*.
 
 WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normalized:
 
-  A. SENTENCE-INITIAL CAPITALS  He/Him/His/They/Them/She/Her at the head of a sentence.  English
-     forces the capital, and a forced capital silently reassigns the referent to the Son, the
-     Father or the Spirit.  Every hit is listed for justification; the usual repair is to
-     restructure so the pronoun falls mid-sentence.
+  A. A SENTENCE-INITIAL CAPITAL THAT READS AS DEITY  He/Him/His/They/Them/She/Her at the head of a
+     sentence, WHERE THE NEAREST ANTECEDENT IS A PERSON.  English forces the capital on every
+     pronoun at a sentence head, so the capital itself is not the fault; in a house that
+     capitalizes deity pronouns, the one that does damage is a HUMAN's, which then reads as the
+     Son, the Father or the Spirit.  A capital whose nearest antecedent is God is correct and
+     unremarkable, and so is one in a paragraph that has just named the person — the reader knows
+     who is meant.  The capital can only be MISREAD where God is in play in the same paragraph, so
+     both a figure and a God-word must be present, the figure nearer.  Listing every capital buried
+     the real ones 485-deep, and listing every human-antecedent one still put 51 correct sentences
+     up for review (narrowed twice on 2026-09-10, Eric's call).  The repair is to restructure so
+     the pronoun falls mid-sentence, or to name the person.
+     KNOWN LIMIT: `nearest antecedent` mis-attributes where a person's NAME sits beside a divine
+     pronoun — a scripture citation (*John 10*), or an author quoted about God.  *None but He and
+     I* reads its *He* as Brother Lawrence when the word is God's, in Lawrence's own phrase.
   B. GENERIC MASCULINE  he/him/his/himself and *a man / the man / one man / any man*.  A
      hypothetical person takes they/them; the exception is *this person actually exists*
-     (scripture, history, a named character, the author).  Hits within a few words of a name
-     given with --names are marked `named?`; everything else is `GENERIC?` and needs a referent.
+     (scripture, history, a named character, the author).  A person named in `figures:` in the
+     piece's publish.yaml — or passed with --names — is STICKY FOR THE REST OF ITS PARAGRAPH, and
+     hits after them are theirs.  The old test was a 120-character lookback, far shorter than this
+     desk's prose: *Rising After Falls* names Brother Lawrence once and then says *he* for two
+     hundred words, and 85 of its 98 hits read GENERIC? when every one was Lawrence.
   C. GOD AS A LOWERCASE OBLIQUE, OR AS A *WHAT*  lowercase *the one / someone / whoever /
      something / a mind / one mind* in a sentence that also names God (God, Lord, Father,
      Spirit, Them, infinite, dream(ing), remembering, the One).  The essay voice capitalizes
@@ -331,31 +344,102 @@ def load_allow(piece):
         pass
     return allow
 
+def load_figures(piece):
+    """Named people whose pronouns are their own, from publish.yaml `figures:`.
+
+    B's old test was a 120-character lookback, which is far shorter than this desk's prose: a
+    passage about Brother Lawrence names him once and then says *he* for two hundred words, so
+    85 of 98 hits in *Rising After Falls* read GENERIC? when every one of them was Lawrence.
+    A declared figure is sticky for the rest of its PARAGRAPH instead (2026-09-10)."""
+    figs = []
+    try:
+        in_block = False
+        for ln in open(os.path.join(piece, 'publish.yaml'), encoding='utf-8'):
+            if re.match(r'^figures\s*:', ln):
+                in_block = True; continue
+            if in_block:
+                m = re.match(r'^\s+-\s+(.*?)\s*(?:#.*)?$', ln)
+                if m: figs.append(m.group(1).strip()); continue
+                if ln.strip() and not ln.startswith(' '): in_block = False
+    except FileNotFoundError:
+        pass
+    return figs
+
+# A God-word standing as an ANTECEDENT — the referent a capitalized pronoun would point back at.
+GOD_ANTECEDENT = re.compile(
+    r"\b(?:God|the LORD|the Lord|the Father|the Son|the Spirit|the Holy Spirit|Christ|Jesus|"
+    r"the One|Someone|They|Them|Their)\b")
+
 def sweep(piece, names=(), allow=None):
     """Run every section over the piece.  Returns {'sentences': n, 'A': [...], ... 'H': [...]}."""
     allow = load_allow(piece) if allow is None else allow
     text = body_of(piece)
     sents = sentences(text)
     A, B, C, D, E, F, G, H, I = [], [], [], [], [], [], [], [], []
-    name_re = re.compile(r'\b(' + '|'.join(map(re.escape, names)) + r')\b') if names else None
+    figures = list(names) + [f for f in load_figures(piece) if f not in names]
+    fig_re = re.compile(r'\b(' + '|'.join(map(re.escape, figures)) + r')\b') if figures else None
+
+    def last_referent(before):
+        """(kind, name) of the nearest antecedent in `before` — 'figure', 'God', or (None, None).
+
+        Nearest wins: whichever of a declared human figure or a God-word was named last is what a
+        pronoun after it points back at."""
+        fm = None
+        if fig_re:
+            for fm in fig_re.finditer(before):
+                pass
+        gm = None
+        for gm in GOD_ANTECEDENT.finditer(before):
+            pass
+        if fm and (not gm or fm.start() > gm.start()): return ('figure', fm.group(1))
+        if gm: return ('God', gm.group(0))
+        return (None, None)
+
+    # A and B run over PARAGRAPHS, because a referent is sticky for the length of a passage and a
+    # sentence-scoped test cannot see that (2026-09-10).
+    for flat in paragraphs(text):
+        if re.match(r'^\[\^[^\]]+\]:', flat):
+            continue
+        for a_i, b_i in sentence_bounds(flat):
+            s = flat[a_i:b_i].strip()
+            if not s:
+                continue
+            before = flat[:a_i]
+            quoted = [(q.start(), q.end()) for q in QUOTE_SPAN.finditer(s)]
+            def in_quote(i): return any(a <= i < b for a, b in quoted)
+            # A — a sentence-initial capital that MISLEADS.  English forces the capital on every
+            # pronoun at a sentence head; in a house that capitalizes deity pronouns, the one that
+            # does damage is a HUMAN's, which then reads as the Son, the Father or the Spirit.  A
+            # capital whose nearest antecedent is God is correct and unremarkable, and listing it
+            # buried the real ones 485-deep (narrowed 2026-09-10, Eric's call).
+            m = re.match(r'^[“"\*\[]*(He|Him|His|They|Them|She|Her)\b', s)
+            if m:
+                kind, who = last_referent(before)
+                window = flat[max(0, a_i - 60):a_i + 60]
+                # AMBIGUITY, not merely a human antecedent.  A capital in a paragraph that has just
+                # named Pickle or Corey Taylor misleads nobody — the reader knows who is meant, and
+                # listing those put 51 correct sentences in front of an operator.  The capital can
+                # only be MISREAD where God is also in play in the same paragraph, so both a figure
+                # and a God-word must be present, with the figure the nearer (2026-09-10).
+                if (kind == 'figure' and GOD_ANTECEDENT.search(before)
+                        and not any(x in window for x in allow)):
+                    A.append((m.group(1), f'God is named in this paragraph too; nearest is {who}',
+                              s[:130]))
+            # B — generic masculine, with a declared figure sticky for the rest of its paragraph
+            for m in re.finditer(r"\b(he|him|his|himself|a man|the man|one man|any man|man who)\b", s):
+                if in_quote(m.start()):
+                    continue
+                w = s[max(0, m.start()-60):m.end()+60]
+                if any(x in w for x in allow):
+                    continue
+                kind, who = last_referent(before + s[:m.start()])
+                if kind == 'figure':
+                    continue                                   # this person actually exists
+                B.append(('GENERIC?', m.group(1), ctx(s, m, 60)))
+
     for s in sents:
-        # A — sentence-initial forced capitals
-        m = re.match(r'^[“"\*\[]*(He|Him|His|They|Them|She|Her)\b', s)
-        if m:
-            A.append((m.group(1), s[:110]))
-        # spans that are quotations — case inside them is the source's
         quoted = [(q.start(), q.end()) for q in QUOTE_SPAN.finditer(s)]
         def in_quote(i): return any(a <= i < b for a, b in quoted)
-        # B — generic masculine
-        for m in re.finditer(r"\b(he|him|his|himself|a man|the man|one man|any man|man who)\b", s):
-            if in_quote(m.start()):
-                continue
-            tag = 'GENERIC?'
-            if name_re:
-                window = s[max(0, m.start()-120):m.start()]
-                if name_re.search(window):
-                    tag = 'named?  '
-            B.append((tag, m.group(1), ctx(s, m, 60)))
         # C — lowercase oblique for God, or God as a what
         if re.search(GOD_WORDS, s):
             for m in re.finditer(r"\b(the one|someone|whoever|something|a mind|one mind|the mind|a thing|the thing)\b", s):
@@ -453,8 +537,8 @@ def main():
     r = sweep(piece, names)
     A, B, C, D, E, F, G, H, I = (r[k] for k in 'ABCDEFGHI')
     print(f"check_pronouns — {os.path.basename(piece)}: {r['sentences']} sentences")
-    print(f"\nA. sentence-initial capitals to justify ({len(A)}):")
-    for p, c in A: print(f"   {p:5s} {c}")
+    print(f"\nA. a sentence-initial capital that READS AS DEITY but points at a person ({len(A)}):")
+    for w, why, c in A: print(f"   {w:5s} {why:52s} {_clip(c,120)}")
     print(f"\nB. masculine / 'a man' to justify ({len(B)}; {sum(1 for t,_,_ in B if t.startswith('GENERIC'))} unexplained):")
     for t, w, c in B: print(f"   {t} {w:8s} {c}")
     print(f"\nC. lowercase oblique near a God-word, or God as a *what* ({len(C)}):")

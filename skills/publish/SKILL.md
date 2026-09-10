@@ -154,6 +154,17 @@ first.
    proven rather than guessed), searching `~/Downloads` by default; failing that it keeps
    Substack's copy. Run it dry first — it changes nothing without `--apply`.
 
+0b-cover. **The cover is a checked-in asset, not only a Substack setting.**
+   A piece's hero lives at `pieces/<name>/assets/hero.png` and is recorded in `publish.yaml` as
+   `cover:` plus `cover_caption:`, with dimensions and a `sha256`. **`publish.yaml` must also state
+   the image's provenance — photograph or generated** — because a photorealistic hero can imply a
+   real person, or re-attach a biographical reading a piece deliberately dropped; the caption and
+   alt text then have to avoid implying a photograph. (Precedent: the generated portrait in
+   `metric-space`, disclosed in the manifest and in the footnote before its gate cleared.)
+   **The converter does not set the featured image** — attaching it is a composer-UI action and
+   belongs on the human's checklist, not this skill's. What the check-in buys is that the bytes
+   survive a recompose, and that the cover can be reviewed before it is attached.
+
 0b-embeds. **An embed is not an image, and the image checks were blind to it.**
    An image can be made recompose-safe by putting its URL in `draft.md`, because the converter
    emits `<img>`. **No markdown emits an embed.** A YouTube embed is a `youtube2` node carrying

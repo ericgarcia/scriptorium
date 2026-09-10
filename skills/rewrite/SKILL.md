@@ -59,6 +59,27 @@ under a constitution that has changed. Most of the work is deciding what stays f
      can see is a decision waiting; an image you picked is a decision taken from them. Where the
      piece is already live and has a hero, snapshot it (URL and caption) before anything else, since
      a recompose drops it.
+
+     **When they supply one, it is checked in — the image is part of the piece, not a thing that
+     lives only in Substack.** Four steps, and none is optional:
+     1. **`pieces/<slug>/assets/hero.png`** (the house name; 34 pieces use it). The repo holds the
+        bytes, so a recompose can never orphan it.
+     2. **`publish.yaml` records `cover:` and `cover_caption:`**, with the dimensions and a
+        `sha256` so a later file can be told from this one.
+     3. **Disclose the provenance, and treat it as load-bearing rather than housekeeping.** Say
+        whether it is a photograph or **generated**. This matters most where a photorealistic image
+        could be read as a picture of the author or someone they know: it can silently re-attach a
+        biographical reading the prose deliberately dropped. *Not Made of Things That Appear* is the
+        case — its §I is universal on purpose (*take a dog out on a leash*, not the author's own
+        dog), the corpus holds a real photograph of the author with his dog in another piece, and a
+        generated man-and-dog cover would have undone that scoping without a word being changed.
+        The caption and the alt text must not imply a photograph of anyone.
+     4. **Put it in the review artifact**, downscaled to about 1400px and embedded, so the surface
+        the author reviews shows the actual cover rather than a description of one.
+
+     **The converter does not set Substack's featured image** — attaching the cover is a composer-UI
+     action and stays on the human's list. Checking it in is what makes that a one-click step rather
+     than a hunt through Downloads.
    - **Which version seams go?** A published piece accumulates sentences about its own earlier
      versions (*the correction I owe*, *for a while I told it as…*). They are process showing
      through; the reader never saw the earlier version. Cut them, or turn them into direct address

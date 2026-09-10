@@ -156,6 +156,75 @@ def unit_pages(tmp):
     check('pages: a POST with no subtitle is still refused', bool(errs2))
 
 
+# ---------------------------------------------------------------- unit: substack notes
+def unit_notes(tmp):
+    """One Note per live post; the backlog is derived, and goes out one a day (2026-09-10)."""
+    print("\n-- substack notes --------------------------------------------------")
+    import substack_notes as sn
+    root = os.path.join(tmp, 'notesrepo')
+
+    def piece(slug, date=None, extra='', note=None):
+        d = os.path.join(root, slug); os.makedirs(d, exist_ok=True)
+        url = f'https://example.substack.com/p/{slug}'
+        live = f'public_url: {url}\npublished_at: {date}   # a comment\n' if date else ''
+        open(os.path.join(d, 'publish.yaml'), 'w').write(f'title: T {slug}\n{live}{extra}')
+        if note is not None:
+            open(os.path.join(d, 'substack-note.md'), 'w').write(note.replace('URL', url))
+        return d
+
+    piece('a-old', '2026-08-01')
+    piece('b-mid', '2026-08-02', note='A line.\n\nURL\n')
+    piece('c-done', '2026-08-03',
+          extra='substack_note:\n  posted_at: 2026-09-09\n  note_url: https://substack.com/@x/note/c-9\n')
+    piece('colophon', '2026-08-01', extra='substack_type: page\n')
+    piece('unpublished')
+    piece('e-fresh', '2026-09-10',
+          extra='substack_note:\n  posted_at: 2026-09-10\n  note_url: https://substack.com/@x/note/c-10\n')
+
+    corpus = sn.load(root)
+    slugs = [p['slug'] for p in corpus]
+    check('notes: a page is not announced', 'colophon' not in slugs)
+    check('notes: an unpublished piece is not in scope', 'unpublished' not in slugs)
+    check('notes: states are read from disk',
+          [p['state'] for p in corpus] == ['missing', 'drafted', 'posted', 'posted'],
+          str([(p['slug'], p['state']) for p in corpus]))
+    check('notes: the backlog is oldest first and skips posted',
+          [p['slug'] for p in sn.backlog(corpus)] == ['a-old', 'b-mid'])
+    check("notes: a backlog Note today closes today's slot",
+          (sn.backlog_done_today(corpus, '2026-09-09') or {}).get('slug') == 'c-done')
+    check("notes: a FRESH publication's Note does not use the backlog slot",
+          sn.backlog_done_today(corpus, '2026-09-10') is None)
+    check('notes: next exits 3 once the day is used',
+          sn.main(['next', '--pieces', root, '--today', '2026-09-09']) == 3)
+
+    paras, problems = sn.read_note(os.path.join(root, 'b-mid'), 'https://example.substack.com/p/b-mid')
+    check('notes: a well-formed Note has no problems', not problems, str(problems))
+    check('notes: the hash is the paragraphs joined by a blank line',
+          sn.note_hash(paras) == hashlib.sha256('A line.\n\nhttps://example.substack.com/p/b-mid'.encode()).hexdigest())
+    bad = piece('f-bad', '2026-08-04', note='A *marked* line.\n\nhttps://elsewhere.example/p/x\n')
+    _, probs = sn.read_note(bad, 'https://example.substack.com/p/f-bad')
+    check('notes: the URL must be the last paragraph', any('last paragraph' in p for p in probs), str(probs))
+    check('notes: markdown is refused in a plain-text Note', any('markdown' in p for p in probs), str(probs))
+
+    a = os.path.join(root, 'a-old')
+    sn.record(a, '2026-09-11', 'https://substack.com/@x/note/c-11')
+    text = open(os.path.join(a, 'publish.yaml')).read()
+    check('notes: record keeps the manifest comments', '# a comment' in text)
+    check('notes: record writes a block the manifest reader understands',
+          sn.read_manifest(os.path.join(a, 'publish.yaml')).get('substack_note', {}).get('posted_at') == '2026-09-11')
+    try:
+        sn.record(a, '2026-09-12', 'https://substack.com/@x/note/c-12'); twice = False
+    except SystemExit:
+        twice = True
+    check('notes: a post gets one Note — record refuses a second', twice)
+
+    feed = [{'id': 1, 'blob': '{"url": "https://example.substack.com/p/a-old"}'},
+            {'id': 2, 'blob': '{"url": "https://example.substack.com/p/a-older"}'}]
+    check('notes: a feed match does not take a longer slug for a shorter one',
+          sn.match_notes([{'slug': 'a-old', 'public_url': 'https://example.substack.com/p/a-old'}], feed)
+          == {'a-old': [1]})
+
+
 # ---------------------------------------------------------------- unit: scripture check
 def unit_scripture(tmp):
     """The scripture checker's conventions, which are where it can go wrong.
@@ -1066,6 +1135,24 @@ def unit_manifest_gate(tmp):
     errs, warns = manifest_gate(d)
     check('a settled header passes clean', not errs and not warns, str((errs, warns)))
     check('a missing manifest is an error, not a pass', manifest_gate(os.path.join(tmp, 'nope'))[0])
+    # the caption says what the image represents -- provenance and disclaimers warn, never refuse
+    dc = os.path.join(tmp, 'caption'); os.makedirs(dc, exist_ok=True)
+    with open(os.path.join(dc, 'publish.yaml'), 'w') as f:
+        f.write('title: T\nsubtitle: S\ncover_caption: A friar at the sink. An imagined scene, not a likeness of him.\n')
+    errs, warns = manifest_gate(dc)
+    check('a provenance/disclaimer caption warns, never refuses',
+          not errs and any(w.startswith('cover_caption reads as provenance') for w in warns), str((errs, warns)))
+    with open(os.path.join(dc, 'publish.yaml'), 'w') as f:
+        f.write("title: T\nsubtitle: S\ncover_caption: The work doesn't change. Who it's done with does.\n")
+    errs, warns = manifest_gate(dc)
+    check('a caption that says what the image represents passes clean', not errs and not warns, str((errs, warns)))
+    with open(os.path.join(dc, 'draft.md'), 'w') as f:
+        f.write('scaffold\n\n---\n\n![A man stands at a stone sink drying a plate](assets/hero.png)\n\nBody.\n')
+    with open(os.path.join(dc, 'publish.yaml'), 'w') as f:
+        f.write('title: T\nsubtitle: S\ncover: assets/hero.png   # 10x10, generated\ncover_caption: A man stands at a stone sink, drying up.\n')
+    errs, warns = manifest_gate(dc)
+    check('a caption that repeats the alt warns',
+          not errs and any(w.startswith('cover_caption repeats the alt') for w in warns), str((errs, warns)))
 
     # the live side: the body comparison never sees the header, so this one must
     post = {'title': 'T', 'subtitle': ''}
@@ -1548,6 +1635,17 @@ def unit_store(tmp):
     check('content json is short-lived', got['index.json'] == 'IDX' and got['pieces/x.json'] == 'PIECES')
     check('an unknown key falls back rather than caching forever',
           store_publish.cache_control('stray.txt', cc) == 'PIECES')
+    check("a talk's record is content json, short-lived — not the year-long talk asset rule",
+          store_publish.cache_control('talks/x/piece.json', cc) == 'PIECES'
+          and store_publish.cache_control('talks/x/assets/piece.json', cc) == 'TALK',
+          'filed at talks/<slug>/piece.json, a typo fix must reach readers in a minute')
+    live = {'pieces': [{'slug': s} for s in ('talk', 'essay-a', 'essay-b')]}
+    check('a bundle index that drops live pieces is caught',
+          store_publish.index_losses(live, {'pieces': [{'slug': 'new'}]}) == ['essay-a', 'essay-b', 'talk'],
+          'index.json replaces the live list outright; a fresh bundle would unpublish the store')
+    check('a bundle seeded from the live index loses nothing',
+          store_publish.index_losses(live, {'pieces': live['pieces'] + [{'slug': 'new'}]}) == [])
+    check('an empty store loses nothing', store_publish.index_losses({}, {'pieces': []}) == [])
     check('content types are pinned for the formats a bundle carries',
           store_publish.content_type('a/b.webp') == 'image/webp'
           and store_publish.content_type('a/b.js').startswith('text/javascript')
@@ -1571,6 +1669,12 @@ def unit_store(tmp):
         json.dump({'spec': '2', 'generated_at': '', 'pieces': [
             {'slug': 'elsewhere', 'title': 'Elsewhere', 'published_at': '2026-01-01',
              'digest': 'sha256:dead', 'outlets': ['alignmentfellowship'], 'kind': 'piece'}]}, f)
+    # A bundle dir reused from before talks were filed by kind still holds the talk's record
+    # at pieces/<slug>.json. Left there, it would be uploaded over whatever essay now owns
+    # that key.
+    os.makedirs(os.path.join(bundle, 'pieces'), exist_ok=True)
+    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), 'w', encoding='utf-8') as f:
+        json.dump({'slug': 'a-talk', 'talk': {'deck': 'x', 'notes': 'y', 'slide_count': 1}}, f)
 
     r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
                        capture_output=True, text=True)
@@ -1578,7 +1682,12 @@ def unit_store(tmp):
     if r.returncode != 0:
         return
 
-    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), encoding='utf-8') as f:
+    check("a talk's record is filed by kind, beside its deck",
+          os.path.exists(os.path.join(bundle, 'talks', 'a-talk', 'piece.json')),
+          'talks/<slug>/piece.json — so a talk and an essay can share a slug')
+    check("and a stale old-layout record is removed, so it cannot overwrite an essay",
+          not os.path.exists(os.path.join(bundle, 'pieces', 'a-talk.json')))
+    with open(os.path.join(bundle, 'talks', 'a-talk', 'piece.json'), encoding='utf-8') as f:
         piece = json.load(f)
     check('the piece carries a talk block with relative paths',
           piece['talk']['deck'] == '../talks/a-talk/deck.html'
@@ -1914,7 +2023,7 @@ def corpus_manifests():
     pieces_dir = PIECES
     if not os.path.isdir(pieces_dir):
         skip('manifests', f'no corpus at {pieces_dir}'); return
-    bad, unsettled, n = [], [], 0
+    bad, unsettled, captioned, n = [], [], [], 0
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'publish.yaml')):
@@ -1923,12 +2032,18 @@ def corpus_manifests():
         errs, warns = manifest_gate(d)
         if errs:
             bad.append(f'{p}: ' + '; '.join(errs))
-        if warns and read_manifest(os.path.join(d, 'publish.yaml')).get('public_url'):
+        head = [w for w in warns if not w.startswith('cover_caption')]
+        if head and read_manifest(os.path.join(d, 'publish.yaml')).get('public_url'):
             unsettled.append(p)
+        if any(w.startswith('cover_caption') for w in warns):
+            captioned.append(p)
     check(f'all {n} composed pieces carry a title and a subtitle', not bad, '; '.join(bad[:4]))
     if unsettled:
         print(f"  note  live but the manifest still marks the header unsettled: {', '.join(unsettled)}"
               "  (clear the comment once the author has signed off)")
+    if captioned:
+        print(f"  note  a caption reads as provenance or repeats the alt: {', '.join(captioned)}"
+              "  (a caption says what the image represents -- framework/docs/ALT-TEXT.md)")
 
 
 def corpus_baselines():
@@ -2141,6 +2256,7 @@ def main():
         unit_review_artifact(tmp)
         unit_scripture(tmp)
         unit_pages(tmp)
+        unit_notes(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()

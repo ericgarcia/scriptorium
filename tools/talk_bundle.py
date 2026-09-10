@@ -7,7 +7,7 @@ A talk is a piece with slides (BUNDLE.md, "Talks"). This puts the two halves tog
   INPUT   <talk>/piece.yaml            title, date, venue, and the framing prose
           <deck>/                      output of dc_to_deck.py
 
-  OUTPUT  <bundle>/pieces/<slug>.json  the piece, with its `talk` block
+  OUTPUT  <bundle>/talks/<slug>/piece.json  the talk's record, filed BY KIND beside its deck
           <bundle>/talks/<slug>/…      deck.html, notes.json, deck-stage.js, assets
           <bundle>/index.json          created, or updated in place if it exists
 
@@ -118,8 +118,19 @@ def main():
     if meta.get('syndicated'):
         piece['syndicated'] = meta['syndicated']
 
-    os.makedirs(os.path.join(bundle_dir, 'pieces'), exist_ok=True)
-    piece_path = os.path.join(bundle_dir, 'pieces', f'{slug}.json')
+    # Filed BY KIND (2026-09-10): a talk's record lives beside its deck, not in pieces/.
+    # One flat slug-space meant a talk and its companion essay could not both exist under
+    # their own name. Same schema, same renderer; only where it is filed changed. Sites read
+    # it with quire's store.getTalk (>= 0.8.0).
+    piece_path = os.path.join(talk_out, 'piece.json')
+    # A bundle dir that once held this talk under the old layout must not upload that stale
+    # record over whatever essay now owns pieces/<slug>.json.
+    legacy = os.path.join(bundle_dir, 'pieces', f'{slug}.json')
+    if os.path.exists(legacy):
+        with open(legacy, encoding='utf-8') as fh:
+            if 'talk' in json.load(fh):
+                os.remove(legacy)
+                print(f"  removed the old-layout record {legacy}")
     with open(piece_path, 'w', encoding='utf-8') as fh:
         json.dump(piece, fh, indent=2, ensure_ascii=False)
         fh.write('\n')

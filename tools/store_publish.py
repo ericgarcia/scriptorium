@@ -92,6 +92,12 @@ def cache_control(key, cc):
         return cc.get('images')
     if key.startswith('talks/'):
         base = os.path.basename(key)
+        # A talk's RECORD is content JSON like any piece — rewritten when a sentence changes —
+        # so it gets the short policy. Filed at talks/<slug>/piece.json it would otherwise
+        # have fallen into the year-long immutable rule below, and a typo fix to a talk would
+        # not have reached a reader for a year.
+        if base == 'piece.json' and key.count('/') == 2:
+            return cc.get('pieces')
         if base in ('notes.json', 'deck.html'):
             return cc.get('talks_mutable', cc.get('pieces'))
         return cc.get('talks')
@@ -139,6 +145,33 @@ def remote_objects(s3, bucket):
             break
         token = page.get('NextContinuationToken')
     return out
+
+
+def index_losses(live, bundle):
+    """Slugs the live index lists that the bundle's index.json would drop.
+
+    Everything else this tool does is additive, but index.json is ONE object: uploading it
+    replaces the store's list outright. A fresh bundle directory starts its index empty and
+    lists only its own pieces, so publishing one essay from one would have replaced a
+    33-entry index with a 1-entry index — unpublishing every talk and every other outlet's
+    piece from every listing, with every object still sitting in the bucket. Found
+    2026-09-10, before the first professional publish, not after it.
+    """
+    have = {p.get('slug') for p in (bundle or {}).get('pieces', [])}
+    return sorted({p.get('slug') for p in (live or {}).get('pieces', [])} - have)
+
+
+def live_index(base_url):
+    """The store's current index.json, {} if the store has none yet."""
+    import urllib.request, urllib.error
+    url = base_url.rstrip('/') + f'/index.json?cb={os.urandom(4).hex()}'
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 404):
+            return {}
+        raise
 
 
 def main():
@@ -192,6 +225,23 @@ def main():
             upload.append((key, path))
 
     stale = sorted(set(remote) - set(local))
+
+    # index.json replaces the live list outright; refuse a bundle whose index would drop
+    # pieces that are live. --prune is the one flag that means "yes, remove things".
+    if 'index.json' in local and not a.prune:
+        if not store.get('base_url'):
+            die(1, f'{a.config}: store.base_url is required to check index.json before replacing it')
+        try:
+            live = live_index(store['base_url'])
+        except Exception as e:                                    # noqa: BLE001
+            die(1, f'cannot read the live index to check it — {e}')
+        with open(local['index.json'], encoding='utf-8') as fh:
+            lost = index_losses(live, json.load(fh))
+        if lost:
+            die(4, f"refusing: this bundle's index.json would UNPUBLISH {len(lost)} live "
+                   f"piece(s) — {', '.join(lost[:8])}{' …' if len(lost) > 8 else ''}. Seed the "
+                   f"bundle from the live index first (curl {store['base_url'].rstrip('/')}"
+                   f"/index.json -o {a.bundle}/index.json), or pass --prune if removal is meant.")
 
     print(f"bundle    {a.bundle}")
     print(f"store     s3://{bucket}  ->  {store.get('base_url', '(no base_url)')}")

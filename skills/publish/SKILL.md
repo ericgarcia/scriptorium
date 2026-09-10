@@ -207,6 +207,17 @@ first.
    emitted with the mapping against ~3.4 MB without it.** The alt text is read out of the draft's
    image markdown, because the hero is a piece's most-seen image and a screen reader gets only that.
 
+   **Two things about hero alt text, both learned the hard way on 2026-09-10.** **(a) Transcribe any
+   text that is IN the image**, in quotation marks — WCAG 1.1.1 requires text presented within an
+   image to be available as text, so a sighted reader getting four phrases off the picture means a
+   screen-reader user must get them too. It is not decoration and it is not optional. **(b) Alt text
+   is house prose and the house sweeps govern it.** The first version of this one said *labelled*,
+   against a spelling rule that names `labeled` explicitly — written into `draft.md` *after* the
+   last britishism sweep had run, so nothing caught it and the author did. **Because the alt lives
+   in `draft.md`, the ordinary sweeps do cover it — but only if they run again afterwards**, which
+   is the standing rule that a passage written after a check does not inherit that check's clean
+   bill. Re-run the sweeps after adding a hero.
+
    **Two things are still the author's:** the **caption** (a composer-UI field, not in the API
    payload) and the Publish click. **And do not probe the contract with a 1×1 test pixel on a real
    post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and

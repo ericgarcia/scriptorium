@@ -390,6 +390,13 @@ def audit_archive(repo, fresh):
             flags.append('NO SUBTITLE')
         if not _norm_header(p.get('title')):
             flags.append('NO TITLE')
+        # A post with no cover has no drafts-list thumbnail, no archive card and no social
+        # preview — it looks unfinished everywhere it is listed, and every other check here
+        # reads the BODY, where the hero is a different image that is present. So the one
+        # thing that can see this is the archive walk. (2026-09-10: publishing set the cover
+        # as a step for the first time, and this is what stops it being skipped silently.)
+        if not (p.get('cover_image') or '').strip():
+            flags.append('NO COVER')
         if name is None:
             flags.append('not in the desk')
         elif man is not None:

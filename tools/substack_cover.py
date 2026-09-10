@@ -104,8 +104,23 @@ def main():
         print(f"Refusing: {src} is {mime or 'an unknown type'}, not an image. A wrong-type data "
               f"URI uploads cleanly and renders as a broken cover."); sys.exit(4)
 
-    raw = open(src, 'rb').read()
-    if max_w:
+    # REUSE an already-uploaded asset rather than uploading a second copy of it.
+    # publish.yaml's `images:` block maps a local file to the Substack URL it is already
+    # at — the body converter reads that map so a recompose reuses the asset instead of
+    # orphaning it, and the cover should behave the same way. Without this the tool
+    # emits the whole image as a data URI (2.5 MB for a 1484x1060 hero) and uploads a
+    # duplicate of a file already on the CDN. (2026-09-10.)
+    recorded = None
+    for line in man.get('_raw', '').splitlines():
+        m2 = re.match(r'\s+(\S+)\s*:\s*(https://\S+)', line)
+        if m2 and os.path.basename(m2.group(1)) == os.path.basename(cover):
+            recorded = m2.group(2); break
+    if recorded and '--reupload' not in sys.argv:
+        print(f"reusing the asset already uploaded for this piece:\n  {recorded}\n"
+              f"(--reupload forces a fresh upload from the local bytes)")
+
+    raw = open(src, 'rb').read() if not recorded or '--reupload' in sys.argv else b''
+    if max_w and raw:
         try:
             from PIL import Image
             import io
@@ -123,8 +138,9 @@ def main():
               f"it is a photograph or generated — a photorealistic cover can imply a real person, "
               f"or re-attach a biographical reading the prose dropped."); sys.exit(5)
 
-    b64 = base64.b64encode(raw).decode('ascii')
-    data_uri = f"data:{mime};base64,{b64}"
+    data_uri = ('' if (recorded and '--reupload' not in sys.argv)
+                else f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
+    reuse_url = recorded if (recorded and '--reupload' not in sys.argv) else ''
     caption = man.get('cover_caption', '')
     cover_only = '--cover-only' in sys.argv
     # alt text: the hero is the piece's most-seen image and a screen reader gets only this
@@ -140,13 +156,21 @@ def main():
   const CAPTION = %s;
   const WITH_BODY = %s;
   const DATA = "%s";
-  const up = await fetch('/api/v1/image', {
-    method: 'POST', credentials: 'include',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({image: DATA})
-  });
-  if (!up.ok) return JSON.stringify({step: 'upload', status: up.status});
-  const img = await up.json();
+  const REUSE = %s;
+  // An asset already on the CDN is used as it stands; uploading it again would make a
+  // duplicate and orphan the one the body already points at.
+  let img;
+  if (REUSE) {
+    img = {url: REUSE, imageWidth: null, imageHeight: null, bytes: null, contentType: null};
+  } else {
+    const up = await fetch('/api/v1/image', {
+      method: 'POST', credentials: 'include',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({image: DATA})
+    });
+    if (!up.ok) return JSON.stringify({step: 'upload', status: up.status});
+    img = await up.json();
+  }
   const put = await fetch('/api/v1/drafts/' + POST, {
     method: 'PUT', credentials: 'include',
     headers: {'content-type': 'application/json'},
@@ -183,10 +207,14 @@ def main():
     stillUnpublished: back.is_published === false
   });
 })()""" % (json.dumps(post_id or ''), json.dumps(alt), json.dumps(caption),
-                   'false' if cover_only else 'true', data_uri)
+                   'false' if cover_only else 'true', data_uri, json.dumps(reuse_url))
 
     open(out_js, 'w', encoding='utf-8').write(snippet)
-    print(f"{os.path.basename(src)}  {len(raw):,} bytes  {mime}  sha256={hashlib.sha256(raw).hexdigest()[:16]}")
+    if reuse_url:
+        print(f"{os.path.basename(src)}  reused from the CDN, nothing uploaded")
+    else:
+        print(f"{os.path.basename(src)}  {len(raw):,} bytes  {mime}  "
+              f"sha256={hashlib.sha256(raw).hexdigest()[:16]}")
     if caption:
         print(f"caption (set on the body hero from cover_caption:): {caption}")
     print(f"wrote {out_js} ({len(snippet):,} bytes)")

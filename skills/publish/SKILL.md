@@ -585,6 +585,30 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    learns it from the send. *(Shipping a later **edit** to an already-published post is a different
    act with a different rule — see Republish step 5; that path sends nothing.)*
 
+8. **Set the cover. This is a STEP, not an option, and it runs AFTER the publish click.**
+   A post with no `cover_image` has no drafts-list thumbnail, no archive card and no social
+   preview: the piece looks unfinished everywhere it is listed, and nothing in the pipeline
+   notices, because every other check reads the body. It was the last thing the author had to
+   remember, and it should not be.
+
+       python3 framework/tools/substack_cover.py pieces/<slug> --post <id> --cover-only --out cover.js
+
+   **The ordering IS the step, and getting it wrong blocks the publish.** The tool writes through
+   the drafts API, and the API is a second editor: run it while the composer holds the document and
+   Substack refuses to publish — *"Draft not saved — Post out of date"* — and the cover reverts to
+   `null` when the editor writes its own state back (measured 2026-09-10 on
+   `what-was-already-there`, which sat one stale copy from being unpublishable). So run it **after
+   publishing**, on the share-center page Substack redirects to, with the composer closed. **Assert
+   `document.querySelector('.ProseMirror')` is null before writing.**
+
+   `--cover-only` whenever `draft.md` already references the hero, or the tool inserts a second
+   copy in the body. **It reuses an asset already recorded in `publish.yaml`'s `images:` block
+   instead of uploading a duplicate** — 2,588 bytes of snippet against 2,580,143 for the same
+   image. Carry it with `pane_carry.py`: it is small, but it carries the author's caption and alt.
+
+   **Then run `substack_verify --fresh` anyway.** A cover write should touch nothing else; that is
+   a claim, and this is the cheap check that it held.
+
 ### The JS-snippet path — the pane's default, and Chrome's fallback
 
 `md_to_substack.py` emits a self-contained snippet that sets title and subtitle and pastes the
@@ -767,7 +791,7 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    finishes it. **Finishing the edit is part of making it.**
 
    **What is still gated, and it is the only thing: the FIRST publication of an unpublished
-   draft** (step 7 above). That click *is* the publication — it is the one that can mail the
+   draft** (step 8 above). That click *is* the publication — it is the one that can mail the
    subscriber list, and it stays the author's.
 
    **The email guard does NOT relax, because it is not what was gating you.** Removing the ask

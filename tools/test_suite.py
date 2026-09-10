@@ -139,6 +139,22 @@ def unit_pages(tmp):
     check('pages: a post does not accidentally declare itself one',
           man_post.get('substack_type') is None)
 
+    # The header gate refuses a post with no subtitle — and a PAGE HAS NO SUBTITLE FIELD,
+    # so requiring one refused a compose that was correct. A gate that refuses correct work
+    # is the worst kind: it teaches you to reach for an override. (2026-09-10.)
+    spec2 = importlib.util.spec_from_file_location(
+        'mts', os.path.join(os.path.dirname(__file__), 'md_to_substack.py'))
+    mts = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(mts)
+    pg = os.path.join(pieces, 'a-colophon')
+    open(os.path.join(pg, 'publish.yaml'), 'w').write(
+        'title: A Colophon\nsubstack_type: page\n')
+    errs, _warns = mts.manifest_gate(pg)
+    check('pages: the header gate does not demand a subtitle of a page', not errs)
+    po = os.path.join(pieces, 'an-essay')
+    open(os.path.join(po, 'publish.yaml'), 'w').write('title: An Essay\n')
+    errs2, _ = mts.manifest_gate(po)
+    check('pages: a POST with no subtitle is still refused', bool(errs2))
+
 
 # ---------------------------------------------------------------- unit: scripture check
 def unit_scripture(tmp):

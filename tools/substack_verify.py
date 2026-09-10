@@ -292,7 +292,12 @@ def header_drift(post, man):
     reported by a verify run. An EMPTY live subtitle is drift even if the manifest is empty
     too, because the reader sees the archive card, not the manifest."""
     out = []
-    for k in ('title', 'subtitle'):
+    # A PAGE has no subtitle FIELD (measured 2026-09-10: the composer offers Title only), so
+    # "live post has NO subtitle" is not drift on one — it is the only state a page can be in.
+    # The rule it replaces still stands for posts, where the subtitle is the second line of
+    # every archive card and social preview and an empty one went unseen for a month.
+    fields = ('title',) if man.get('substack_type') == 'page' else ('title', 'subtitle')
+    for k in fields:
         live, want = _norm_header(post.get(k)), _norm_header(man.get(k))
         if not live:
             out.append(f'live post has NO {k}')

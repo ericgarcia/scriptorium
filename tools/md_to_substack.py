@@ -105,7 +105,14 @@ def manifest_gate(piece_dir):
         return ([f'no publish.yaml in {piece_dir}'], [])
     man = read_manifest(path)
     errors, warnings = [], []
-    for k in ('title', 'subtitle'):
+    # A PAGE HAS NO SUBTITLE FIELD. Measured 2026-09-10: a custom page opens in the same
+    # composer as a post with Title only — no `Add a subtitle…` textarea exists — so a page
+    # cannot have the thing this gate refuses without. Requiring one here refused a compose
+    # that was correct, which is the worst kind of gate: it teaches you to reach for an
+    # override. The subtitle rule stands for posts, where it is second line of every archive
+    # card and social preview; a page is in none of those.
+    required = ('title',) if man.get('substack_type') == 'page' else ('title', 'subtitle')
+    for k in required:
         v = man.get(k, '')
         if not isinstance(v, str) or not v.strip():
             errors.append(f'publish.yaml has no {k}')

@@ -105,17 +105,23 @@ page marks that span in place and hangs the note under the paragraph:
 ```json
 { "severity": "fidelity",
   "anchor": "It asks nothing for Itself",
+  "now":    "It asks — nothing — for Itself",
   "title": "§II drops the source's dashes from a sentence §I quotes with them",
   "what": "The book reads <em>It asks—nothing—for Itself</em>. (HTML ok.)",
-  "was":  "*It asks nothing for Itself …",
-  "now":  "*It asks — nothing — for Itself …",
   "evidence": "<em>Unveiled Mysteries</em>, p. 25, read in the PDF today." }
 ```
 
 - **The anchor is verbatim `draft.md`**, markdown and all, matched against the
   whitespace-normalised block — line wraps do not matter, `*asterisks*` do.
-- **`was`/`now` render verbatim in mono**, which is what makes a change of
-  punctuation or case legible. Use them wherever you are proposing specific words.
+- **The mark shows the PROPOSAL.** Where a finding carries `now`, the marked span
+  renders the replacement, so the highlighted prose reads as the piece would read if
+  every change were taken. **`now` must be an exact replacement for `anchor`** — the
+  same span, rewritten. Write it as real markdown; it goes through the same inline
+  pass as the prose around it.
+- **`was` is not an input** — it is the anchored text, derived, and supplying it is
+  refused so the two halves of the diff cannot disagree. A finding with **no `now`** is
+  a note: it marks the span and changes nothing. **A deletion is a replacement of a
+  wider span** — anchor what goes *and* what survives, and let `now` be what remains.
 - **`evidence` says what you checked it against.** A finding the author has to take
   on trust is a finding they have to re-derive.
 - **Anchors are not allowed to miss.** An anchor matching nothing, matching twice, or

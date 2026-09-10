@@ -176,7 +176,7 @@ def unit_review_artifact(tmp):
         f = dict(facts); f['findings'] = [kw]; return f
 
     hf = ra.build(d, fnd(anchor='A line with **weight**', severity='fidelity',
-                         title='T', what='W', was='old', now='new', evidence='E'))
+                         title='T', what='W', evidence='E'))
     check('review: the anchored span is marked in place',
           '<mark class="hl hl-fidelity" id="a1">' in hf)
     check('review: the mark closes exactly once',
@@ -188,8 +188,29 @@ def unit_review_artifact(tmp):
     check('review: the note hangs under its own paragraph',
           hf.index('id="a1"') < hf.index('id="f1"') < hf.index('<h2>Second</h2>'),
           'a change is judged next to the sentence it changes')
-    check('review: was/now render verbatim so punctuation is legible',
-          'class="was"' in hf and 'class="now"' in hf)
+    # THE MARK SHOWS THE PROPOSAL, NOT THE PRESENT (Eric, 2026-09-10). Reading the
+    # highlighted prose has to be reading the piece as it would be if the changes were
+    # taken — that is the thing being decided.
+    hn = ra.build(d, fnd(anchor='and one more', title='T', now='and one fewer'))
+    prose = re.sub(r'<aside class="fx.*?</aside>', '', hn, flags=re.S)
+    check('review: the mark renders the replacement, not the original',
+          'and one fewer' in prose and 'and one more' not in prose)
+    check('review: the original survives in the card as the derived `was`',
+          '<dd class="was">and one more</dd>' in hn,
+          'derived from the anchor, so the two halves of the diff cannot drift')
+    check('review: the stamp says the prose is showing proposals',
+          'prose shows 1 proposed change<' in hn,
+          'the page is not draft.md any more and must not pretend to be')
+    check('review: a note-only finding leaves the prose alone',
+          'class="diff"' not in hf and 'prose shows' not in hf)
+    check('review: `was` as an input is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'was': 'y'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a hand-typed `was` can disagree with the anchor; a derived one cannot')
+    check('review: an empty `now` is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'now': ''}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a deletion is a replacement of the wider span, not an invisible mark')
     check('review: the finding is listed in the index', 'class="fidx"' in hf)
     check('review: severity colours the mark and the card',
           'class="fx sev-fidelity"' in hf)

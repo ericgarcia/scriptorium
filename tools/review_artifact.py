@@ -134,6 +134,14 @@ def place(findings, holders):
     still renders, still looks whole, and the author reads it believing they have
     seen everything. So an anchor that matches nothing, matches twice, or overlaps
     another one is a hard failure that names itself.
+
+    THE MARK SHOWS THE PROPOSAL, NOT THE PRESENT. Where a finding carries `now`, the
+    marked span renders the REPLACEMENT — so reading the highlighted prose is reading
+    the piece as it would be if every change were taken, which is the thing an author
+    is actually deciding about. `was` is not an input: it is the anchored text, so the
+    two halves of the diff cannot drift apart the way two hand-typed strings can.
+    (Eric, 2026-09-10: "this should show what we are changing it *to* and not what we
+    are changing it *from* in the inline view.")
     """
     errs = []
     for i, f in enumerate(findings, 1):
@@ -141,6 +149,14 @@ def place(findings, holders):
         a = ' '.join((f.get('anchor') or '').split())
         if not a:
             errs.append(f'finding {i} ({label!r}): no anchor'); continue
+        if 'was' in f:
+            errs.append(f'finding {i} ({label!r}): `was` is derived from the anchor — '
+                        f'remove it, and make `anchor` the text being replaced')
+            continue
+        if 'now' in f and not ' '.join(str(f['now']).split()):
+            errs.append(f'finding {i} ({label!r}): `now` is empty — express a deletion as a '
+                        f'replacement, widening the anchor to the text that survives')
+            continue
         hits = [(h, m.start(), m.end())
                 for h in holders for m in re.finditer(re.escape(a), h['text'])]
         if not hits:
@@ -162,7 +178,11 @@ def place(findings, holders):
         return errs
     for h in holders:                       # right-to-left, so earlier offsets hold
         for st, en, i, sev in sorted(h['marks'], key=lambda t: -t[0]):
-            h['text'] = (h['text'][:st] + f'{OPEN}{i}{SEP}{sev}{SHUT}' + h['text'][st:en]
+            f = findings[i - 1]
+            f['_was'] = h['text'][st:en]              # the diff's other half, derived
+            shown = ' '.join(str(f['now']).split()) if f.get('now') else f['_was']
+            f['_changed'] = shown != f['_was']
+            h['text'] = (h['text'][:st] + f'{OPEN}{i}{SEP}{sev}{SHUT}' + shown
                          + f'{SHUT}{i}{END}' + h['text'][en:])
         h['cards'].sort()
     return []
@@ -261,6 +281,7 @@ mark.hl{background:var(--accent-soft);color:inherit;padding:1px 0;
   box-shadow:inset 0 -2px 0 var(--accent)}
 mark.hl-fidelity,mark.hl-open{background:var(--flag-soft);box-shadow:inset 0 -2px 0 var(--flag)}
 mark.hl-voice{background:transparent;box-shadow:inset 0 -1px 0 var(--muted)}
+mark.hl-new{box-shadow:inset 0 -2px 0 var(--accent),inset 0 0 0 1px var(--accent-soft)}
 sup.hlno{font-family:var(--mono);font-size:10px;vertical-align:super;padding:0 2px}
 sup.hlno a{text-decoration:none;color:var(--accent)}
 mark.hl-fidelity sup.hlno a,mark.hl-open sup.hlno a{color:var(--flag)}
@@ -422,12 +443,10 @@ def build(piece_dir, facts):
                f'<b>{f.get("title", "")}</b><em class="sev">{html.escape(sev)}</em></div>']
         if f.get('what'):
             out.append(f'<p>{f["what"]}</p>')
-        if f.get('was') or f.get('now'):
-            rows = ''
-            if f.get('was'):
-                rows += f'<dt>was</dt><dd class="was">{html.escape(f["was"])}</dd>'
-            if f.get('now'):
-                rows += f'<dt>now</dt><dd class="now">{html.escape(f["now"])}</dd>'
+        if f.get('_changed'):
+            rows = (f'<dt>was</dt><dd class="was">{html.escape(f["_was"])}</dd>'
+                    f'<dt>now</dt><dd class="now">'
+                    f'{html.escape(" ".join(str(f["now"]).split()))}</dd>')
             out.append(f'<dl class="diff">{rows}</dl>')
         if f.get('evidence'):
             out.append(f'<div class="ev"><b>checked against</b>{f["evidence"]}</div>')
@@ -474,8 +493,11 @@ def build(piece_dir, facts):
             f'href="#f{i}"><b>{i}</b><em class="sev">{html.escape(f.get("severity","open"))}</em>'
             f'<span class="ft">{f.get("title","")}</span></a>'
             for i, f in enumerate(findings, 1))
+        shown = sum(1 for f in findings if f.get('_changed'))
+        note = (f'{shown} of them rewritten in the prose below' if shown
+                else 'each one marked where it lands')
         fidx = (f'<section class="fidx"><h3>{len(findings)} proposed '
-                f'change{"s" if len(findings) != 1 else ""} &mdash; each one marked where it lands'
+                f'change{"s" if len(findings) != 1 else ""} &mdash; {note}'
                 f'</h3>{rows}</section>')
 
     calls = facts.get('calls', [])
@@ -504,8 +526,16 @@ def build(piece_dir, facts):
         f'{"".join(card(j) for j in note_h[k]["cards"])}</div></li>'
         for k in order)
 
+    # The page is no longer a faithful rendering of draft.md once a mark shows a
+    # replacement. Every one of them is highlighted and numbered, so it is not a silent
+    # edit — but the stamp says so, because an author must never have to wonder whether
+    # what they are reading is the draft or the proposal.
+    nchg = sum(1 for f in findings if f.get('_changed'))
+    flags = list(facts.get('state', []))
+    if nchg:
+        flags.append(f'prose shows {nchg} proposed change{"s" if nchg != 1 else ""}')
     stamp = ' '.join([f'<span>{html.escape(facts.get("version","draft"))}</span>']
-                     + [f'<b>{html.escape(s)}</b>' for s in facts.get('state', [])]
+                     + [f'<b>{html.escape(s)}</b>' for s in flags]
                      + ([f'<b>{html.escape(facts["date"])}</b>'] if facts.get('date') else []))
 
     return f"""<title>{html.escape(man.get('title','Review'))}</title>

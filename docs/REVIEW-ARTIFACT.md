@@ -34,7 +34,7 @@ see.
 | **Findings** | `findings` | The review's proposed changes, ranked, each linking to the line it lands on. |
 | **Calls** | `calls` | *Every open question listed as a call*, in the flag color, above the fold. This band is the reason the page exists. |
 | **Contents** | headings | Movement numbers with per-movement word counts — where the piece is heavy or thin, at a glance. |
-| **The piece** | `draft.md` | Sticky movement rail, 66ch column, working footnote jumps both ways. **Each finding's span is marked in place and its note hangs under that paragraph** — a proposed change is judged next to the sentence it changes, or it is not being judged. |
+| **The piece** | `draft.md` | Sticky movement rail, 66ch column, working footnote jumps both ways. **Each finding's span is marked in place, showing the PROPOSED wording, and its note hangs under that paragraph** — so the prose reads as the revised piece and a change is judged next to the sentence it changes. |
 | **Notes** | `[^slug]:` | Real numbered notes, back-linked. |
 
 ## Facts
@@ -54,10 +54,9 @@ still renders and the strip reports what can be counted.
   "findings": [
     { "severity": "fidelity",
       "anchor": "It asks nothing for Itself",
+      "now": "It asks — nothing — for Itself",
       "title": "§II drops the source's dashes from a sentence §I quotes with them",
       "what": "The book reads <em>It asks—nothing—for Itself</em>. (HTML ok.)",
-      "was": "*It asks nothing for Itself …",
-      "now": "*It asks — nothing — for Itself …",
       "evidence": "<em>Unveiled Mysteries</em>, p. 25, read in the PDF today." }
   ] }
 ```
@@ -73,10 +72,36 @@ order given — **rank them**, because that ranking is the first thing read.
 
 `anchor` is **verbatim `draft.md`**, markdown and all, matched against the
 whitespace-normalised block, so line wraps do not matter and `*asterisks*` do. It may
-land in a footnote as easily as in the body. `was`/`now` render **verbatim in mono**,
-which is the only way a change of punctuation or case is legible on the page —
-a dropped em dash is invisible in prose type. `evidence` says what the finding was
+land in a footnote as easily as in the body. `evidence` says what the finding was
 checked against, so the author does not have to re-derive it.
+
+### The mark shows the proposal, not the present
+
+Where a finding carries `now`, **the marked span renders the replacement.** Reading the
+highlighted prose is then reading the piece *as it would be if every change were taken*
+— which is the thing the author is actually deciding about. A page that highlights the
+old wording asks them to do the substitution in their head, sentence by sentence, which
+is the work the page exists to save. (Eric, 2026-09-10: *"this should show what we are
+changing it **to** and not what we are changing it **from** in the inline view."*)
+
+So **`now` must be an exact replacement for `anchor`** — the same span, rewritten — and
+the two render as a `was`/`now` pair in the card, **verbatim in mono**, which is the only
+way a change of punctuation or case is legible at all (a dropped em dash is invisible in
+prose type).
+
+**`was` is not an input.** It is the anchored text itself, derived. Supplying it is
+refused, because two hand-typed strings can disagree with the span they claim to
+describe and nothing would catch it. A finding with no `now` is a **note** about a
+passage: it marks the span and changes nothing.
+
+**A deletion is a replacement of a wider span**, not an empty `now` — anchor the text
+that survives along with the text that goes, and let `now` be what remains. An empty
+`now` is refused: it would render an invisible mark.
+
+**The stamp says so.** Once any mark shows a replacement the page is no longer a faithful
+rendering of `draft.md`, so the stamp gains *prose shows N proposed changes*. Every one is
+highlighted and numbered, so nothing is edited silently — but an author must never have to
+wonder whether they are reading the draft or the proposal.
 
 ### The anchor is not allowed to miss
 

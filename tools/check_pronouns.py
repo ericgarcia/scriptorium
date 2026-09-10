@@ -106,8 +106,14 @@ USAGE
     Lord's Prayer). A justified G-hit is silenced the same way as a C-hit, by a substring under
     `pronouns_allow:` in publish.yaml. Footnote definitions are never swept: the note that records
     the King James's wording keeps the King James's own *Lord*.
-    A C-hit whose referent is NOT God is justified by listing a substring of it in the piece's
-    publish.yaml under `pronouns_allow:` — reviewable, and it survives the session.
+    A C- or D-hit whose referent is NOT God is justified by listing a substring of it in the
+    piece's publish.yaml under `pronouns_allow:` — reviewable, and it survives the session.
+    D honors the list for the same reason C does (2026-09-10): D is a PROXIMITY test, so most of
+    what it finds is a pronoun for something else standing near a God-word — *God is black, and
+    meant it ontologically* (the claim), *the sentence says it takes both* (an expletive). Both
+    sections refuse under --strict, so both need a way to say *this referent has been named*;
+    without one the only way to clear a D-hit is to reword the draft, which on a published piece
+    means editing live prose to satisfy a linter.
 EXIT  0 clean or only A/B/E/F/G/H listings · 3 C/D hits under --strict · 1 usage
 """
 import os, re, sys
@@ -326,7 +332,7 @@ def sweep(piece, names=(), allow=None):
     allow = load_allow(piece) if allow is None else allow
     text = body_of(piece)
     sents = sentences(text)
-    A, B, C, D, E, F, G, H = [], [], [], [], [], [], [], []
+    A, B, C, D, E, F, G, H, I = [], [], [], [], [], [], [], [], []
     name_re = re.compile(r'\b(' + '|'.join(map(re.escape, names)) + r')\b') if names else None
     for s in sents:
         # A — sentence-initial forced capitals
@@ -359,6 +365,9 @@ def sweep(piece, names=(), allow=None):
         for m in re.finditer(r"\b(God|the Lord|the LORD|the Father|the Spirit|Christ|Jesus)\b((?:\s+\S+){0,6}?)\s+\b(he|him|his|it|its)\b", s):
             if in_quote(m.start(3)):
                 continue
+            window = s[max(0, m.start()-60):m.end()+60]
+            if any(a in window for a in allow):
+                continue                                       # justified in publish.yaml
             D.append((m.group(3), ctx(s, m, 50)))
     # E and F look INSIDE scripture quotations, which A–D deliberately do not.  They run on
     # paragraphs, not sentences, because a quotation can hold more than one sentence and its
@@ -384,7 +393,28 @@ def sweep(piece, names=(), allow=None):
         # H — a lowercase reflexive whose antecedent is God.  It runs on the paragraph because the
         # self-naming path asks whether the paragraph names God at all, which a sentence cannot say.
         H.extend(reflexive_hits(flat, allow))
-    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G, 'H': H}
+        # I — a creature rendered as a *what*.  The publication's position is that God, any person
+        # and any ANIMAL is a *who*; the pronoun rules forbid *it* but govern only PRONOUNS, and the
+        # *what* rule had named God and persons and stopped — so "Something came through here," said
+        # of whatever a dog is smelling, was compliant with both and shipped through a draft, two
+        # critiques and a compose (Eric, 2026-09-10: animals are never things).
+        # This flags the WORD and asks about the REFERENT, because the same sentence can hold both:
+        # in "someone ate something worth knowing about" the eater moves and the meal does not.
+        for m in re.finditer(r"\b(Something|something|Anything|anything|Nothing|nothing)\b", flat):
+            window = flat[max(0, m.start()-90):m.end()+90]
+            if not CREATURE_NEAR.search(window):
+                continue
+            if any(a in window for a in allow):
+                continue                                       # justified in publish.yaml
+            I.append(ctx(flat, m, 75))
+    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G,
+            'H': H, 'I': I}
+
+CREATURE_NEAR = re.compile(
+    r"\b(dog|dogs|cat|cats|animal|animals|creature|creatures|bird|birds|puppy|horse|horses|"
+    r"sheep|lamb|ox|donkey|pig|pigs|fox|deer|bat|bats|bee|bees|leash|paw|paws|nose|snout|"
+    r"smell|smelling|scent|sniff|sniffing|fur|tail|whimper|bark|barked|barking|"
+    r"frightened|sick|hungry|wounded|grief|flinch)\b", re.I)
 
 def _clip(s, n=200):
     return s if len(s) <= n else s[:n] + '…'
@@ -402,7 +432,7 @@ def main():
         i = sys.argv.index('--names'); names = [n.strip() for n in sys.argv[i+1].split(',')]
     strict = '--strict' in sys.argv
     r = sweep(piece, names)
-    A, B, C, D, E, F, G, H = (r[k] for k in 'ABCDEFGH')
+    A, B, C, D, E, F, G, H, I = (r[k] for k in 'ABCDEFGHI')
     print(f"check_pronouns — {os.path.basename(piece)}: {r['sentences']} sentences")
     print(f"\nA. sentence-initial capitals to justify ({len(A)}):")
     for p, c in A: print(f"   {p:5s} {c}")
@@ -420,9 +450,11 @@ def main():
     for c in G: print(f"   {_clip(c)}")
     print(f"\nH. lowercase reflexive whose antecedent reads as God — the house never lets God be a *what*: *Themself*, never *itself* ({len(H)}):")
     for w, ev, c in H: print(f"   {w:8s} {ev:42s} {_clip(c)}")
+    print(f"\nI. a creature as a *what* — the house makes God, any person AND any animal a *who*; justify each as naming a thing rather than a creature ({len(I)}):")
+    for c in I: print(f"   {_clip(c)}")
     if strict:
-        if E or F or G or H:
-            print("\nSTRICT: E/F/G/H hits are warnings — each needs a referent or speaker named; not refused.")
+        if E or F or G or H or I:
+            print("\nSTRICT: E/F/G/H/I hits are warnings — each needs a referent or speaker named; not refused.")
         if C or D:
             print("\nSTRICT: C/D hits remain — justify or fix before compose.")
             sys.exit(3)

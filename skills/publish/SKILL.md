@@ -343,6 +343,31 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    address from the day it published, because that URL had only ever been copied and never
    followed. Fix a dead link here **and** in every scaffold file that repeats it.
 
+0b-scripture. **Check every scripture quotation against the text, not against a memory of it:**
+   `python3 framework/tools/check_scripture.py pieces/<name>`
+   It reads each footnote's locus, looks the verse up in the indexed KJV, and compares the
+   quoted spans. **This is the one preflight step that can say a citation is WRONG** rather
+   than that nobody has confirmed it — `check_verified.py` records whether anyone *said* they
+   checked, and says plainly it cannot do more.
+
+   It knows this house's conventions, because a checker that flags correct prose is worse than
+   none: the King James's own `[brackets]` are supplied words and are kept, a **draft's**
+   `[Them]` is the disclosed substitution and matches whatever the source has there, an
+   ellipsis matches its fragments in order, and a mid-sentence start is fine.
+
+   Read the finding kind. **RANGE** is the commonest and is not drift: the quotation runs past
+   the verse the note cites (*cite 13:4-5*). **DRIFT** names the word where the quotation
+   leaves the text. **SUSPECT** is a partial match, which is where a real error looks like a
+   near miss — read it rather than dismissing it. **NOT IN INDEX** means the locus is not in
+   this edition. A first corpus run (2026-09-10, 144 quotations) found 17 across 11 pieces.
+
+   **The index is content and lives in the instance**, built once from a PDF the author owns:
+   `framework/tools/refindex.py <kjv.pdf> --scheme kjv --out books/<name>/references/kjv.tsv.gz`,
+   with a provenance row in that folder's README. `--verify` refuses an index with interior
+   gaps, because a chapter missing a verse answers "not found" for a locus that exists, and the
+   reader of that answer cannot tell which side is wrong. `refindex.py --scheme pages` indexes
+   any other reference PDF the same way, for sources checked by quotation rather than locus.
+
 0b-pronouns. **Run the pronoun sweep, and justify every hit by naming who it points at:**
    `python3 framework/tools/check_pronouns.py pieces/<name> --names <the named figures> --strict`
    It lists sentence-initial forced capitals (a capital *He* silently reassigns a referent to the

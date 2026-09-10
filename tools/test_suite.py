@@ -112,6 +112,68 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: scripture check
+def unit_scripture(tmp):
+    """The scripture checker's conventions, which are where it can go wrong.
+
+    A checker that flags correct prose is worse than none — it trains the reader to
+    skim past it. Three of this house's conventions look like drift to a naive
+    string compare, and each one is a case here.
+    """
+    import importlib.util, os, gzip
+    spec = importlib.util.spec_from_file_location(
+        'check_scripture', os.path.join(os.path.dirname(__file__), 'check_scripture.py'))
+    cs = importlib.util.module_from_spec(spec); spec.loader.exec_module(cs)
+
+    idx = os.path.join(tmp, 'idx.tsv.gz')
+    with gzip.open(idx, 'wt') as f:
+        f.write("Matthew\t6\t24\tNo man can serve two masters: for either he will hate "
+                "the one, and love the other; or else he will hold to the one, and despise "
+                "the other. Ye cannot serve God and mammon.\n")
+        f.write("Philippians\t4\t8\tFinally, brethren, whatsoever things are true, "
+                "whatsoever things [are] honest, whatsoever things [are] lovely, "
+                "think on these things.\n")
+        f.write("Exodus\t20\t20\tAnd Moses said unto the people, Fear not: for God is "
+                "come to prove you, and that his fear may be before your faces.\n")
+        f.write("1 Corinthians\t13\t4\tCharity suffereth long, [and] is kind.\n")
+        f.write("1 Corinthians\t13\t5\tSeeketh not her own, is not easily provoked.\n")
+    index = cs.load(idx)
+    canon = lambda k: cs.norm(index[k])
+
+    check('scripture: a whole verse matches',
+          cs.match("No man can serve two masters", canon(('Matthew', 6, 24)))[0])
+    check('scripture: an ellipsis matches fragments in order',
+          cs.match("whatsoever things are true… think on these things",
+                   canon(('Philippians', 4, 8)))[0])
+    check("scripture: the KJV's own [brackets] are words, kept",
+          cs.match("whatsoever things are honest", canon(('Philippians', 4, 8)))[0])
+    check("scripture: a DRAFT's [substitution] is a wildcard, not drift",
+          cs.match("and that [Their] fear may be before your faces",
+                   canon(('Exodus', 20, 20)))[0])
+    check('scripture: real drift is still caught',
+          not cs.match("No man can serve three masters", canon(('Matthew', 6, 24)))[0])
+    check('scripture: fragments out of order are caught',
+          not cs.match("think on these things… whatsoever things are true",
+                       canon(('Philippians', 4, 8)))[0])
+    check('scripture: a quotation spanning two verses fails against just one',
+          not cs.match("Charity suffereth long, and is kind. Seeketh not her own",
+                       canon(('1 Corinthians', 13, 4)))[0])
+    check('scripture: and matches the joined range',
+          cs.match("Charity suffereth long, and is kind. Seeketh not her own",
+                   cs.norm(index[('1 Corinthians', 13, 4)] + ' ' +
+                           index[('1 Corinthians', 13, 5)]))[0])
+    # a locus must come from the closed book set — "And 22:17" is not a citation
+    check('scripture: a non-book word is never read as a locus',
+          not cs.LOCUS_RE.search("And 22:17 says otherwise"))
+    check('scripture: a real locus is read',
+          bool(cs.LOCUS_RE.search("see Revelation 22:17")))
+    # commentary must not be mistaken for a quotation
+    lo, run = cs.overlap("What the ellipsis drops:", canon(('Philippians', 4, 8)))
+    check('scripture: commentary scores below the candidate floor', lo < 0.25 or run < 4)
+    hi, run2 = cs.overlap("whatsoever things are true", canon(('Philippians', 4, 8)))
+    check('scripture: a real quotation scores above it', hi >= 0.6 and run2 >= 4)
+
+
 # ---------------------------------------------------------------- unit: review artifact
 def unit_review_artifact(tmp):
     """The author-facing review page is generated, so its invariants are testable.
@@ -988,6 +1050,27 @@ def unit_pronouns(tmp):
     allow_f = check_pronouns.sweep(d, allow=['Without me ye can do nothing'])
     check('pronouns_allow silences a justified F hit',
           not any(ev == 'ref:john155' for _, ev, _ in allow_f['F']), str(allow_f['F']))
+    # A blockquote's `body` has its `> ` markers stripped, so a PARAGRAPH-relative window drifts
+    # two characters per line and misses the substring on any long quotation. Measured on *The
+    # Towel* 2026-09-10: four hits in one John 13 blockquote could not be justified at all.
+    d7 = os.path.join(tmp, 'pronouns-bq'); os.makedirs(d7, exist_ok=True)
+    with open(os.path.join(d7, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\n"
+                "> *Jesus knowing that the Father had given all things into His hands, and that He\n"
+                "> was come from God, and went to God; He riseth from supper, and laid aside His\n"
+                "> garments; and took a towel, and girded Himself. After that He poureth water into\n"
+                "> a bason, and began to wash the disciples' feet.*[^t]\n\n"
+                "[^t]: John 13:3-5 (KJV).\n")
+    check('the long-blockquote fixture lists every pronoun in the span',
+          len(check_pronouns.sweep(d7)['E']) == 6, str(len(check_pronouns.sweep(d7)['E'])))
+    check('a substring LATE in a long blockquote still silences its hit',
+          not any('poureth water' in sent for _, _, sent in
+                  check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']),
+          str(check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']))
+    check('and a substring late in the span does not silence one at the start',
+          any('given all things' in sent for _, _, sent in
+              check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']))
+
     check('an unrelated allow entry silences neither E nor F',
           len(check_pronouns.sweep(d, allow=['nothing to do with this'])['E']) == len(r['E'])
           and len(check_pronouns.sweep(d, allow=['nothing to do with this'])['F']) == len(r['F']))
@@ -1452,6 +1535,7 @@ def main():
         unit_normalization()
         unit_link_extraction()
         unit_review_artifact(tmp)
+        unit_scripture(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()

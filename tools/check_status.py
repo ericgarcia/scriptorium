@@ -97,7 +97,8 @@ LOG_HEADING = re.compile(r'^#{1,6}\s+\d{4}-\d{2}-\d{2}\b')
 
 UNPUBLISHED = re.compile(
     r'\bunpublished\b|\bnot yet published\b|\bprivate draft\b|\bnot published\b|'
-    r'\bunreleased\b|\bdraft only\b', re.I)
+    r'\bunreleased\b|\bdraft only\b|\bawaiting publication\b|'
+    r"\bawaiting (?:a human |Eric's )?publish\b", re.I)
 
 SLUG_REF = re.compile(r'`([a-z0-9][a-z0-9-]{2,})`')
 MD_LINK = re.compile(r'\[([^\]]+)\]\((https?://[^)\s]+)\)')
@@ -273,13 +274,41 @@ def check(paths, pieces_dir, outlets_file, prefer):
 NEAR = 320
 
 
+SENT_SPLIT = re.compile(r'(?<=[.!?:])\s+(?=[A-Z*`\[(])')
+
+
+def _sentences(block):
+    """(offset, text) per sentence. Proximity alone attributes a claim to whatever slug
+    happens to sit within NEAR characters, and in real prose the neighbour is often the
+    OPPOSITE claim: `> All 13 substitutions are applied; four are unpublished drafts. **The
+    six live posts are re-synced:** `nothing-to-get`, `the-dreamer`, ...` — six pieces named
+    as LIVE, every one reported unpublished because the word sat 40 characters away. Same
+    shape in a piece README: `three live posts with the same leak (`distinction`, ...) —
+    re-syncs awaiting Eric's yes. Still a private draft awaiting Eric's Publish.` where the
+    private draft is the piece doing the reporting, not the three it names.
+
+    A claim and its subject share a SENTENCE. Splitting first keeps every true positive the
+    block-and-proximity rule found and drops both of those."""
+    out, pos = [], 0
+    for part in SENT_SPLIT.split(block):
+        out.append((pos, part))
+        pos += len(part) + 1
+    return out
+
+
 def _claims_near(block, slug, pattern):
-    """Does `pattern` match within NEAR characters of a `slug` reference in this block?"""
-    refs = [m.start() for m in re.finditer(r'`%s`' % re.escape(slug), block)]
-    if not refs:
-        return False
-    return any(abs(m.start() - r) <= NEAR
-               for m in pattern.finditer(block) for r in refs)
+    """Does `pattern` match the same SENTENCE as a `slug` reference, and within NEAR
+    characters of it? Sentence first, proximity second — a long sentence listing many
+    slugs still needs the distance check."""
+    ref_re = re.compile(r'`%s`' % re.escape(slug))
+    for _off, sent in _sentences(block):
+        refs = [m.start() for m in ref_re.finditer(sent)]
+        if not refs:
+            continue
+        if any(abs(m.start() - r) <= NEAR
+               for m in pattern.finditer(sent) for r in refs):
+            return True
+    return False
 
 
 def _slugify(t):

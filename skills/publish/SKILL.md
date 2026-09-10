@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes — that first click is never delegated. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is delegable: ask in chat, then click Update → Update now. NEVER sends email — the confirm dialog is read first and, if any email option is present, it stops and asks.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes — that first click is never delegated. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. NEVER sends email — the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks.
 ---
 
 # Publish (to Substack)
@@ -626,23 +626,43 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    editor. **`reordered`** means a target block's exact text was found at a *different* live
    index: the two lists are misaligned, not edited — the count guard alone could not see this,
    and a piece once aligned 30 footnotes against the wrong 30 live nodes while passing it.
-5. **Ship it: ask, then click Update → Update now.** A body edit to a published post
-   **stages** — measured three times now (2026-09-01 on two posts, 2026-09-03 on `hollow-flute`):
+5. **Ship it: click Update → Update now. Do not ask first.** A body edit to a published post
+   **stages** — measured three times (2026-09-01 on two posts, 2026-09-03 on `hollow-flute`):
    the editor reads **Saved**, **Update** is **enabled**, and the **cache-busted public page still
    serves the old text.** So the edit is *not* live until the button is pressed, and leaving it
    pressed-by-nobody strands a correction the author believes they asked for.
 
-   **The default is therefore: ask the user for permission in chat, and on a clear yes, click it
-   yourself.** Do not make a person walk to a browser to press a button on a change they already
-   approved. **What is NOT delegated by that yes:** the *first* publication of an unpublished
-   draft (step 7 above) — that click is the publication and stays theirs.
+   **Shipping an update is NOT gated on a fresh yes** (Eric, 2026-09-10, revising the earlier
+   ask-then-click rule). Asking permission to press a button on a change the author has already
+   asked for is friction that buys nothing: the decision was the edit, and this click only
+   finishes it. **Finishing the edit is part of making it.**
 
-   **The email guard is absolute and survives this change.** Before confirming, read the dialog
-   and prove it cannot mail anyone: look for *email / send / newsletter / notify / subscribers
-   will receive* wording and for any enabled email control. On an already-published post the
-   dialog has consistently offered **none** — audience and comment radios only. **If an email
-   option is present, or you cannot tell, STOP and ask.** Never disable, uncheck, or work around
-   one to get the button pressed.
+   **What is still gated, and it is the only thing: the FIRST publication of an unpublished
+   draft** (step 7 above). That click *is* the publication — it is the one that can mail the
+   subscriber list, and it stays the author's.
+
+   **The email guard does NOT relax, because it is not what was gating you.** Removing the ask
+   removes a permission step, not a safety check. Before confirming, read the dialog's
+   **`innerText`** for *Delivery / Send via email / newsletter / notify / subscribers will
+   receive*, and if any such section exists, **prove every control in it is off** before clicking.
+   **If one is on, or its state cannot be determined, STOP and ask.** Never toggle, uncheck or
+   route around one.
+
+   > **⚠️ The dialog is not always the same, and the difference is an email switch.** The note
+   > here used to say an already-published post's dialog "has consistently offered none". **False
+   > as of 2026-09-10.** *For the Love of Dogs* (2026-08-05, the corpus's oldest post) shows a
+   > **Delivery — "Send via email and the Substack app"** section, and its top-right button reads
+   > **"Continue", enabled**, where newer posts read "Update". (An enabled *Continue* is a third
+   > state; the earlier note only recorded *disabled* Continue meaning "nothing pending".)
+   >
+   > **And a control query is not the check.** Searching `input`/`select` for email-ish
+   > `name`/`id`/`aria-label` returned **`[]`** on that dialog — the toggle is a `role="checkbox"`
+   > `<button>` with no accessible name. Only the dialog TEXT caught it. **A structured query that
+   > finds nothing is not evidence that nothing is there.** Read the text first; use a control
+   > query only to read the state of what the text found.
+   >
+   > On that post the toggle was off (`aria-checked="false"`, drafts API `should_send_email:
+   > false`), it was clicked on Eric's explicit instruction, and `email_sent_at` stayed `null`.
 
    **Then verify against the cache-busted reader URL, not the "Your post is live!" screen** —
    that screen is a claim, not evidence. `substack_verify.py --fresh <piece>` is the evidence.
@@ -906,18 +926,19 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   transport. The author's words should travel **disk → pasteboard → browser**, never through the
   agent's fingers. This is not a performance preference: a transcription slip publishes a typo in
   the author's voice, and every guard downstream reads it as an intended edit.
-- **Shipping an edit is delegable; publishing is not.** Two different acts, two rules.
+- **Shipping an edit is ungated; publishing is not.** Two different acts, two rules.
   **First publication of an unpublished draft: never click.** It is the publication, and it is the
   control that can mail the subscriber list. **Shipping a later edit to an already-published post:
-  ask in chat, and on a clear yes, click Update → Update now yourself** (revised 2026-09-03 on
-  Eric's instruction — the old blanket never-click made a person press a button on a change they
-  had already approved, and stranded corrections behind it).
-  **The email guard does not move.** Read the confirm dialog before confirming and prove it cannot
-  mail anyone — *email / send / newsletter / notify* wording, any enabled email control. On an
-  already-published post it has consistently offered none. **If one is present, or you cannot tell,
-  STOP and ask.** Never uncheck or route around one.
-  **And permission is per-change, not standing:** a yes to shipping this fix is not a yes to the
-  next one.
+  just click Update → Update now** (Eric, 2026-09-10, revising the 2026-09-03 ask-then-click rule,
+  which itself replaced a blanket never-click). The decision was the edit; the click only finishes
+  it, and an unfinished edit strands a correction the author believes they asked for.
+  **The email guard does not move, and removing the ask did not touch it** — an ask is a permission
+  step, a guard is a safety check. Read the confirm dialog's **text** and prove nothing can be
+  mailed: *Delivery / Send via email / newsletter / notify*. **If a delivery section exists, every
+  control in it must be provably off; if one is on, or you cannot tell, STOP and ask.** Never
+  toggle or route around one. **Do not rely on a control query** — on the one post that has this
+  section the toggle is a `role="checkbox"` button with no accessible name, and an
+  input/select query returned `[]` while the section was plainly there in the text.
 - **Verify both sides of a live write, and never infer the outcome.** *Before*, because the
   pre-image hash check is the only gate that exists if autosave turns out to publish. *After*,
   against the **cache-busted reader URL** — measured repeatedly, the editor says *Saved* while

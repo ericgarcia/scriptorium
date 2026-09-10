@@ -208,6 +208,10 @@ first.
    emitted with the mapping against ~3.4 MB without it.** The alt text is read out of the draft's
    image markdown, because the hero is a piece's most-seen image and a screen reader gets only that.
 
+   **The alt-text rule lives in [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md)** — describe the
+   image, and transcribe any text that is *in* it, in quotation marks. Read it there rather than
+   reconstructing it here; what follows is the measured history that produced it.
+
    **Two things about hero alt text, both learned the hard way on 2026-09-10.** **(a) Transcribe any
    text that is IN the image**, in quotation marks — WCAG 1.1.1 requires text presented within an
    image to be available as text, so a sighted reader getting four phrases off the picture means a

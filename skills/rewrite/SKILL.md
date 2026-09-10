@@ -73,7 +73,9 @@ under a constitution that has changed. Most of the work is deciding what stays f
         case — its §I is universal on purpose (*take a dog out on a leash*, not the author's own
         dog), the corpus holds a real photograph of the author with his dog in another piece, and a
         generated man-and-dog cover would have undone that scoping without a word being changed.
-        The caption and the alt text must not imply a photograph of anyone.
+        The caption and the alt text must not imply a photograph of anyone. **Write the alt to
+        [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md)** — describe it, and transcribe
+        any text that is *in* it, in quotation marks.
      4. **Put it in the review artifact**, downscaled to about 1400px and embedded, so the surface
         the author reviews shows the actual cover rather than a description of one.
 

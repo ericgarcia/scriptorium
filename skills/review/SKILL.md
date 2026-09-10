@@ -113,10 +113,14 @@ page marks that span in place and hangs the note under the paragraph:
 
 - **The anchor is verbatim `draft.md`**, markdown and all, matched against the
   whitespace-normalised block — line wraps do not matter, `*asterisks*` do.
-- **Read the alt text while you are there.** The page shows every image with its alt
-  text as prose, because that string is house writing that no other surface displays —
-  and it is anchorable, so a finding can propose better alt text like any other change.
-  An empty one is flagged: a picture with no alt gives a screen-reader user nothing.
+- **Read the alt text while you are there, against
+  [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md).** The page shows every image with
+  its alt text as prose, because that string is house writing that no other surface
+  displays — and it is anchorable, so a finding can propose better alt text like any other
+  change. **The half that gets forgotten is transcription:** a chart's title, both axis
+  labels, its legend and its annotations are text *in* the image and have to be quoted. An
+  alt that is a figure number, a caption or a citation is a finding. An empty one is
+  flagged: a picture with no alt gives a screen-reader user nothing.
 - **The mark shows the PROPOSAL.** Where a finding carries `now`, the marked span
   renders the replacement, so the highlighted prose reads as the piece would read if
   every change were taken. **`now` must be an exact replacement for `anchor`** — the

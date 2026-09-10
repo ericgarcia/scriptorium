@@ -40,6 +40,9 @@ see.
 
 ## Images, and why the alt text is on the page
 
+**The rule for writing alt text is [`ALT-TEXT.md`](ALT-TEXT.md).** This section is about
+showing it.
+
 **Alt text is house prose and this was the only surface that could show it.** It is what a
 screen-reader user gets instead of the picture; WCAG requires any text *inside* an image to be
 available as text; and it lives in `draft.md`, so the ordinary sweeps govern it — but only if

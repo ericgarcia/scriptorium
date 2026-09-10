@@ -37,7 +37,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
           fixture and must all be listed; --strict warns on them and does not refuse
 """
-import os, re, sys, json, shutil, subprocess, tempfile, datetime
+import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -1093,6 +1093,102 @@ def unit_deck(tmp):
           code == 1 and 'assets/fig1.png' in log, log.strip())
 
 
+# ---------------------------------------------------------------- unit: store publish
+def unit_store(tmp):
+    """The two publishing tools, exercised without touching AWS.
+
+    The index merge is the one that could do real damage: a bundle holding one talk must
+    not unpublish the rest of the corpus, and the obvious implementation — write the
+    index from what is in this bundle — does exactly that.
+    """
+    print("\n-- store: bundle assembly and cache policy ----------------------")
+    import store_publish, talk_bundle
+
+    cc = {'index': 'IDX', 'pieces': 'PIECES', 'images': 'IMG',
+          'talks': 'TALK', 'talks_mutable': 'TALKMUT'}
+    got = {k: store_publish.cache_control(k, cc) for k in [
+        'index.json',
+        'pieces/x.json',
+        'images/x/hero.webp',
+        'talks/x/assets/fig1.png',
+        'talks/x/deck-stage.js',
+        'talks/x/deck.html',
+        'talks/x/notes.json',
+    ]}
+    check('an immutable asset and a rewritten file get different cache policies',
+          got['images/x/hero.webp'] == 'IMG'
+          and got['talks/x/assets/fig1.png'] == 'TALK'
+          and got['talks/x/deck.html'] == 'TALKMUT'
+          and got['talks/x/notes.json'] == 'TALKMUT', str(got))
+    check('content json is short-lived', got['index.json'] == 'IDX' and got['pieces/x.json'] == 'PIECES')
+    check('an unknown key falls back rather than caching forever',
+          store_publish.cache_control('stray.txt', cc) == 'PIECES')
+    check('content types are pinned for the formats a bundle carries',
+          store_publish.content_type('a/b.webp') == 'image/webp'
+          and store_publish.content_type('a/b.js').startswith('text/javascript')
+          and store_publish.content_type('a/b.json') == 'application/json')
+
+    # a bundle from a fixture deck
+    talk = os.path.join(tmp, 'talk-src'); os.makedirs(talk, exist_ok=True)
+    deck = os.path.join(tmp, 'talk-deck'); os.makedirs(os.path.join(deck, 'assets'), exist_ok=True)
+    with open(os.path.join(deck, 'notes.json'), 'w', encoding='utf-8') as f:
+        json.dump({'slug': 'a-talk', 'title': 'A Talk', 'slideCount': 3, 'slides': []}, f)
+    with open(os.path.join(deck, 'deck.html'), 'w', encoding='utf-8') as f:
+        f.write('<deck-stage></deck-stage>')
+    with open(os.path.join(talk, 'piece.yaml'), 'w', encoding='utf-8') as f:
+        f.write('slug: a-talk\ntitle: A Talk\npublished_at: 2026-09-08\n'
+                'outlets: [muffinlabs]\nbody: |\n  Some **framing** prose.\n')
+
+    bundle = os.path.join(tmp, 'bundle')
+    # Pretend the store already holds another piece, published to a different outlet.
+    os.makedirs(bundle, exist_ok=True)
+    with open(os.path.join(bundle, 'index.json'), 'w', encoding='utf-8') as f:
+        json.dump({'spec': '2', 'generated_at': '', 'pieces': [
+            {'slug': 'elsewhere', 'title': 'Elsewhere', 'published_at': '2026-01-01',
+             'digest': 'sha256:dead', 'outlets': ['alignmentfellowship'], 'kind': 'piece'}]}, f)
+
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
+                       capture_output=True, text=True)
+    check('a talk bundle assembles', r.returncode == 0, (r.stdout + r.stderr).strip())
+    if r.returncode != 0:
+        return
+
+    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), encoding='utf-8') as f:
+        piece = json.load(f)
+    check('the piece carries a talk block with relative paths',
+          piece['talk']['deck'] == '../talks/a-talk/deck.html'
+          and piece['talk']['slide_count'] == 3, str(piece.get('talk')))
+    check('the digest covers reader text, not markup',
+          piece['plain'] == 'Some framing prose.', repr(piece.get('plain')))
+    check('the digest is a sha256 of that text',
+          piece['digest'] == 'sha256:' + hashlib.sha256(piece['plain'].encode()).hexdigest())
+
+    with open(os.path.join(bundle, 'index.json'), encoding='utf-8') as f:
+        index = json.load(f)
+    slugs = sorted(p['slug'] for p in index['pieces'])
+    check('publishing one talk does NOT unpublish everything else',
+          slugs == ['a-talk', 'elsewhere'], str(slugs))
+    check('the index is newest first',
+          [p['slug'] for p in index['pieces']] == ['a-talk', 'elsewhere'],
+          str([p['slug'] for p in index['pieces']]))
+
+    # re-running must replace the entry, not duplicate it
+    subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
+                   capture_output=True, text=True)
+    with open(os.path.join(bundle, 'index.json'), encoding='utf-8') as f:
+        index2 = json.load(f)
+    check('re-publishing replaces the index entry rather than duplicating it',
+          len(index2['pieces']) == 2, str([p['slug'] for p in index2['pieces']]))
+
+    # nothing is published without being named
+    with open(os.path.join(talk, 'piece.yaml'), 'w', encoding='utf-8') as f:
+        f.write('slug: a-talk\ntitle: A Talk\npublished_at: 2026-09-08\nbody: |\n  x\n')
+    r2 = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck,
+                         os.path.join(tmp, 'bundle2')], capture_output=True, text=True)
+    check('a talk with no outlets is refused, not published everywhere',
+          r2.returncode != 0 and 'outlets' in (r2.stdout + r2.stderr), (r2.stdout + r2.stderr).strip())
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -1403,6 +1499,7 @@ def main():
         unit_pronouns(tmp)
         unit_talk(tmp)
         unit_deck(tmp)
+        unit_store(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

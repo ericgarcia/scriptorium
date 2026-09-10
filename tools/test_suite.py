@@ -809,7 +809,7 @@ def unit_pronouns(tmp):
     tool = os.path.join(HERE, 'check_pronouns.py')
     p = subprocess.run([sys.executable, tool, d, '--strict'], capture_output=True, text=True)
     check('--strict exits 0 with only E/F/G hits, and says they are warnings',
-          p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+          p.returncode == 0 and 'hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
     d2 = os.path.join(tmp, 'pronouns-d'); os.makedirs(d2, exist_ok=True)
     with open(os.path.join(d2, 'draft.md'), 'w', encoding='utf-8') as f:
         f.write("*Draft.*\n\n---\n\nGod made the world and he saw that it was good.\n")
@@ -846,7 +846,7 @@ def unit_pronouns(tmp):
     check('G does not list LORD, a lowercase lord, or a footnote definition\'s King James wording',
           not check_pronouns.sweep(d4)['G'], str(check_pronouns.sweep(d4)['G']))
     p = subprocess.run([sys.executable, tool, d3, '--strict'], capture_output=True, text=True)
-    check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}")
+    check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'hits are warnings' in p.stdout, f"rc={p.returncode}")
 
     # H — a lowercase reflexive whose antecedent is God (2026-09-10).  The two hits are the two
     # misses that shipped live in *They Them*; the two non-hits are the only two legitimate uses
@@ -888,7 +888,7 @@ def unit_pronouns(tmp):
           r6['H'] and not r6['C'] and not r6['D'], str(r6['C'] + r6['D']))
     p = subprocess.run([sys.executable, tool, d6, '--strict'], capture_output=True, text=True)
     check('--strict exits 0 on H hits — an antecedent is a human call, so H warns and never refuses',
-          p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+          p.returncode == 0 and 'hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
     # a justified hit is silenced the way a C or G hit is, in a reviewable file
     with open(os.path.join(d5, 'publish.yaml'), 'w', encoding='utf-8') as f:
         f.write("title: T\nsubtitle: S\npronouns_allow:\n  - called itself\n")

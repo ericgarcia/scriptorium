@@ -124,6 +124,27 @@ not**, and the author reads it believing they have seen everything the review fo
 Lengthen the anchor until it is unique. (Eric, 2026-09-10: *"when reviewing we should
 open as an artifact highlighting the suggested changes."*)
 
+## Applying it
+
+```
+python3 framework/tools/review_artifact.py <piece_dir> --apply
+```
+
+Writes every finding's `now` into `draft.md`. **This is the reason the contract is strict:** because
+`now` is an exact replacement for `anchor`, applying a review is a substitution and never a
+retyping — so what the author approved on the page and what lands in the file are the same string.
+Ten spans re-keyed by hand, one of them a King James verse recased in four places, is exactly where
+a slip becomes an edit nobody can see.
+
+**Nothing is written unless every finding lands**; a half-applied review leaves the draft in a state
+nobody chose. Anchors are matched across the file's own line wraps, only the changed blocks are
+re-flowed (footnotes keep their four-space continuations, blockquotes their `>`), and a markdown
+link is never broken across lines.
+
+**Afterwards the review is spent.** Every anchor is gone from `draft.md` by construction, so
+re-rendering the same findings exits 3 — which is the staleness guard doing its job, not a fault.
+Move them under another key as the record and re-review the new draft.
+
 ## It refuses rather than renders wrong
 
 A footnote marker with no definition, or a definition never referenced, **exits 2 and names

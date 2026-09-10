@@ -338,6 +338,52 @@ def unit_review_artifact(tmp):
     check('review: gate chips wrap rather than overflow',
           'white-space:nowrap}' not in ra.CSS.split('.gates b{')[0].split('.gates span{')[1])
 
+    # --- --apply: the contract makes applying a review a substitution, not a retyping ---
+    ap = os.path.join(tmp, 'apply'); os.makedirs(ap, exist_ok=True)
+    src = ('scaffold\n---\n## I. First\n\nThe devil taketh him up, and sheweth him all.[^a]\n\n'
+           'A second line entirely.\n\n[^a]: A note about the world — outside — of it.\n')
+    def fresh():
+        open(os.path.join(ap, 'draft.md'), 'w').write(src)
+    fresh()
+    n, errs = ra.apply_findings(ap, [
+        {'anchor': 'taketh him up, and sheweth him all', 'now': 'taketh Him up, and sheweth Him all'},
+        {'anchor': 'A note about the world', 'now': 'A note about the whole world'}])
+    got = open(os.path.join(ap, 'draft.md')).read()
+    check('apply: every finding is written in', (n, errs) == (2, []))
+    check('apply: the replacement is the `now`, byte for byte',
+          'taketh Him up, and sheweth Him all' in got,
+          'what the author approved and what lands come from the same string')
+    check('apply: a finding may land in a footnote', 'A note about the whole world' in got)
+    check('apply: the scaffold header above --- is untouched', got.startswith('scaffold\n---\n'))
+    check('apply: untouched blocks are not re-flowed', 'A second line entirely.' in got)
+    check('apply: footnote continuations keep the 4-space indent',
+          all(l.startswith('    ') for l in got.split('[^a]: ')[1].split('\n')[1:] if l.strip()))
+
+    fresh()
+    n, errs = ra.apply_findings(ap, [{'anchor': 'not in this draft', 'now': 'x'}])
+    check('apply: an anchor that misses refuses', n == 0 and bool(errs))
+    check('apply: NOTHING is written when any finding misses',
+          open(os.path.join(ap, 'draft.md')).read() == src,
+          'a half-applied review leaves the draft in a state nobody chose')
+
+    fresh()
+    ra.apply_findings(ap, [{'anchor': 'A second line entirely.',
+                            'now': 'A [second line](https://example.com/p/a) entirely, made long '
+                                   'enough that the wrapper has to break it somewhere near here.'}])
+    got = open(os.path.join(ap, 'draft.md')).read()
+    check('apply: a markdown link is never broken across lines',
+          not re.search(r'\[[^\]]*\n[^\]]*\]\(', got),
+          'it still parses, but no draft on this desk carries one that way')
+
+    # the anchor is matched across the draft's own line wraps
+    fresh()
+    open(os.path.join(ap, 'draft.md'), 'w').write(
+        'h\n---\n## I. A\n\nThe devil taketh him up, and\nsheweth him all.\n')
+    n, errs = ra.apply_findings(ap, [{'anchor': 'taketh him up, and sheweth him all',
+                                      'now': 'taketh Him up, and sheweth Him all'}])
+    check('apply: an anchor matches across the file\'s line wraps', (n, errs) == (1, []),
+          'draft.md wraps at ~100 chars; the anchor is written as one line')
+
     # a headingless piece put the whole prose in BOTH lead and movements: the word
     # count doubled and every anchor matched twice
     flat = os.path.join(tmp, 'flat'); os.makedirs(flat, exist_ok=True)

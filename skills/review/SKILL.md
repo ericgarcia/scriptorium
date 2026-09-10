@@ -147,8 +147,24 @@ the thing the page exists to stop.
 
 ## Proposing is not applying
 
-**Review proposes. It does not edit `draft.md` without a yes.** When the author takes
-changes, apply exactly those, re-render, republish the same artifact URL, and then:
+**Review proposes. It does not edit `draft.md` without a yes.** When the author takes the
+changes, **apply them with the tool, never by hand**:
+
+```
+python3 framework/tools/review_artifact.py pieces/<slug> --apply
+```
+
+That is what the strict contract buys: `now` is an exact replacement for `anchor`, so what
+the author approved on the page and what lands in the file are the same string. Nothing is
+written unless every finding lands. **If the author takes only some**, drop the rest from
+`findings` first — keep them under another key so they are not lost.
+
+**Then re-run every gate, and read your own new prose against the same sweeps you just
+used on theirs.** A pass that rewrites a piece can introduce exactly the faults it was
+hunting: on *False Light* the stage-direction grep caught *"Here I want to be careful…"* in
+a section written minutes after finding 9 flagged that identical shape in the opening line.
+
+After applying, re-render, republish the same artifact URL, and then:
 
 - a change that reflects the **voice** goes in `styles/<style>/corrections.md`,
   append-only, with the why — the same rule `critique` follows;

@@ -21,6 +21,7 @@ WHY THIS EXISTS
 
 USAGE
   python3 review_artifact.py <piece_dir> [--facts facts.json] [--out page.html]
+  python3 review_artifact.py <piece_dir> --apply      # write every `now` into draft.md
 
   Everything the page shows about the PIECE is read from the piece: title and
   subtitle from publish.yaml, prose and notes from draft.md, the hero from
@@ -192,6 +193,81 @@ def place(findings, holders):
                          + f'{SHUT}{i}{END}' + h['text'][en:])
         h['cards'].sort()
     return []
+
+
+def apply_findings(piece_dir, findings, width=100):
+    """Write every finding's `now` into draft.md. Returns (n_applied, [complaints]).
+
+    The contract makes this safe and therefore makes it the right way to do it: `now` is
+    an EXACT replacement for `anchor`, so applying a review is a string substitution and
+    never a retyping. Ten spans re-keyed by hand — one of them a King James verse being
+    recased in three places — is precisely where a slip becomes an edit nobody can see,
+    which is the same reason the composer never retypes into Substack.
+
+    What the author approved in the artifact and what lands in the file are the same
+    bytes, because both come from the same `now`.
+
+    Nothing is written unless EVERY finding lands. A half-applied review would leave the
+    draft in a state no one chose.
+    """
+    path = os.path.join(piece_dir, 'draft.md')
+    raw = open(path, encoding='utf-8').read()
+    head, sep, body = raw.partition('\n---\n')
+    if not sep:                                    # no scaffold header; the file is the body
+        head, sep, body = '', '', raw
+    parts = re.split(r'(\n[ \t]*\n)', body)        # keep the separators, rejoin exactly
+    errs, touched = [], set()
+
+    for i, f in enumerate(findings, 1):
+        a = ' '.join((f.get('anchor') or '').split())
+        pat = re.compile(r'\s+'.join(re.escape(w) for w in a.split()))
+        hits = [(j, m) for j, b in enumerate(parts) if j % 2 == 0
+                for m in [pat.search(b)] if m]
+        total = sum(len(pat.findall(parts[j])) for j, _ in hits)
+        if not hits:
+            errs.append(f'finding {i}: anchor not in draft.md — {a[:70]!r}'); continue
+        if total > 1:
+            errs.append(f'finding {i}: anchor appears {total} times in draft.md'); continue
+        j, m = hits[0]
+        parts[j] = parts[j][:m.start()] + ' '.join(str(f['now']).split()) + parts[j][m.end():]
+        touched.add(j)
+    if errs:
+        return 0, errs
+
+    for j in sorted(touched):                      # re-wrap only what changed
+        parts[j] = rewrap(parts[j], width)
+    open(path, 'w', encoding='utf-8').write(head + sep + ''.join(parts))
+    return len(findings), []
+
+
+LINK = re.compile(r'\[[^\]]*\]\([^)\s]*\)')
+
+
+def rewrap(block, width):
+    """Re-flow one block at the house measure, keeping its kind.
+
+    A markdown link is never broken across lines. It still PARSES broken — the converter
+    normalises whitespace — but no draft on this desk carries one that way, and a wrapped
+    link is harder to grep and harder to read in a diff.
+    """
+    import textwrap
+    if block.lstrip().startswith(('#', '![')):
+        return block
+    holds = []
+
+    def hide(m):
+        holds.append(m.group(0))
+        return m.group(0).replace(' ', '\x00')
+
+    block = LINK.sub(hide, block)
+    unhide = lambda t: t.replace('\x00', ' ')
+    lead = re.match(r'\s*', block).group(0)
+    if re.match(r'\s*>', block):                    # blockquote
+        text = ' '.join(l.lstrip().lstrip('>').strip() for l in block.strip().split('\n'))
+        return unhide(lead + '\n'.join('> ' + l for l in textwrap.wrap(text, width - 2)))
+    text = ' '.join(block.split())
+    indent = '    ' if re.match(r'\[\^[\w-]+\]:', text) else ''
+    return unhide(lead + '\n'.join(textwrap.wrap(text, width, subsequent_indent=indent)))
 
 
 def hero(piece_dir, width=1400):
@@ -578,6 +654,17 @@ def main():
     fp = opt('--facts') or os.path.join(piece_dir, 'review.json')
     if os.path.exists(fp):
         facts = json.load(open(fp, encoding='utf-8'))
+
+    if '--apply' in sys.argv:
+        n, errs = apply_findings(piece_dir, facts.get('findings', []))
+        if errs:
+            print('review_artifact --apply: nothing written —', file=sys.stderr)
+            for e in errs:
+                print('  ' + e, file=sys.stderr)
+            sys.exit(3)
+        print(f'applied {n} finding(s) to {piece_dir}/draft.md — re-run the gates, and '
+              f're-sync if the piece is composed')
+        sys.exit(0)
     out = opt('--out', os.path.join(piece_dir, 'review.html'))
     page = build(piece_dir, facts)
     # Explicit, not locale-dependent: the page is full of em dashes and ellipses, and a

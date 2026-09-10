@@ -534,11 +534,12 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    transcription error, so this is cheap and should pass first time; if it does *not*, something
    else moved (a concurrent edit to the draft, a Substack-side input rule) and that is worth
    knowing before a human publishes.
-7. **Hand off:** the draft is composed. Tell the user to review it in Substack and click
-   **Publish** themselves. **Do not click Publish / Continue / Send on a FIRST publication.**
-   That click is the publication itself and is the one that can mail the subscriber list; it stays
-   the author's, and asking for permission does not transfer it. *(Shipping a later **edit** to an
-   already-published post is a different act with a different rule — see Republish step 5.)*
+7. **Hand off:** the draft is composed. Tell the user to review it in Substack, and **on their
+   word, click Publish.** The click is delegable; the *decision* is not, and it is theirs to make on
+   a draft they have read. **A first publication SENDS the subscriber email, and that is correct** —
+   it is the one notification the piece will ever get. Say so plainly before clicking, so nobody
+   learns it from the send. *(Shipping a later **edit** to an already-published post is a different
+   act with a different rule — see Republish step 5; that path sends nothing.)*
 
 ### The JS-snippet path — the pane's default, and Chrome's fallback
 
@@ -1018,9 +1019,10 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   transport. The author's words should travel **disk → pasteboard → browser**, never through the
   agent's fingers. This is not a performance preference: a transcription slip publishes a typo in
   the author's voice, and every guard downstream reads it as an intended edit.
-- **Shipping an edit is ungated; publishing is not.** Two different acts, two rules.
-  **First publication of an unpublished draft: never click.** It is the publication, and it is the
-  control that can mail the subscriber list. **Shipping a later edit to an already-published post:
+- **Shipping an edit is ungated; publishing needs the author's word — not their mouse.** Two
+  different acts, two rules. **First publication of an unpublished draft: the author decides, this
+  skill clicks.** It is the publication, and it is the one time the subscriber list is mailed —
+  which is the point of having one, not a hazard to design around. **Shipping a later edit to an already-published post:
   just click Update → Update now** (Eric, 2026-09-10, revising the 2026-09-03 ask-then-click rule,
   which itself replaced a blanket never-click). The decision was the edit; the click only finishes
   it, and an unfinished edit strands a correction the author believes they asked for.

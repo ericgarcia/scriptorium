@@ -96,6 +96,24 @@ def image_map(piece_dir):
     return out
 
 
+def readme_h1(piece_dir):
+    """The piece's own name, for a piece with no publish.yaml (a talk, an early draft).
+
+    Without this the page titled itself 'Review' — a generic label on a gallery card, which
+    is the one thing the naming rule forbids, because a shelf of pieces named 'Review' cannot
+    be read. Markdown emphasis is stripped; the parenthetical half of a title is kept, since
+    that is often the only thing distinguishing two pieces of the same work.
+    """
+    path = os.path.join(piece_dir, 'README.md')
+    if not os.path.exists(path):
+        return ''
+    for line in open(path, encoding='utf-8'):
+        if line.startswith('# '):
+            t = re.sub(r'\*+', '', line[2:]).strip()
+            return re.sub(r'\s+', ' ', t)
+    return ''
+
+
 def manifest(piece_dir):
     out, path = {}, os.path.join(piece_dir, 'publish.yaml')
     if os.path.exists(path):
@@ -710,13 +728,15 @@ def build(piece_dir, facts):
                      + [f'<b>{html.escape(s)}</b>' for s in flags]
                      + ([f'<b>{html.escape(facts["date"])}</b>'] if facts.get('date') else []))
 
-    return f"""<title>{html.escape(man.get('title','Review'))}</title>
+    name = (man.get('title') or readme_h1(piece_dir)
+            or os.path.basename(piece_dir).replace('-', ' ').title())
+    return f"""<title>{html.escape(name)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={SERIF}:ital,wght@0,400;0,600;1,400&family={SANS.replace(' ','+')}:wght@400;500;600&family={MONO.replace(' ','+')}:wght@400;500&display=swap">
 <style>{CSS}</style>
 <div class="wrap">
 <header class="mast">
   <div class="stamp">{stamp}</div>
-  <h1>{html.escape(man.get('title','(untitled)'))}</h1>
+  <h1>{html.escape(man.get('title') or name)}</h1>
   <p class="sub">{html.escape(man.get('subtitle',''))}</p>
   {figure}
   <dl class="review">{strip}</dl>

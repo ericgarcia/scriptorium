@@ -55,7 +55,7 @@ Then, without `--check`, it writes `pieces/<name>/linkedin/article.html` and
 | `rel=canonical` | *Originally published at <url>* as the first line | LinkedIn emits no canonical tag |
 | subtitle | italic lede under that line | an Article has a title and nothing else |
 | native footnotes | `[1]` in the text, **Notes** at the end | LinkedIn has no footnotes; numbered in first-reference order, as Substack numbers them |
-| figures | a marked slot per figure, uploaded by hand | unmeasured what the editor does with a pasted data: image |
+| figures | a marked slot, replaced by pasting that figure over it | a pasted image uploads on save but loses its alt, so figures go one at a time and each alt is restored from its payload |
 
 ## Composing — measured 2026-09-10, end to end, in the built-in pane
 

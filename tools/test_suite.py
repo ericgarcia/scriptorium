@@ -37,7 +37,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
           fixture and must all be listed; --strict warns on them and does not refuse
 """
-import os, re, sys, json, shutil, subprocess, tempfile, datetime
+import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -1373,6 +1373,343 @@ def unit_talk(tmp):
           [(t.split('.')[0], b) for t, w, b in per] == [('I', 5), ('II', 12)] and per[0][1] > per[1][1], str(per))
 
 
+# ---------------------------------------------------------------- unit: dc -> deck
+def _tiny_png():
+    """A real, complete 1x1 PNG, built here so the fixture needs no binary in git."""
+    import struct, zlib
+    def chunk(tag, data):
+        return (struct.pack('>I', len(data)) + tag + data
+                + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
+    ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 0, 0, 0, 0)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
+            + chunk(b'IDAT', zlib.compress(b'\x00\x00')) + chunk(b'IEND', b''))
+
+
+DC_FIXTURE = """<helmet><style>body{background:#111}</style></helmet>
+<x-dc><x-import width="1600" height="900">
+<section data-label="Open" data-speaker-notes="Say &#x201c;hello&#x201d; &amp; wait.">
+  <h1>A &mdash; Talk</h1>
+</section>
+<section data-label="Figure">
+  <img src="assets/fig1.png">
+</section>
+</x-import></x-dc>
+"""
+
+
+def _run_deck(src, out):
+    tool = os.path.join(HERE, 'dc_to_deck.py')
+    r = subprocess.run([sys.executable, tool, src, out],
+                       capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr)
+
+
+def unit_deck(tmp):
+    """Every case here is a fault that actually happened, or a footgun the port created.
+
+    The truncated PNG is the real one: a Claude Design asset came back cut off at the
+    export tool's read limit (2026-09-09) and would have shipped as a broken slide.
+    The refuse-to-delete cases are new: in the JavaScript original the output path was
+    computed, and in this port it is an argument.
+    """
+    print("\n-- deck: Claude Design .dc.html -> standalone deck ---------------")
+    src = os.path.join(tmp, 'deck-src')
+    os.makedirs(os.path.join(src, 'assets'), exist_ok=True)
+    with open(os.path.join(src, 'deck.dc.html'), 'w', encoding='utf-8') as f:
+        f.write(DC_FIXTURE)
+    with open(os.path.join(src, 'deck-stage.js'), 'w', encoding='utf-8') as f:
+        f.write('/* stub runtime */\n')
+    png = os.path.join(src, 'assets', 'fig1.png')
+    with open(png, 'wb') as f:
+        f.write(_tiny_png())
+    # an asset no slide references — it must NOT be copied
+    with open(os.path.join(src, 'assets', 'unused.png'), 'wb') as f:
+        f.write(b'not even a png')
+
+    out = os.path.join(tmp, 'deck-out')
+    code, log = _run_deck(src, out)
+    check('a well-formed deck builds', code == 0, log.strip())
+    if code != 0:
+        return
+
+    html = open(os.path.join(out, 'deck.html'), encoding='utf-8').read()
+    notes = json.load(open(os.path.join(out, 'notes.json'), encoding='utf-8'))
+
+    check('the authoring wrapper is gone and deck-stage is the root',
+          '<x-import' not in html and '<x-dc' not in html
+          and '<deck-stage width="1600" height="900">' in html, html[:200])
+    check('the deck is not indexable and does not flash before the runtime defines it',
+          '<meta name="robots" content="noindex">' in html
+          and 'deck-stage:not(:defined) { visibility: hidden; }' in html)
+    check('the helmet head survives into the deck',
+          '<style>body{background:#111}</style>' in html)
+    check('the title comes from the first slide h1, entity-decoded',
+          notes['title'] == 'A — Talk', notes['title'])
+    check('speaker notes are decoded, named and numeric entities alike',
+          notes['slides'][0]['notes'] == 'Say “hello” & wait.', notes['slides'][0]['notes'])
+    check('a slide with no notes still gets an entry, with its label',
+          notes['slideCount'] == 2 and notes['slides'][1]['label'] == 'Figure'
+          and notes['slides'][1]['notes'] == '', str(notes['slides'][1]))
+    check('only referenced assets are copied',
+          sorted(os.listdir(os.path.join(out, 'assets'))) == ['fig1.png'],
+          str(os.listdir(os.path.join(out, 'assets'))))
+
+    # the fault this guard exists for
+    with open(png, 'rb') as f:
+        good = f.read()
+    with open(png, 'wb') as f:
+        f.write(good[:len(good) // 2])
+    code, log = _run_deck(src, out)
+    check('a truncated PNG stops the build and says to re-download it',
+          code == 1 and 'truncated' in log and 'IEND' in log, log.strip())
+    check('and the previous good build is left intact, not half-erased',
+          os.path.exists(os.path.join(out, 'deck.html'))
+          and os.path.exists(os.path.join(out, 'assets', 'fig1.png')))
+    with open(png, 'wb') as f:
+        f.write(good)
+
+    # footguns the port introduced by taking the output path as an argument
+    keep = os.path.join(tmp, 'not-a-deck')
+    os.makedirs(keep, exist_ok=True)
+    with open(os.path.join(keep, 'irreplaceable.txt'), 'w', encoding='utf-8') as f:
+        f.write('do not delete me')
+    code, log = _run_deck(src, keep)
+    check('a directory that is not a deck build is refused, not deleted',
+          code == 2 and 'refusing to delete' in log
+          and os.listdir(keep) == ['irreplaceable.txt'], log.strip())
+    code, log = _run_deck(src, src)
+    check('writing the output over the source is refused',
+          code == 2 and 'same directory' in log, log.strip())
+    check('and the source survived that', os.path.exists(os.path.join(src, 'deck.dc.html')))
+
+    # malformed input fails loudly rather than emitting a deck missing slides
+    bad = os.path.join(tmp, 'deck-unbalanced')
+    shutil.copytree(src, bad)
+    with open(os.path.join(bad, 'deck.dc.html'), 'w', encoding='utf-8') as f:
+        f.write(DC_FIXTURE.replace('</section>', '', 1))
+    code, log = _run_deck(bad, os.path.join(tmp, 'deck-out-bad'))
+    check('an unbalanced <section> is an error, not a silently shortened deck',
+          code == 1 and 'unbalanced' in log, log.strip())
+
+    missing = os.path.join(tmp, 'deck-missing-asset')
+    shutil.copytree(src, missing)
+    os.remove(os.path.join(missing, 'assets', 'fig1.png'))
+    code, log = _run_deck(missing, os.path.join(tmp, 'deck-out-missing'))
+    check('a slide pointing at an asset that is not there names the asset',
+          code == 1 and 'assets/fig1.png' in log, log.strip())
+
+
+# ---------------------------------------------------------------- unit: store publish
+def unit_store(tmp):
+    """The two publishing tools, exercised without touching AWS.
+
+    The index merge is the one that could do real damage: a bundle holding one talk must
+    not unpublish the rest of the corpus, and the obvious implementation — write the
+    index from what is in this bundle — does exactly that.
+    """
+    print("\n-- store: bundle assembly and cache policy ----------------------")
+    import store_publish, talk_bundle
+
+    cc = {'index': 'IDX', 'pieces': 'PIECES', 'images': 'IMG',
+          'talks': 'TALK', 'talks_mutable': 'TALKMUT'}
+    got = {k: store_publish.cache_control(k, cc) for k in [
+        'index.json',
+        'pieces/x.json',
+        'images/x/hero.webp',
+        'talks/x/assets/fig1.png',
+        'talks/x/deck-stage.js',
+        'talks/x/deck.html',
+        'talks/x/notes.json',
+    ]}
+    check('an immutable asset and a rewritten file get different cache policies',
+          got['images/x/hero.webp'] == 'IMG'
+          and got['talks/x/assets/fig1.png'] == 'TALK'
+          and got['talks/x/deck.html'] == 'TALKMUT'
+          and got['talks/x/notes.json'] == 'TALKMUT', str(got))
+    check('content json is short-lived', got['index.json'] == 'IDX' and got['pieces/x.json'] == 'PIECES')
+    check('an unknown key falls back rather than caching forever',
+          store_publish.cache_control('stray.txt', cc) == 'PIECES')
+    check('content types are pinned for the formats a bundle carries',
+          store_publish.content_type('a/b.webp') == 'image/webp'
+          and store_publish.content_type('a/b.js').startswith('text/javascript')
+          and store_publish.content_type('a/b.json') == 'application/json')
+
+    # a bundle from a fixture deck
+    talk = os.path.join(tmp, 'talk-src'); os.makedirs(talk, exist_ok=True)
+    deck = os.path.join(tmp, 'talk-deck'); os.makedirs(os.path.join(deck, 'assets'), exist_ok=True)
+    with open(os.path.join(deck, 'notes.json'), 'w', encoding='utf-8') as f:
+        json.dump({'slug': 'a-talk', 'title': 'A Talk', 'slideCount': 3, 'slides': []}, f)
+    with open(os.path.join(deck, 'deck.html'), 'w', encoding='utf-8') as f:
+        f.write('<deck-stage></deck-stage>')
+    with open(os.path.join(talk, 'piece.yaml'), 'w', encoding='utf-8') as f:
+        f.write('slug: a-talk\ntitle: A Talk\npublished_at: 2026-09-08\n'
+                'outlets: [muffinlabs]\nbody: |\n  Some **framing** prose.\n')
+
+    bundle = os.path.join(tmp, 'bundle')
+    # Pretend the store already holds another piece, published to a different outlet.
+    os.makedirs(bundle, exist_ok=True)
+    with open(os.path.join(bundle, 'index.json'), 'w', encoding='utf-8') as f:
+        json.dump({'spec': '2', 'generated_at': '', 'pieces': [
+            {'slug': 'elsewhere', 'title': 'Elsewhere', 'published_at': '2026-01-01',
+             'digest': 'sha256:dead', 'outlets': ['alignmentfellowship'], 'kind': 'piece'}]}, f)
+
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
+                       capture_output=True, text=True)
+    check('a talk bundle assembles', r.returncode == 0, (r.stdout + r.stderr).strip())
+    if r.returncode != 0:
+        return
+
+    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), encoding='utf-8') as f:
+        piece = json.load(f)
+    check('the piece carries a talk block with relative paths',
+          piece['talk']['deck'] == '../talks/a-talk/deck.html'
+          and piece['talk']['slide_count'] == 3, str(piece.get('talk')))
+    check('the digest covers reader text, not markup',
+          piece['plain'] == 'Some framing prose.', repr(piece.get('plain')))
+    check('the digest is a sha256 of that text',
+          piece['digest'] == 'sha256:' + hashlib.sha256(piece['plain'].encode()).hexdigest())
+
+    with open(os.path.join(bundle, 'index.json'), encoding='utf-8') as f:
+        index = json.load(f)
+    slugs = sorted(p['slug'] for p in index['pieces'])
+    check('publishing one talk does NOT unpublish everything else',
+          slugs == ['a-talk', 'elsewhere'], str(slugs))
+    check('the index is newest first',
+          [p['slug'] for p in index['pieces']] == ['a-talk', 'elsewhere'],
+          str([p['slug'] for p in index['pieces']]))
+
+    # re-running must replace the entry, not duplicate it
+    subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
+                   capture_output=True, text=True)
+    with open(os.path.join(bundle, 'index.json'), encoding='utf-8') as f:
+        index2 = json.load(f)
+    check('re-publishing replaces the index entry rather than duplicating it',
+          len(index2['pieces']) == 2, str([p['slug'] for p in index2['pieces']]))
+
+    # nothing is published without being named
+    with open(os.path.join(talk, 'piece.yaml'), 'w', encoding='utf-8') as f:
+        f.write('slug: a-talk\ntitle: A Talk\npublished_at: 2026-09-08\nbody: |\n  x\n')
+    r2 = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck,
+                         os.path.join(tmp, 'bundle2')], capture_output=True, text=True)
+    check('a talk with no outlets is refused, not published everywhere',
+          r2.returncode != 0 and 'outlets' in (r2.stdout + r2.stderr), (r2.stdout + r2.stderr).strip())
+
+    # ---- bundle_pieces: markdown bundle -> the JSON the store serves ----
+    content = os.path.join(tmp, 'vendored')
+    os.makedirs(content, exist_ok=True)
+    imgs = os.path.join(tmp, 'vendored-images', 'a-piece')
+    os.makedirs(imgs, exist_ok=True)
+    with open(os.path.join(imgs, 'hero.webp'), 'wb') as f:
+        f.write(b'RIFF____WEBP')
+    with open(os.path.join(content, 'a-piece.md'), 'w', encoding='utf-8') as f:
+        f.write('---\nslug: a-piece\ntitle: A Piece\npublished_at: 2026-05-04\n'
+                'digest: sha256:abc123def456\nhero:\n  src: /images/a-piece/hero.webp\n'
+                '  alt: A hero\n---\n\nBody with an ![inline](/images/a-piece/hero.webp).\n')
+
+    b2 = os.path.join(tmp, 'bundle-pieces')
+    r3 = subprocess.run([sys.executable, os.path.join(HERE, 'bundle_pieces.py'), content, b2,
+                         '--outlet', 'alignmentfellowship', '--images',
+                         os.path.join(tmp, 'vendored-images')], capture_output=True, text=True)
+    check('a vendored bundle converts to store JSON', r3.returncode == 0,
+          (r3.stdout + r3.stderr).strip())
+    if r3.returncode != 0:
+        return
+    with open(os.path.join(b2, 'pieces', 'a-piece.json'), encoding='utf-8') as f:
+        conv = json.load(f)
+    # A destination rewrote ../images to /images so it could serve from /public. The
+    # store needs that undone, in the front matter AND in the prose.
+    check('a destination image rewrite is undone in front matter',
+          conv['hero']['src'] == '../images/a-piece/hero.webp', str(conv.get('hero')))
+    check('and undone in the body too',
+          '../images/a-piece/hero.webp' in conv['body'] and '](/images/' not in conv['body'],
+          conv['body'])
+    check('the digest is carried over, never recomputed',
+          conv['digest'] == 'sha256:abc123def456', conv['digest'])
+    check('images travel with the piece',
+          os.path.exists(os.path.join(b2, 'images', 'a-piece', 'hero.webp')))
+
+    # ---- snapshot: the way back ----
+    # Served from a local directory rather than the real store: the suite makes no
+    # network calls, and a backup tool that needs the thing it is backing up to be
+    # reachable in order to be TESTED is not much of a backup tool.
+    import http.server, socketserver, threading, functools
+    store_root = os.path.join(tmp, 'fake-store')
+    os.makedirs(os.path.join(store_root, 'pieces'), exist_ok=True)
+    os.makedirs(os.path.join(store_root, 'images', 'a-piece'), exist_ok=True)
+    with open(os.path.join(store_root, 'images', 'a-piece', 'hero.webp'), 'wb') as f:
+        f.write(b'RIFF____WEBP')
+    piece = {'slug': 'a-piece', 'title': 'A Piece', 'published_at': '2026-05-04',
+             'digest': 'sha256:abc123def456', 'body': 'Prose.\n',
+             'hero': {'src': '../images/a-piece/hero.webp', 'alt': 'A hero'}}
+    with open(os.path.join(store_root, 'pieces', 'a-piece.json'), 'w', encoding='utf-8') as f:
+        json.dump(piece, f)
+    with open(os.path.join(store_root, 'index.json'), 'w', encoding='utf-8') as f:
+        json.dump({'spec': '2', 'generated_at': '', 'pieces': [
+            {'slug': 'a-piece', 'title': 'A Piece', 'published_at': '2026-05-04',
+             'digest': 'sha256:abc123def456', 'outlets': ['somewhere'], 'kind': 'piece'}]}, f)
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=store_root)
+    class Quiet(handler.func):
+        def log_message(self, *a): pass
+    httpd = socketserver.TCPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=store_root))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        cfg_path = os.path.join(tmp, 'store.yaml')
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            f.write(f'store:\n  base_url: http://127.0.0.1:{port}\n  bucket: b\n'
+                    f'  region: us-east-1\n  distribution_id: d\n')
+        snap = os.path.join(tmp, 'snap')
+        snapshot = os.path.join(HERE, 'snapshot.py')
+        r = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path],
+                           capture_output=True, text=True)
+        check('a snapshot of the store completes', r.returncode == 0,
+              (r.stdout + r.stderr).strip())
+        check('it writes the piece back as front matter + markdown',
+              os.path.exists(os.path.join(snap, 'content', 'a-piece.md')))
+        check('and brings the images with it',
+              os.path.exists(os.path.join(snap, 'images', 'a-piece', 'hero.webp')))
+        if os.path.exists(os.path.join(snap, 'content', 'a-piece.md')):
+            text = open(os.path.join(snap, 'content', 'a-piece.md'), encoding='utf-8').read()
+            check('the date is a bare YYYY-MM-DD, not a quoted string',
+                  'published_at: 2026-05-04' in text, text[:200])
+            check('the body survives the round trip', text.rstrip().endswith('Prose.'))
+
+        rv = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('verify-only passes on a good snapshot', rv.returncode == 0,
+              (rv.stdout + rv.stderr).strip())
+
+        # A verifier that cannot fail is not a verifier. Each of these is a way a
+        # backup rots quietly.
+        os.remove(os.path.join(snap, 'images', 'a-piece', 'hero.webp'))
+        r1 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a missing image fails verification',
+              r1.returncode == 1 and 'missing' in (r1.stdout + r1.stderr), r1.stderr.strip())
+
+        with open(os.path.join(snap, 'images', 'a-piece', 'hero.webp'), 'wb') as f:
+            f.write(b'RIFF____WEBP')
+        md = os.path.join(snap, 'content', 'a-piece.md')
+        body = open(md, encoding='utf-8').read().replace('sha256:abc123def456', 'sha256:0000')
+        open(md, 'w', encoding='utf-8').write(body)
+        r2 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a digest that disagrees with the index fails verification',
+              r2.returncode == 1 and 'digest disagrees' in (r2.stdout + r2.stderr),
+              r2.stderr.strip())
+
+        os.remove(md)
+        r3 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a missing piece fails verification',
+              r3.returncode == 1 and 'missing' in (r3.stdout + r3.stderr), r3.stderr.strip())
+    finally:
+        httpd.shutdown()
+
+
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -1685,6 +2022,8 @@ def main():
         unit_manifest_gate(tmp)
         unit_pronouns(tmp)
         unit_talk(tmp)
+        unit_deck(tmp)
+        unit_store(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

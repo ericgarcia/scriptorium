@@ -91,11 +91,24 @@ _BLOCKERS = [
 ]
 
 # A blocker phrase sitting inside a sentence that RESOLVES it is not a blocker.
+#
+# The NEGATION VOCABULARY here is load-bearing and was incomplete until 2026-09-10: the
+# alternation ran (no|zero|non?e), so "zero unverified" cleared and **"nothing unverified
+# is asserted" did not** — `no` matched inside "nothing" but the required whitespace then
+# failed. Two pieces were blocked from composing by sentences stating the OPPOSITE of a
+# doubt, one of them written by the session that had just run this tool. A gate that reads
+# a word and not the sentence around it teaches people to pass `--force`, and there is
+# deliberately no --force here, so it teaches them to write the clearance falsely instead.
 _CLEARED_CONTEXT = re.compile(
-    r'(?:no|zero|non?e)\s+(?:\w+\s+){0,3}(?:unverified|verify)'      # "zero unverified markers"
+    r'(?:no|zero|non?e|nothing|never|no\s+longer)\s+(?:\w+\s+){0,3}(?:unverified|verify)'
+    r'|not\s+unverified'                                            # adjacent only, on purpose
     r'|(?:unverified|verify)\s+(?:\w+\s+){0,3}(?:remain|remains|outstanding|cleared|closed)'
     r'|all\s+(?:\w+\s+){0,3}(?:verified|checked)'
-    r'|(?:anchors?|references?|loci|quotes?)\s+(?:\w+\s+){0,2}VERIFIED',
+    r'|(?:anchors?|references?|loci|quotes?)\s+(?:\w+\s+){0,2}VERIFIED'
+    # A GENERAL STATEMENT ABOUT VERIFICATION IS NOT A DOUBT ABOUT THIS PIECE. A log quoting
+    # check_links' docstring — "a copied URL is unverified by default" — blocked a piece whose
+    # own claims were never in question.
+    r'|unverified\s+by\s+default',
     re.I)
 
 _CLEARANCE = re.compile(

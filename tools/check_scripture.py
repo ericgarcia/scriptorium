@@ -229,15 +229,34 @@ def main():
         # counterweight in the same note (1 Thess 5:18 answered by Eph 5:20). Check
         # every quotation against EVERY locus the note cites, or the second verse's
         # quotation reads as drift against the first verse.
-        keys = []
+        # A cited RANGE is checked as a range. LOCUS_RE has always captured the end
+        # verse in group 4 and this loop threw it away, so a note that correctly read
+        # `13:4-5` was checked against 13:4 alone and then told to "cite 13:4-5" —
+        # advising exactly what it already said. That is a checker flagging correct
+        # prose, which this file's own docstring names as the failure that trains a
+        # reader to ignore it. Measured on false-light 2026-09-10.
+        keys, cited_to = [], {}
         for lm in LOCUS_RE.finditer(note):
             book = ALIASES.get(lm.group(1), lm.group(1))
             k = (book, int(lm.group(2)), int(lm.group(3)))
+            end = int(lm.group(4)) if lm.group(4) else k[2]
             if k not in keys:
                 keys.append(k)
+            cited_to[k] = max(cited_to.get(k, end), end)
         if not keys:
             continue
-        print(f"[^{name}] " + " · ".join(f"{b} {c}:{v}" for b, c, v in keys))
+
+        def shown(k):
+            hi = cited_to.get(k, k[2])
+            return f"{k[0]} {k[1]}:{k[2]}" + (f"-{hi}" if hi > k[2] else "")
+
+        def cited_text(k):
+            b, c, v = k
+            hi = cited_to.get(k, v)
+            parts = [idx[(b, c, i)] for i in range(v, hi + 1) if (b, c, i) in idx]
+            return " ".join(parts) if parts else idx[k]
+
+        print(f"[^{name}] " + " · ".join(shown(k) for k in keys))
         unknown = [k for k in keys if k not in idx]
         if unknown:
             for b, c, v in unknown:
@@ -246,7 +265,7 @@ def main():
         keys = [k for k in keys if k in idx]
         if not keys:
             continue
-        canons = {k: norm(idx[k]) for k in keys}
+        canons = {k: norm(cited_text(k)) for k in keys}
         spans = quoted_spans(note)
         if not spans:
             print("   locus only, no quotation to check"); continue
@@ -266,12 +285,12 @@ def main():
             checked += 1
             ok, detail = match(q, canon)
             if ok:
-                where = f" — {key[0]} {key[1]}:{key[2]}" if len(keys) > 1 else ""
+                where = f" — {shown(key)}" if len(keys) > 1 else ""
                 print(f"   MATCH   {detail}{where}")
-                for n in house_changes(q, idx[key]):
+                for n in house_changes(q, cited_text(key)):
                     print(f"     {n}")
                 if verbose:
-                    print(f"     KJV  : {idx[key][:110]}")
+                    print(f"     KJV  : {cited_text(key)[:110]}")
                 continue
 
             # The commonest real finding is not drift but an UNDER-CITED RANGE: the
@@ -296,7 +315,7 @@ def main():
             if span_lo:
                 rng = f"{c}:{span_lo}" if span_lo == span_hi else f"{c}:{span_lo}-{span_hi}"
                 print(f"   RANGE   the quotation covers {b} {rng}, but the note cites "
-                      f"only {c}:{v} — cite {rng}")
+                      f"only {shown(key)[len(b) + 1:]} — cite {rng}")
             elif score < 0.6:
                 print(f"   SUSPECT only {int(score*100)}% of the span is in the verse — "
                       f"read it; a real drift looks like this")

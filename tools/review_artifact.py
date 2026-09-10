@@ -37,9 +37,35 @@ FACTS (all keys optional)
   gates     [["check_links","8 live, 0 dead"], ...]
   calls     [["Short title","One or two sentences of body (HTML ok)."], ...]
   cover     {"caption":"...","provenance":"Generated, not a photograph."}
+  findings  [{...}, ...]                a REVIEW's proposed changes — see below
+
+FINDINGS — the review's proposed changes, highlighted where they land
+  A finding is anchored to the prose it is about, and the page marks that exact
+  span in place and hangs the note under the paragraph it belongs to. The author
+  reads the change in its context, which is the only place it can be judged.
+
+    anchor    VERBATIM span of draft.md (markdown and all) that the finding is
+              about. Matched against the whitespace-normalised block, so line
+              wraps do not matter and `*asterisks*` do. REQUIRED.
+    severity  fidelity | argument | voice | open   (colours the mark; default
+              `open`). Any other value renders neutral.
+    title     the finding in a phrase
+    what      the note (HTML ok)
+    was/now   the current wording and the proposal, rendered verbatim in mono as
+              a two-row diff — so a change of punctuation or case is legible
+    evidence  what the claim was checked against (HTML ok)
+
+  Findings are numbered in the order given — rank them; that ranking is what the
+  author reads first.
+
+  **The anchor is not allowed to miss.** An anchor that matches nothing, matches
+  more than one place, or overlaps another finding's anchor EXITS 3 and names it.
+  A finding that silently fails to highlight leaves a page that looks complete and
+  is not, which is the one failure a review page must never have. Lengthen the
+  anchor until it is unique.
 
 EXIT
-  0 rendered            1 usage / no draft            2 draft failed to parse
+  0 rendered   1 usage / no draft   2 draft failed to parse   3 an anchor missed
 """
 import sys, os, re, json, html, io, base64
 
@@ -86,6 +112,60 @@ def inline(t, num, notes=True):
             f'<sup class="fn" id="r{num[m.group(1)]}">'
             f'<a href="#n{num[m.group(1)]}">{num[m.group(1)]}</a></sup>') if m.group(1) in num else '', t)
     return t
+
+
+SEVS = ('fidelity', 'argument', 'voice', 'open')
+OPEN, SEP, SHUT, END = '\ue000', '\ue001', '\ue002', '\ue003'
+
+
+def demark(t):
+    """Turn the placed sentinels into the highlight, AFTER the markdown pass."""
+    t = re.sub(OPEN + r'(\d+)' + SEP + r'([a-z]+)' + SHUT,
+               lambda m: f'<mark class="hl hl-{m.group(2)}" id="a{m.group(1)}">', t)
+    return re.sub(SHUT + r'(\d+)' + END,
+                  lambda m: f'<sup class="hlno"><a href="#f{m.group(1)}" '
+                            f'aria-label="finding {m.group(1)}">{m.group(1)}</a></sup></mark>', t)
+
+
+def place(findings, holders):
+    """Anchor every finding, or refuse. Returns [] or a list of complaints.
+
+    A finding whose anchor does not land is worse than a missing finding: the page
+    still renders, still looks whole, and the author reads it believing they have
+    seen everything. So an anchor that matches nothing, matches twice, or overlaps
+    another one is a hard failure that names itself.
+    """
+    errs = []
+    for i, f in enumerate(findings, 1):
+        label = f.get('title') or f.get('anchor', '')
+        a = ' '.join((f.get('anchor') or '').split())
+        if not a:
+            errs.append(f'finding {i} ({label!r}): no anchor'); continue
+        hits = [(h, m.start(), m.end())
+                for h in holders for m in re.finditer(re.escape(a), h['text'])]
+        if not hits:
+            errs.append(f'finding {i} ({label!r}): anchor matches nothing — {a[:70]!r}')
+            continue
+        if len(hits) > 1:
+            errs.append(f'finding {i} ({label!r}): anchor matches {len(hits)} places — '
+                        f'lengthen it until it is unique — {a[:70]!r}')
+            continue
+        h, st, en = hits[0]
+        clash = next((n for s0, e0, n, _ in h['marks'] if st < e0 and s0 < en), None)
+        if clash:
+            errs.append(f'finding {i} ({label!r}): anchor overlaps finding {clash}')
+            continue
+        sev = f.get('severity', 'open')
+        h['marks'].append((st, en, i, sev if sev in SEVS else 'open'))
+        h['cards'].append(i)
+    if errs:
+        return errs
+    for h in holders:                       # right-to-left, so earlier offsets hold
+        for st, en, i, sev in sorted(h['marks'], key=lambda t: -t[0]):
+            h['text'] = (h['text'][:st] + f'{OPEN}{i}{SEP}{sev}{SHUT}' + h['text'][st:en]
+                         + f'{SHUT}{i}{END}' + h['text'][en:])
+        h['cards'].sort()
+    return []
 
 
 def hero(piece_dir, width=1400):
@@ -158,6 +238,55 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
   color:var(--flag);margin:0}
 .calls p{margin:0;font-family:var(--sans);font-size:15px;line-height:1.6;max-width:70ch}
 .calls p b{font-weight:600}
+/* --- findings: the review's proposed changes ------------------------------ */
+.fidx{margin:34px 0 0;border:1px solid var(--rule);background:var(--card)}
+.fidx h3{font-family:var(--sans);font-size:12px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);margin:0;padding:14px 18px;border-bottom:1px solid var(--rule)}
+.fidx a{display:grid;grid-template-columns:30px 92px 1fr;gap:12px;align-items:baseline;
+  padding:11px 18px;border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink);
+  font-family:var(--sans);font-size:15px;line-height:1.45}
+.fidx a:last-child{border-bottom:0}
+.fidx a:hover{background:var(--accent-soft)}
+.fidx a>b{font-family:var(--mono);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.fidx a>em.sev{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  font-style:normal}
+.fidx a em:not(.sev){font-style:italic}
+.sev-fidelity>em.sev,.sev-fidelity>b{color:var(--flag)}
+.sev-argument>em.sev,.sev-argument>b{color:var(--accent)}
+.sev-voice>em.sev,.sev-voice>b{color:var(--muted)}
+.sev-open>em.sev,.sev-open>b{color:var(--flag)}
+mark.hl{background:var(--accent-soft);color:inherit;padding:1px 0;
+  box-shadow:inset 0 -2px 0 var(--accent)}
+mark.hl-fidelity,mark.hl-open{background:var(--flag-soft);box-shadow:inset 0 -2px 0 var(--flag)}
+mark.hl-voice{background:transparent;box-shadow:inset 0 -1px 0 var(--muted)}
+sup.hlno{font-family:var(--mono);font-size:10px;vertical-align:super;padding:0 2px}
+sup.hlno a{text-decoration:none;color:var(--accent)}
+mark.hl-fidelity sup.hlno a,mark.hl-open sup.hlno a{color:var(--flag)}
+.fx{margin:0 0 22px;border-left:2px solid var(--accent);background:var(--card);
+  padding:14px 18px;max-width:66ch}
+.fx.sev-fidelity,.fx.sev-open{border-left-color:var(--flag)}
+.fx.sev-voice{border-left-color:var(--rule)}
+.fxh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:0 0 8px}
+.fxh b{font-family:var(--sans);font-size:15px;font-weight:600;line-height:1.35}
+.fxh>span{font-family:var(--mono);font-size:12px;color:var(--accent);font-variant-numeric:tabular-nums}
+.fx.sev-fidelity .fxh>span,.fx.sev-open .fxh>span{color:var(--flag)}
+.fxh em.sev{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  font-style:normal;color:var(--muted);margin-left:auto}
+.fxh b em{font-style:italic;font-weight:600}
+.fx p{font-family:var(--sans);font-size:14.5px;line-height:1.6;margin:0 0 10px}
+.fx p:last-child{margin-bottom:0}
+.diff{margin:10px 0;display:grid;grid-template-columns:38px 1fr;gap:2px 10px;
+  font-family:var(--mono);font-size:13px;line-height:1.55}
+.diff dt{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  padding-top:3px}
+.diff dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.diff .was{color:var(--muted)}
+.diff .now{color:var(--ink);background:var(--accent-soft);padding:1px 4px;margin:0 -4px}
+.fx.sev-fidelity .diff .now,.fx.sev-open .diff .now{background:var(--flag-soft)}
+.ev{font-family:var(--sans);font-size:13px;line-height:1.55;color:var(--muted);
+  border-top:1px solid var(--rule);padding-top:9px;margin-top:10px}
+.ev b{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  font-weight:500;color:var(--muted);display:block;margin-bottom:3px}
 .toc{margin:40px 0 0;border-top:1px solid var(--rule)}
 .toc a{display:grid;grid-template-columns:34px 1fr auto;gap:14px;align-items:baseline;
   padding:11px 2px;border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink);
@@ -194,6 +323,8 @@ a.sib:hover{border-bottom-color:var(--accent)}
 :target{background:var(--accent-soft)}
 a:focus-visible,.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:720px){
+  .fidx a{grid-template-columns:26px 1fr;gap:4px 10px}
+  .fidx a>em.sev{grid-column:2}
   .mv{grid-template-columns:1fr;gap:10px;padding-top:40px}
   .rail{position:static;flex-direction:row;gap:10px;text-align:left;align-items:baseline}
   .col p{font-size:17.5px}}
@@ -202,7 +333,7 @@ a:focus-visible,.toc a:focus-visible{outline:2px solid var(--accent);outline-off
 
 
 def build(piece_dir, facts):
-    raw = open(os.path.join(piece_dir, 'draft.md')).read()
+    raw = open(os.path.join(piece_dir, 'draft.md'), encoding='utf-8').read()
     prose, defs = split_draft(raw)
     man = manifest(piece_dir)
 
@@ -222,19 +353,34 @@ def build(piece_dir, facts):
         head, _, rest = ch.partition('\n')
         movements.append((head.strip(), rest.strip()))
     if not movements:                      # a piece with no headings is still reviewable
-        movements = [('', prose)]
+        movements, lead = [('', prose)], ''
 
-    def blocks(md):
+
+    # --- blocks, as mutable holders -----------------------------------------
+    # Findings are anchored into the prose BEFORE it is rendered, so a mark can
+    # sit inside an emphasis run without the inline pass having to know about it.
+    # The sentinels are private-use codepoints: html.escape leaves them alone and
+    # none of the markdown regexes can match them.
+    def split_blocks(md, kind='mv'):
         out = []
-        for blk in re.split(r'\n\s*\n', md):
-            blk = blk.strip()
-            if not blk or blk.startswith('!['):
+        for b in re.split(r'\n\s*\n', md):
+            b = b.strip()
+            if not b or b.startswith('!['):
                 continue
-            if blk.startswith('>'):
-                q = ' '.join(l.lstrip('> ').strip() for l in blk.split('\n'))
-                out.append(f'<blockquote><p>{inline(q, num)}</p></blockquote>')
+            if b.startswith('>'):
+                out.append({'q': True, 'kind': kind, 'cards': [], 'marks': [],
+                            'text': ' '.join(l.lstrip('> ').strip() for l in b.split('\n'))})
             else:
-                out.append(f'<p>{inline(" ".join(blk.split()), num)}</p>')
+                out.append({'q': False, 'kind': kind, 'cards': [], 'marks': [],
+                            'text': ' '.join(b.split())})
+        return out
+
+    def render_blocks(hs):
+        out = []
+        for h in hs:
+            body = demark(inline(h['text'], num, notes=(h['kind'] != 'note')))
+            out.append(f'<blockquote><p>{body}</p></blockquote>' if h['q'] else f'<p>{body}</p>')
+            out.extend(card(i) for i in h['cards'])
         return '\n'.join(out)
 
     def words(md):
@@ -251,7 +397,44 @@ def build(piece_dir, facts):
 
     body_words = words(lead) + sum(words(b) for _, b in movements)
 
+    # --- findings, anchored into the prose ----------------------------------
+    findings = facts.get('findings', [])
+    lead_h = split_blocks(lead, 'lead')
+    mv_h = [split_blocks(md) for _, md in movements]
+    note_h = {k: {'q': False, 'kind': 'note', 'cards': [], 'marks': [],
+                  'text': ' '.join(defs[k].split())} for k in order}
+    holders = lead_h + [h for lst in mv_h for h in lst] + [note_h[k] for k in order]
+    errs = place(findings, holders)
+    if errs:
+        print('review_artifact: findings did not anchor —', file=sys.stderr)
+        for e in errs:
+            print('  ' + e, file=sys.stderr)
+        sys.exit(3)
+
+    def card(i):
+        f = findings[i - 1]
+        sev = f.get('severity', 'open')
+        sev = sev if sev in SEVS else 'open'
+        out = [f'<aside class="fx sev-{sev}" id="f{i}"><div class="fxh"><span>{i}</span>'
+               f'<b>{f.get("title", "")}</b><em class="sev">{html.escape(sev)}</em></div>']
+        if f.get('what'):
+            out.append(f'<p>{f["what"]}</p>')
+        if f.get('was') or f.get('now'):
+            rows = ''
+            if f.get('was'):
+                rows += f'<dt>was</dt><dd class="was">{html.escape(f["was"])}</dd>'
+            if f.get('now'):
+                rows += f'<dt>now</dt><dd class="now">{html.escape(f["now"])}</dd>'
+            out.append(f'<dl class="diff">{rows}</dl>')
+        if f.get('evidence'):
+            out.append(f'<div class="ev"><b>checked against</b>{f["evidence"]}</div>')
+        out.append(f'<p><a class="back" href="#a{i}">&#8617; back to the line</a></p></aside>')
+        return ''.join(out)
+
     toc, essay = [], []
+    if lead_h:
+        essay.append(f'<section class="mv"><div class="rail"></div>'
+                     f'<div class="col">{render_blocks(lead_h)}</div></section>')
     for i, (head, md) in enumerate(movements, 1):
         n = re.match(r'([IVXLC]+|\d+)\.', head)
         label = n.group(1) if n else str(i)
@@ -261,7 +444,7 @@ def build(piece_dir, facts):
         essay.append(
             f'<section class="mv" id="m{i}"><div class="rail"><div class="rn">{label}</div>'
             f'<div class="wc">{w:,} w</div></div><div class="col">'
-            f'<h2>{html.escape(title)}</h2>{blocks(md)}</div></section>')
+            f'<h2>{html.escape(title)}</h2>{render_blocks(mv_h[i - 1])}</div></section>')
 
     # --- review strip -------------------------------------------------------
     prior = facts.get('prior') or {}
@@ -279,6 +462,17 @@ def build(piece_dir, facts):
     gates = ''.join(f'<span><b>{html.escape(k)}</b> {html.escape(v)}</span>'
                     for k, v in facts.get('gates', []))
     gates = f'<div class="gates">{gates}</div>' if gates else ''
+
+    fidx = ''
+    if findings:
+        rows = ''.join(
+            f'<a class="sev-{(f.get("severity","open") if f.get("severity","open") in SEVS else "open")}" '
+            f'href="#f{i}"><b>{i}</b><em class="sev">{html.escape(f.get("severity","open"))}</em>'
+            f'{f.get("title","")}</a>'
+            for i, f in enumerate(findings, 1))
+        fidx = (f'<section class="fidx"><h3>{len(findings)} proposed '
+                f'change{"s" if len(findings) != 1 else ""} &mdash; each one marked where it lands'
+                f'</h3>{rows}</section>')
 
     calls = facts.get('calls', [])
     callsblk = ''
@@ -300,8 +494,10 @@ def build(piece_dir, facts):
         figure = f'<div class="slot">Hero image slot &mdash; {warn or "none supplied yet"}</div>'
 
     notes = ''.join(
-        f'<li id="n{num[k]}"><div class="fnn">{num[k]}</div><div>{inline(" ".join(defs[k].split()), num, notes=False)} '
-        f'<a class="back" href="#r{num[k]}" aria-label="back to text">&#8617;</a></div></li>'
+        f'<li id="n{num[k]}"><div class="fnn">{num[k]}</div><div>'
+        f'{demark(inline(note_h[k]["text"], num, notes=False))} '
+        f'<a class="back" href="#r{num[k]}" aria-label="back to text">&#8617;</a>'
+        f'{"".join(card(j) for j in note_h[k]["cards"])}</div></li>'
         for k in order)
 
     stamp = ' '.join([f'<span>{html.escape(facts.get("version","draft"))}</span>']
@@ -319,6 +515,7 @@ def build(piece_dir, facts):
   {figure}
   <dl class="review">{strip}</dl>
   {gates}
+  {fidx}
   {callsblk}
   <nav class="toc">{''.join(toc)}</nav>
 </header>
@@ -344,10 +541,12 @@ def main():
     facts = {}
     fp = opt('--facts') or os.path.join(piece_dir, 'review.json')
     if os.path.exists(fp):
-        facts = json.load(open(fp))
+        facts = json.load(open(fp, encoding='utf-8'))
     out = opt('--out', os.path.join(piece_dir, 'review.html'))
     page = build(piece_dir, facts)
-    open(out, 'w').write(page)
+    # Explicit, not locale-dependent: the page is full of em dashes and ellipses, and a
+    # non-UTF-8 default would write a file that is mojibake the moment anything opens it.
+    open(out, 'w', encoding='utf-8').write(page)
     print(f"wrote {out} ({len(page)//1024} KB) — publish it with the Artifact tool")
 
 

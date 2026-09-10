@@ -31,9 +31,10 @@ see.
 | **Hero + provenance** | `assets/hero.*` | Downscaled to 1400px and embedded. The provenance stamp says **generated** or photograph — load-bearing where a photorealistic image could re-attach a biographical reading the prose dropped. No image yet renders a marked **slot**, because a slot is a decision waiting and a picked image is a decision taken. |
 | **Review strip** | counted + `prior` | Body words, movements, footnotes, each with the delta against the previous version. Counted from the file, never asserted. |
 | **Gates** | `gates` | Which checks ran and what they said. |
+| **Findings** | `findings` | The review's proposed changes, ranked, each linking to the line it lands on. |
 | **Calls** | `calls` | *Every open question listed as a call*, in the flag color, above the fold. This band is the reason the page exists. |
 | **Contents** | headings | Movement numbers with per-movement word counts — where the piece is heavy or thin, at a glance. |
-| **The piece** | `draft.md` | Sticky movement rail, 66ch column, working footnote jumps both ways. |
+| **The piece** | `draft.md` | Sticky movement rail, 66ch column, working footnote jumps both ways. **Each finding's span is marked in place and its note hangs under that paragraph** — a proposed change is judged next to the sentence it changes, or it is not being judged. |
 | **Notes** | `[^slug]:` | Real numbered notes, back-linked. |
 
 ## Facts
@@ -49,14 +50,51 @@ still renders and the strip reports what can be counted.
   "prior": {"words": 3072, "movements": 8, "notes": 11},
   "gates": [["check_links", "8 live, 0 dead"]],
   "cover": {"caption": "…", "provenance": "Generated, not a photograph"},
-  "calls": [["Short title", "One or two sentences (HTML ok)."]] }
+  "calls": [["Short title", "One or two sentences (HTML ok)."]],
+  "findings": [
+    { "severity": "fidelity",
+      "anchor": "It asks nothing for Itself",
+      "title": "§II drops the source's dashes from a sentence §I quotes with them",
+      "what": "The book reads <em>It asks—nothing—for Itself</em>. (HTML ok.)",
+      "was": "*It asks nothing for Itself …",
+      "now": "*It asks — nothing — for Itself …",
+      "evidence": "<em>Unveiled Mysteries</em>, p. 25, read in the PDF today." }
+  ] }
 ```
+
+## Findings — a proposed change, marked where it lands
+
+A review that lists its findings somewhere else asks the author to hold a sentence in
+their head while they go and look at another one. So a finding names the span it is
+about, and the page **highlights that exact span in the prose and puts the note under
+that paragraph.** The severity colours the mark: `fidelity` and `open` in the flag
+colour, `argument` in the accent, `voice` a hairline. Findings are numbered in the
+order given — **rank them**, because that ranking is the first thing read.
+
+`anchor` is **verbatim `draft.md`**, markdown and all, matched against the
+whitespace-normalised block, so line wraps do not matter and `*asterisks*` do. It may
+land in a footnote as easily as in the body. `was`/`now` render **verbatim in mono**,
+which is the only way a change of punctuation or case is legible on the page —
+a dropped em dash is invisible in prose type. `evidence` says what the finding was
+checked against, so the author does not have to re-derive it.
+
+### The anchor is not allowed to miss
+
+An anchor that matches **nothing**, matches **more than one place**, or **overlaps**
+another finding's anchor **exits 3, names the finding, and writes no file.**
+
+This is the one refusal the page cannot do without. Every other failure mode is
+visible: a missing hero renders a marked slot, a broken footnote exits 2. But a
+finding that silently failed to highlight leaves a page that **looks complete and is
+not**, and the author reads it believing they have seen everything the review found.
+Lengthen the anchor until it is unique. (Eric, 2026-09-10: *"when reviewing we should
+open as an artifact highlighting the suggested changes."*)
 
 ## It refuses rather than renders wrong
 
 A footnote marker with no definition, or a definition never referenced, **exits 2 and names
-the key**. Both are invisible in a hand-built page and both mislead an author about what they
-are reading.
+the key**. An anchor that does not land **exits 3** (above). Both are invisible in a
+hand-built page and both mislead an author about what they are reading.
 
 ## Word counts
 

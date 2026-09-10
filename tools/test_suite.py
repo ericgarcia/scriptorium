@@ -169,6 +169,65 @@ def unit_review_artifact(tmp):
     except SystemExit as e:
         check('review: undefined marker refuses with exit 2', e.code == 2)
 
+    # --- findings: a proposed change, marked where it lands ------------------
+    # The anchor is the whole mechanism. A finding that fails to highlight leaves a
+    # page that LOOKS complete, so every miss has to be a refusal and not a warning.
+    def fnd(**kw):
+        f = dict(facts); f['findings'] = [kw]; return f
+
+    hf = ra.build(d, fnd(anchor='A line with **weight**', severity='fidelity',
+                         title='T', what='W', was='old', now='new', evidence='E'))
+    check('review: the anchored span is marked in place',
+          '<mark class="hl hl-fidelity" id="a1">' in hf)
+    check('review: the mark closes exactly once',
+          hf.count('<mark class="hl') == 1 and hf.count('</mark>') == 1)
+    check('review: markdown inside the anchor still renders',
+          '<strong>weight</strong>' in hf, 'the mark is placed BEFORE the inline pass')
+    check('review: no sentinel reaches the reader',
+          not any(c in hf for c in '\ue000\ue001\ue002\ue003'))
+    check('review: the note hangs under its own paragraph',
+          hf.index('id="a1"') < hf.index('id="f1"') < hf.index('<h2>Second</h2>'),
+          'a change is judged next to the sentence it changes')
+    check('review: was/now render verbatim so punctuation is legible',
+          'class="was"' in hf and 'class="now"' in hf)
+    check('review: the finding is listed in the index', 'class="fidx"' in hf)
+    check('review: severity colours the mark and the card',
+          'class="fx sev-fidelity"' in hf)
+
+    check('review: a finding may anchor inside a footnote',
+          '<mark class="hl' in ra.build(d, fnd(anchor='The second note.', title='N')))
+    check('review: an unknown severity degrades to open, it does not crash',
+          'sev-open' in ra.build(d, fnd(anchor='A quotation.', severity='wat', title='S')))
+
+    for label, kw, want in (
+            ('matches nothing', dict(anchor='not in the draft at all', title='X'),
+             'matches nothing'),
+            ('matches twice', dict(anchor='and one more', title='X'), None),
+            ('is missing', dict(title='X'), 'no anchor')):
+        errs = ra.place([kw], [{'text': 'and one more … and one more', 'marks': [], 'cards': []}]
+                        if want is None else
+                        [{'text': 'A line with weight', 'marks': [], 'cards': []}])
+        check(f'review: an anchor that {label} is refused', bool(errs),
+              'a silently dropped finding is the one failure this page cannot have')
+
+    hs = [{'text': 'alpha beta gamma', 'marks': [], 'cards': []}]
+    check('review: overlapping anchors are refused',
+          bool(ra.place([{'anchor': 'alpha beta', 'title': 'A'},
+                         {'anchor': 'beta gamma', 'title': 'B'}], hs)),
+          'right-to-left insertion would otherwise produce broken nesting')
+
+    check('review: no findings renders the page unchanged',
+          'class="fidx"' not in ra.build(d, facts))
+
+    # a headingless piece put the whole prose in BOTH lead and movements: the word
+    # count doubled and every anchor matched twice
+    flat = os.path.join(tmp, 'flat'); os.makedirs(flat, exist_ok=True)
+    open(os.path.join(flat, 'draft.md'), 'w').write('s\n---\nJust one unheaded paragraph here.\n')
+    hflat = ra.build(flat, {'findings': [{'anchor': 'one unheaded paragraph', 'title': 'F'}]})
+    check('review: a headingless piece counts its words once',
+          '<b>5</b>' in hflat, 'lead and movements are one source of truth')
+    check('review: a headingless piece still anchors', 'id="a1"' in hflat)
+
 
 # ---------------------------------------------------------------- unit: link extraction
 def unit_link_extraction():

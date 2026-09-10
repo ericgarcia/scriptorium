@@ -292,7 +292,12 @@ def header_drift(post, man):
     reported by a verify run. An EMPTY live subtitle is drift even if the manifest is empty
     too, because the reader sees the archive card, not the manifest."""
     out = []
-    for k in ('title', 'subtitle'):
+    # A PAGE has no subtitle FIELD (measured 2026-09-10: the composer offers Title only), so
+    # "live post has NO subtitle" is not drift on one — it is the only state a page can be in.
+    # The rule it replaces still stands for posts, where the subtitle is the second line of
+    # every archive card and social preview and an empty one went unseen for a month.
+    fields = ('title',) if man.get('substack_type') == 'page' else ('title', 'subtitle')
+    for k in fields:
         live, want = _norm_header(post.get(k)), _norm_header(man.get(k))
         if not live:
             out.append(f'live post has NO {k}')
@@ -377,6 +382,13 @@ def audit_archive(repo, fresh):
         u = man.get('public_url', '')
         if u:
             known[u.rstrip('/').rsplit('/', 1)[-1]] = (name, man)
+    # A Substack PAGE is a post with `type: "page"` (measured 2026-09-10): same editor
+    # route, same composer, same transport — but it is NOT in the post archive, has no
+    # post_date, never emails and needs no cover. So a piece that declares itself a page
+    # is excluded from this audit rather than reported missing from a list it was never
+    # going to be in.
+    pages = {k: v for k, v in known.items() if v[1].get('substack_type') == 'page'}
+    known = {k: v for k, v in known.items() if v[1].get('substack_type') != 'page'}
     if not known:
         return [], ['no piece records a public_url, so the publication cannot be located']
     base = re.match(r'https?://[^/]+', next(iter(known.values()))[1]['public_url']).group(0)
@@ -390,12 +402,21 @@ def audit_archive(repo, fresh):
             flags.append('NO SUBTITLE')
         if not _norm_header(p.get('title')):
             flags.append('NO TITLE')
+        # A post with no cover has no drafts-list thumbnail, no archive card and no social
+        # preview — it looks unfinished everywhere it is listed, and every other check here
+        # reads the BODY, where the hero is a different image that is present. So the one
+        # thing that can see this is the archive walk. (2026-09-10: publishing set the cover
+        # as a step for the first time, and this is what stops it being skipped silently.)
+        if not (p.get('cover_image') or '').strip():
+            flags.append('NO COVER')
         if name is None:
             flags.append('not in the desk')
         elif man is not None:
             flags += [f for f in header_drift(p, man) if 'differs' in f]
         rows.append((slug, name or '-', (p.get('post_date') or '')[:10], flags))
         problems += [f'{slug}: {f}' for f in flags]
+    for slug, (name, _man) in sorted(pages.items()):
+        rows.append((slug, name, 'page', ['(page — not in the post archive)']))
     return rows, problems
 
 

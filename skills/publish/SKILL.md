@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes — that first click is never delegated. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is delegable: ask in chat, then click Update → Update now. NEVER sends email — the confirm dialog is read first and, if any email option is present, it stops and asks.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT; the author says publish and this skill clicks it. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. A FIRST publication SENDS the subscriber email — that is the only email a piece ever gets. Every re-sync after that sends NOTHING: the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks.
 ---
 
 # Publish (to Substack)
@@ -13,7 +13,8 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 
 - The piece is finished (`pieces/<name>/draft.md`) and has a **manifest**
   `pieces/<name>/publish.yaml` — **`outlets`** (see below), `title`, `subtitle`, `footnotes`
-  (native|endnotes|none), `send_email` (default false), optional `cover`, optional **`post_url`**
+  (native|endnotes|none), **`send_email` (default `true` — a first publication sends the email;
+  every re-sync after it sends nothing)**, optional `cover`, optional **`post_url`**
   (record it once the piece is live; its presence switches this skill into **republish mode** —
   see below), and optional **`public_url`**.
 - **`outlets:` says where the piece goes, and this skill NEVER picks one.** It is a list of
@@ -83,6 +84,19 @@ app's session list then reads as a shelf of pieces instead of a row of identical
 - **It will not stomp a title the author chose.** The app asks them to approve a rename over a
   title they set themselves, and replaces its own generated titles without asking. So propose
   freely; the guard is on their side of it.
+
+## Showing the author the piece
+
+When the author needs to *read* the piece rather than a report on it — a re-voiced draft, a
+pass they have to rule on — render the house review artifact rather than pasting prose into
+chat or building a page by hand:
+
+    python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+then publish that file with the **Artifact** tool, one artifact per piece, republished to the
+same URL as versions land. Facts that cannot be counted go in `pieces/<slug>/review.json` —
+state flags, gates, and every open question listed as a call. Contract:
+`framework/docs/REVIEW-ARTIFACT.md`.
 
 ## Preflight — critique gate, verify & strip editorial notes (DO THIS FIRST)
 
@@ -161,9 +175,115 @@ first.
    real person, or re-attach a biographical reading a piece deliberately dropped; the caption and
    alt text then have to avoid implying a photograph. (Precedent: the generated portrait in
    `metric-space`, disclosed in the manifest and in the footnote before its gate cleared.)
-   **The converter does not set the featured image** — attaching it is a composer-UI action and
-   belongs on the human's checklist, not this skill's. What the check-in buys is that the bytes
-   survive a recompose, and that the cover can be reviewed before it is attached.
+   **The cover is settable from the repo, and this skill sets it** (2026-09-10). The older claim
+   here — *the converter does not set the featured image, attaching it is a composer-UI action* —
+   was untested rather than true, and it ended every piece with the author hunting through
+   Downloads for a file the repo already had. Measured on post 214063778:
+
+       POST /api/v1/image        {"image": "<data URI>"}  -> 200 {"id","url","imageWidth",…}
+       PUT  /api/v1/drafts/<id>  {"cover_image": "<url>"} -> 200, persists on read-back
+
+       python3 framework/tools/substack_cover.py pieces/<slug> --post <id> --out cover.js
+
+   Carry the snippet in with `pane_carry.py` and **verify its hash in the page before executing** —
+   the payload is the image itself, so a corrupted carry is a corrupted upload. The tool refuses on
+   a missing `cover:`, a file the manifest names but the disk lacks, a non-image, and **a cover with
+   no provenance recorded**, since a cover is the most public thing a post has. It uploads, sets
+   `cover_image`, reads back, and touches nothing else — **verify the body digest afterwards
+   anyway**, which is how this run proved the body was untouched.
+
+   **`cover_image` is NOT the hero.** They are two different images and setting one is not
+   setting the other: `cover_image` is the drafts-list thumbnail, the archive card, the social
+   preview and the email header, and **it does not appear in the post.** The hero a reader sees on
+   opening the piece is a **body** image — a `captionedImage` node at the top of the doc. The first
+   version of this tool set the cover and stopped, and the author reported the image *"shows up in
+   substack but not in the piece itself at the top where it should."* `substack_cover.py` now does
+   both from one upload; `--cover-only` opts out of the body half.
+
+   **And the body half is not durable on its own.** A recompose rebuilds the body from `draft.md`,
+   so an image inserted only into the live post is dropped the next time, silently. The durable form
+   is `0b-images`: reference it in `draft.md` as `![alt](assets/hero.png)` **and** record the
+   uploaded URL under `images:` in `publish.yaml`. Then the converter emits `<img src="<that URL>">`
+   and a recompose reuses the asset rather than orphaning it — measured on this piece, **25 KB
+   emitted with the mapping against ~3.4 MB without it.** The alt text is read out of the draft's
+   image markdown, because the hero is a piece's most-seen image and a screen reader gets only that.
+
+   **The alt-text rule lives in [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md)** — describe the
+   image, and transcribe any text that is *in* it, in quotation marks. Read it there rather than
+   reconstructing it here; what follows is the measured history that produced it.
+
+   **Two things about hero alt text, both learned the hard way on 2026-09-10.** **(a) Transcribe any
+   text that is IN the image**, in quotation marks — WCAG 1.1.1 requires text presented within an
+   image to be available as text, so a sighted reader getting four phrases off the picture means a
+   screen-reader user must get them too. It is not decoration and it is not optional. **(b) Alt text
+   is house prose and the house sweeps govern it.** The first version of this one said *labelled*,
+   against a spelling rule that names `labeled` explicitly — written into `draft.md` *after* the
+   last britishism sweep had run, so nothing caught it and the author did. **Because the alt lives
+   in `draft.md`, the ordinary sweeps do cover it — but only if they run again afterwards**, which
+   is the standing rule that a passage written after a check does not inherit that check's clean
+   bill. Re-run the sweeps after adding a hero.
+
+   **The caption comes with the body hero.** `cover_caption:` becomes a `caption` node inside the
+   `captionedImage`, so it is set in the same pass and needs no visit to the composer. (This line
+   used to say the caption was the author's job — true while only `cover_image` was being set
+   through the API, and stale from the moment the body half existed. It was repeated to the author
+   several times after it had stopped being true.)
+
+   **The Publish click is delegable on the author's explicit say-so** (Eric, 2026-09-10: *"we
+   should fix the skill so that we just require user confirmation to go live"*). The older rule —
+   *the first click is never delegated, and asking for permission does not transfer it* — is
+   retired. **What replaces it is confirmation, not ceremony:** the author says publish, and this
+   skill publishes.
+
+### Email: once, on going live, and never again
+
+**The policy, in the author's words** (Eric, 2026-09-10): *"when we go live for the first time, we
+send an email. That is the only time we send an email."*
+
+So the rule is **structural, not per-piece**:
+
+- **A FIRST publication SENDS the email.** It is the one notification a piece ever gets, and it is
+  the point of having subscribers. `should_send_email: true` on a draft about to go live is
+  **correct**, not a defect to reconcile away.
+- **Every re-sync, update and correction after that sends NOTHING.** A published post being fixed
+  must not mail anyone. Read the *Update* dialog and prove no delivery control is enabled; if one
+  is present and cannot be proven off, **stop and ask.**
+
+**The check is symmetric, and only one half of it existed.** The update path had *prove it is off*;
+the first-publication path had nothing — it asserted that publishing sends and then clicked. So a
+launch whose delivery toggle happened to be off would send no email, tell nobody, and look exactly
+like a success. **A silent non-send is a failure of this rule, not a safe outcome:** the piece gets
+no second chance, because every path after the first sends nothing by design.
+
+So, before a **first** publication: read the dialog's text for the delivery section, then **prove the
+control is ON** — `aria-checked="true"` on the toggle, or `should_send_email: true` from
+`GET /api/v1/drafts/<id>`, which is the field that actually governs it. **If it is off, or its state
+cannot be determined, STOP and ask** — exactly as the update path stops when it cannot prove the
+opposite. Do not toggle it silently in either direction; the author gets told which way it reads.
+
+**`send_email:` in the manifest is a record of intent, not a switch.** No tool reads it (verified
+2026-09-10) and it cannot cause or prevent an email — Substack's own control does that. Its job is
+to be the thing you check the composer against: they agree, or you stop. A manifest that says
+`false` on a piece about to go live for the first time is a decision to skip the launch email, and
+should be confirmed with the author rather than obeyed or ignored.
+
+**What this replaced, and why the replacement is narrower rather than looser.** The old rule was
+*never click, never email*, which conflated two very different acts: going live, which the author
+asks for, and mailing a list, which is irreversible. Splitting them means the click is delegable and
+**the one genuinely irreversible thing still gets checked every time** — on the update path, where a
+stray email would be a mistake nobody can take back.
+
+**A correction worth carrying, because it nearly produced the wrong call.** On 2026-09-10 this skill
+inferred *"this publication has never emailed"* from eight archive rows showing `email_sent_at:
+null`. **The archive endpoint does not return `email_sent_at` or `should_send_email` at all** — the
+nulls were absent keys read as values. **A missing field is not a `false`.** Read delivery state
+from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — never from the archive.
+
+**Then verify on the cache-busted public URL.** *"Your post is live!"* is a claim; `substack_verify
+--fresh` is the evidence. **And do not probe the contract with a 1×1 test pixel on a real
+   post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and
+   the author saw it and asked whether something was broken. Probe on a throwaway draft, or go
+   straight to the real file.
 
 0b-embeds. **An embed is not an image, and the image checks were blind to it.**
    An image can be made recompose-safe by putting its URL in `draft.md`, because the converter
@@ -226,6 +346,31 @@ first.
    default**; a dead sibling slug once sat in a piece's README and DASHBOARD as its canonical
    address from the day it published, because that URL had only ever been copied and never
    followed. Fix a dead link here **and** in every scaffold file that repeats it.
+
+0b-scripture. **Check every scripture quotation against the text, not against a memory of it:**
+   `python3 framework/tools/check_scripture.py pieces/<name>`
+   It reads each footnote's locus, looks the verse up in the indexed KJV, and compares the
+   quoted spans. **This is the one preflight step that can say a citation is WRONG** rather
+   than that nobody has confirmed it — `check_verified.py` records whether anyone *said* they
+   checked, and says plainly it cannot do more.
+
+   It knows this house's conventions, because a checker that flags correct prose is worse than
+   none: the King James's own `[brackets]` are supplied words and are kept, a **draft's**
+   `[Them]` is the disclosed substitution and matches whatever the source has there, an
+   ellipsis matches its fragments in order, and a mid-sentence start is fine.
+
+   Read the finding kind. **RANGE** is the commonest and is not drift: the quotation runs past
+   the verse the note cites (*cite 13:4-5*). **DRIFT** names the word where the quotation
+   leaves the text. **SUSPECT** is a partial match, which is where a real error looks like a
+   near miss — read it rather than dismissing it. **NOT IN INDEX** means the locus is not in
+   this edition. A first corpus run (2026-09-10, 144 quotations) found 17 across 11 pieces.
+
+   **The index is content and lives in the instance**, built once from a PDF the author owns:
+   `framework/tools/refindex.py <kjv.pdf> --scheme kjv --out books/<name>/references/kjv.tsv.gz`,
+   with a provenance row in that folder's README. `--verify` refuses an index with interior
+   gaps, because a chapter missing a verse answers "not found" for a locus that exists, and the
+   reader of that answer cannot tell which side is wrong. `refindex.py --scheme pages` indexes
+   any other reference PDF the same way, for sources checked by quotation rather than locus.
 
 0b-pronouns. **Run the pronoun sweep, and justify every hit by naming who it points at:**
    `python3 framework/tools/check_pronouns.py pieces/<name> --names <the named figures> --strict`
@@ -322,16 +467,27 @@ is the only reason that matters: neither one routes the author's prose through t
 > just another edit. The clipboard removes the agent from the transport: the bytes go
 > **disk → system pasteboard → Chrome → ProseMirror** and are never retyped.
 
-**Surface matters, and this is the part that is easy to get wrong.** Measured 2026-09-01:
+**These measurements are about the CLIPBOARD, not about the pane.** Measured 2026-09-01:
 
-| surface | result |
+| surface | result *with the pasteboard transport* |
 |---|---|
 | in-app browser pane + `navigator.clipboard.read()` | ❌ `NotAllowedError: Document is not focused` |
 | in-app browser pane + synthetic `cmd+v` | ❌ no-op, editor stays empty |
 | **real Chrome + real click + real `cmd+v`** | ✅ **works** — `h2`, `em`, `strong`, links, blockquotes all survive |
 
-So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A programmatic
-`.focus()` does **not** satisfy the Clipboard API — the click has to be a real one.
+**The conclusion is that the pane cannot reach the pasteboard — which is why the pane uses
+`pane_carry.py` instead, not why you should leave the pane.** A programmatic `.focus()` does not
+satisfy the Clipboard API, so on real Chrome the click has to be a real one.
+
+> **This block used to end "So compose in real Chrome, not the in-app pane," and that sentence
+> outlived the change that made the pane the default.** It cost a session most of a day on
+> 2026-09-10: the agent read *these* lines rather than the Surface bullet 260 lines above, drove
+> real Chrome, found the window minimized (a hidden zero-size viewport swallows a ⌘V silently),
+> cleared a composed draft to empty before discovering it, and then lost the signed-in tab
+> altogether — while the pane was signed in the whole time and a two-word surgical fix through it
+> took one call. **A skill that says the default in one place and contradicts it in the numbered
+> steps will be obeyed by the numbered steps.** When the default moves, grep the whole file for the
+> old one.
 
 1. **Take the pasteboard and paste in ONE process (the default since 2026-09-08):**
 
@@ -365,7 +521,7 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    **The two-step still exists and is still lease-guarded:** run without `--paste` to load and hold
    the lease, `--verify` immediately before a ⌘V sent from the browser tool, then `--release`. Use it
    only where System Events cannot reach the browser.
-2. **Open the composer in real Chrome** and set Title + Subtitle by JS (small, no prose in it),
+2. **Open the composer on your chosen surface — the pane by default** — and set Title + Subtitle by JS (small, no prose in it),
    then `clearContent(true)` so a retry can't append to a half-paste. **Snapshot any image or embed
    the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
    `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared
@@ -426,11 +582,36 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    transcription error, so this is cheap and should pass first time; if it does *not*, something
    else moved (a concurrent edit to the draft, a Substack-side input rule) and that is worth
    knowing before a human publishes.
-7. **Hand off:** the draft is composed. Tell the user to review it in Substack and click
-   **Publish** themselves. **Do not click Publish / Continue / Send on a FIRST publication.**
-   That click is the publication itself and is the one that can mail the subscriber list; it stays
-   the author's, and asking for permission does not transfer it. *(Shipping a later **edit** to an
-   already-published post is a different act with a different rule — see Republish step 5.)*
+7. **Hand off:** the draft is composed. Tell the user to review it in Substack, and **on their
+   word, click Publish.** The click is delegable; the *decision* is not, and it is theirs to make on
+   a draft they have read. **A first publication SENDS the subscriber email, and that is correct** —
+   it is the one notification the piece will ever get. Say so plainly before clicking, so nobody
+   learns it from the send. *(Shipping a later **edit** to an already-published post is a different
+   act with a different rule — see Republish step 5; that path sends nothing.)*
+
+8. **Set the cover. This is a STEP, not an option, and it runs AFTER the publish click.**
+   A post with no `cover_image` has no drafts-list thumbnail, no archive card and no social
+   preview: the piece looks unfinished everywhere it is listed, and nothing in the pipeline
+   notices, because every other check reads the body. It was the last thing the author had to
+   remember, and it should not be.
+
+       python3 framework/tools/substack_cover.py pieces/<slug> --post <id> --cover-only --out cover.js
+
+   **The ordering IS the step, and getting it wrong blocks the publish.** The tool writes through
+   the drafts API, and the API is a second editor: run it while the composer holds the document and
+   Substack refuses to publish — *"Draft not saved — Post out of date"* — and the cover reverts to
+   `null` when the editor writes its own state back (measured 2026-09-10 on
+   `what-was-already-there`, which sat one stale copy from being unpublishable). So run it **after
+   publishing**, on the share-center page Substack redirects to, with the composer closed. **Assert
+   `document.querySelector('.ProseMirror')` is null before writing.**
+
+   `--cover-only` whenever `draft.md` already references the hero, or the tool inserts a second
+   copy in the body. **It reuses an asset already recorded in `publish.yaml`'s `images:` block
+   instead of uploading a duplicate** — 2,588 bytes of snippet against 2,580,143 for the same
+   image. Carry it with `pane_carry.py`: it is small, but it carries the author's caption and alt.
+
+   **Then run `substack_verify --fresh` anyway.** A cover write should touch nothing else; that is
+   a claim, and this is the cheap check that it held.
 
 ### The JS-snippet path — the pane's default, and Chrome's fallback
 
@@ -538,6 +719,42 @@ path they were composed by, not to Substack discarding it.
 > loaded gun, not a loose end. Deleting it is the author's click, never the agent's; say plainly
 > that it is waiting and where.
 
+## Pages — the same machinery, three differences
+
+**A Substack PAGE is a post with `type: "page"`.** Measured 2026-09-10 by clicking *Add page* in
+Settings → Custom pages: it opens at **`/publish/post/<id>`**, in the **same Tiptap composer**, with
+the same toolbar and the same *Continue* button. So **every transport in this skill works
+unchanged** — `md_to_substack.py`, the `pane_carry.py` carry, the footnote pass, the fidelity
+digest against `render_reader`. Do not build a second pipeline; there is only one.
+
+**What a page is for.** Standing information that is not news: a colophon, a disclosure, an
+editorial policy. A post is dated and filed in the archive, which is wrong for something that
+governs everything published before and after it. A page is undated and sits in the nav bar.
+
+**Declare it in the manifest**, because nothing about the composer will tell you which you are in:
+
+```yaml
+substack_type: page      # default `post`; a page is undated, un-archived, never emailed
+public_url: https://<pub>.substack.com/<slug>   # RECORD it — never derive it
+```
+
+**The three differences, and each one turns a check off rather than on:**
+
+1. **It never emails.** `should_send_email` is `false` on a fresh page and must stay false. The
+   first-publication rule — *a first publication sends the subscriber email* — is about posts. A
+   page going live mails nobody, and the delivery section must be **provably off**, exactly as on
+   the re-sync path.
+2. **It is not in the post archive.** `substack_verify --archive` walks the archive API, so a page
+   will never appear there; the audit excludes a piece that declares `substack_type: page` rather
+   than reporting it missing from a list it was never going to be in.
+3. **It needs no cover.** `cover_image` drives the drafts-list thumbnail, the archive card and the
+   social preview — a page is in none of those, so step 8 does not apply and `NO COVER` is not a
+   finding against it.
+
+**Everything else still holds**, and that is the point of it being the same machinery: the
+verification gate, the scripture check, the pronoun and link sweeps, the fidelity digest, and the
+rule that the author decides and this skill clicks.
+
 ## Republish — surgically re-sync a live post
 
 > **⚠️ Republish edits a public post. Treat the write as irreversible; do NOT assume it has
@@ -602,23 +819,51 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    editor. **`reordered`** means a target block's exact text was found at a *different* live
    index: the two lists are misaligned, not edited — the count guard alone could not see this,
    and a piece once aligned 30 footnotes against the wrong 30 live nodes while passing it.
-5. **Ship it: ask, then click Update → Update now.** A body edit to a published post
-   **stages** — measured three times now (2026-09-01 on two posts, 2026-09-03 on `hollow-flute`):
+5. **Ship it: click Update → Update now. Do not ask first.** A body edit to a published post
+   **stages** — measured three times (2026-09-01 on two posts, 2026-09-03 on `hollow-flute`):
    the editor reads **Saved**, **Update** is **enabled**, and the **cache-busted public page still
    serves the old text.** So the edit is *not* live until the button is pressed, and leaving it
    pressed-by-nobody strands a correction the author believes they asked for.
 
-   **The default is therefore: ask the user for permission in chat, and on a clear yes, click it
-   yourself.** Do not make a person walk to a browser to press a button on a change they already
-   approved. **What is NOT delegated by that yes:** the *first* publication of an unpublished
-   draft (step 7 above) — that click is the publication and stays theirs.
+   **Shipping an update is NOT gated on a fresh yes** (Eric, 2026-09-10, revising the earlier
+   ask-then-click rule). Asking permission to press a button on a change the author has already
+   asked for is friction that buys nothing: the decision was the edit, and this click only
+   finishes it. **Finishing the edit is part of making it.**
 
-   **The email guard is absolute and survives this change.** Before confirming, read the dialog
-   and prove it cannot mail anyone: look for *email / send / newsletter / notify / subscribers
-   will receive* wording and for any enabled email control. On an already-published post the
-   dialog has consistently offered **none** — audience and comment radios only. **If an email
-   option is present, or you cannot tell, STOP and ask.** Never disable, uncheck, or work around
-   one to get the button pressed.
+   **What is still gated, and it is the only thing: the FIRST publication of an unpublished
+   draft** (step 8 above). That click *is* the publication — it is the one that can mail the
+   subscriber list, and it stays the author's.
+
+   **The email guard does NOT relax, because it is not what was gating you.** Removing the ask
+   removes a permission step, not a safety check. Before confirming, read the dialog's
+   **`innerText`** for *Delivery / Send via email / newsletter / notify / subscribers will
+   receive*, and if any such section exists, **prove every control in it is off** before clicking.
+   **If one is on, or its state cannot be determined, STOP and ask.** Never toggle, uncheck or
+   route around one.
+
+   > **⚠️ The dialog is not always the same, and the difference is an email switch.** The note
+   > here used to say an already-published post's dialog "has consistently offered none". **False
+   > as of 2026-09-10.** *For the Love of Dogs* (2026-08-05, the corpus's oldest post) shows a
+   > **Delivery — "Send via email and the Substack app"** section, and its top-right button reads
+   > **"Continue", enabled**, where newer posts read "Update". (An enabled *Continue* is a third
+   > state; the earlier note only recorded *disabled* Continue meaning "nothing pending".)
+   >
+   > **And a control query is not the check.** Searching `input`/`select` for email-ish
+   > `name`/`id`/`aria-label` returned **`[]`** on that dialog — the toggle is a `role="checkbox"`
+   > `<button>` with no accessible name. Only the dialog TEXT caught it. **A structured query that
+   > finds nothing is not evidence that nothing is there.** Read the text first; use a control
+   > query only to read the state of what the text found.
+   >
+   > On that post the toggle was off (`aria-checked="false"`, drafts API `should_send_email:
+   > false`), it was clicked on Eric's explicit instruction, and `email_sent_at` stayed `null`.
+   >
+   > **REPORT THE BUTTON STATE AS A POSITIVE `enabled`, NEVER AS `disabled`/`dis`.** A negated
+   > boolean in a scraped readout gets inverted on sight: `{t:'Continue', dis:false}` was read as
+   > *disabled* — it means **enabled** — and two rounds of work went into explaining why a live
+   > button "would not respond" before the field was re-read. Emit
+   > `{label, enabled: !b.disabled}`, or the literal words, so the value cannot be misread as its
+   > opposite. Same reason the pronoun and status checkers report what a thing IS rather than what
+   > it is not.
 
    **Then verify against the cache-busted reader URL, not the "Your post is live!" screen** —
    that screen is a claim, not evidence. `substack_verify.py --fresh <piece>` is the evidence.
@@ -865,6 +1110,17 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
 
 ## Guardrails
 
+- **NEVER WRITE TO THE DRAFTS API WHILE THE COMPOSER IS OPEN ON THAT POST.** This is the
+  two-editors rule below, one layer down, and the API does not look like an editor — which is
+  exactly why it catches people. Measured 2026-09-10 on `what-was-already-there`: a
+  `PUT /api/v1/drafts/<id>` setting `cover_image`, sent from the editor page's own console while
+  the composer held the document, desynced the two. Substack then **refused to publish** —
+  *"Draft not saved — Post out of date"* — and the cover reverted to `null` when the editor saved
+  its own state back over the write. A fully composed, digest-verified draft sat one stale copy
+  away from being unpublishable, and **nothing warned until the publish button refused.**
+  The recovery is a page reload (the body survives it; verify the counts after). The rule: set the
+  cover **before** opening the composer, or through the composer's own UI, or after publishing
+  with the editor closed — and re-verify the body digest either way.
 - **Never leave two editors open on the same post.** The sync tooling compares `draft.md` against
   **one** live post; it has no concept of two editors racing, and the newer save silently wins.
   On 2026-09-01 the in-app pane and real Chrome both held the same post — the pane still carrying
@@ -882,18 +1138,20 @@ URL into `draft.md` where the image belongs — **never** by deleting the image 
   transport. The author's words should travel **disk → pasteboard → browser**, never through the
   agent's fingers. This is not a performance preference: a transcription slip publishes a typo in
   the author's voice, and every guard downstream reads it as an intended edit.
-- **Shipping an edit is delegable; publishing is not.** Two different acts, two rules.
-  **First publication of an unpublished draft: never click.** It is the publication, and it is the
-  control that can mail the subscriber list. **Shipping a later edit to an already-published post:
-  ask in chat, and on a clear yes, click Update → Update now yourself** (revised 2026-09-03 on
-  Eric's instruction — the old blanket never-click made a person press a button on a change they
-  had already approved, and stranded corrections behind it).
-  **The email guard does not move.** Read the confirm dialog before confirming and prove it cannot
-  mail anyone — *email / send / newsletter / notify* wording, any enabled email control. On an
-  already-published post it has consistently offered none. **If one is present, or you cannot tell,
-  STOP and ask.** Never uncheck or route around one.
-  **And permission is per-change, not standing:** a yes to shipping this fix is not a yes to the
-  next one.
+- **Shipping an edit is ungated; publishing needs the author's word — not their mouse.** Two
+  different acts, two rules. **First publication of an unpublished draft: the author decides, this
+  skill clicks.** It is the publication, and it is the one time the subscriber list is mailed —
+  which is the point of having one, not a hazard to design around. **Shipping a later edit to an already-published post:
+  just click Update → Update now** (Eric, 2026-09-10, revising the 2026-09-03 ask-then-click rule,
+  which itself replaced a blanket never-click). The decision was the edit; the click only finishes
+  it, and an unfinished edit strands a correction the author believes they asked for.
+  **The email guard does not move, and removing the ask did not touch it** — an ask is a permission
+  step, a guard is a safety check. Read the confirm dialog's **text** and prove nothing can be
+  mailed: *Delivery / Send via email / newsletter / notify*. **If a delivery section exists, every
+  control in it must be provably off; if one is on, or you cannot tell, STOP and ask.** Never
+  toggle or route around one. **Do not rely on a control query** — on the one post that has this
+  section the toggle is a `role="checkbox"` button with no accessible name, and an
+  input/select query returned `[]` while the section was plainly there in the text.
 - **Verify both sides of a live write, and never infer the outcome.** *Before*, because the
   pre-image hash check is the only gate that exists if autosave turns out to publish. *After*,
   against the **cache-busted reader URL** — measured repeatedly, the editor says *Saved* while

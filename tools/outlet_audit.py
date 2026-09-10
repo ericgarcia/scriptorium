@@ -52,6 +52,7 @@ EXIT
   1 usage / config                           2 nothing could be reached
 """
 import sys, os, re, json, time, argparse, urllib.request, urllib.error
+import html as html_mod
 import concurrent.futures as cf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -132,12 +133,135 @@ def load_pieces(pieces_dir, legacy_outlet):
     return out
 
 
+
+# ---------------------------------------------------------------- content check
+def _render_reader(piece_dir):
+    """The desk's own reader-text renderer, borrowed rather than reimplemented."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location('_mts', os.path.join(here, 'md_to_substack.py'))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m.render_reader(piece_dir)
+
+
+def _text_of(md):
+    """Markdown body -> the paragraphs a reader sees, normalised for comparison."""
+    md = re.sub(r'```.*?```', ' ', md, flags=re.S)          # fenced code
+    md = re.sub(r'!\[[^\]]*\]\([^)]*\)', ' ', md)          # images
+    # Footnote definitions, WHOLE — they run to the next blank line. Anchoring to `$`
+    # removes only the first line and leaves the tail behind as a phantom paragraph, raw
+    # markdown link and all, which then matches nothing (2026-09-10).
+    # Footnote TEXT is deliberately out of scope here: substack_verify compares notes on
+    # Substack footnote-for-footnote, and this check is about the body a reader scrolls.
+    md = re.sub(r'^\[\^[\w-]+\]:.*?(?=\n\s*\n|\Z)', '', md, flags=re.M | re.S)
+    md = re.sub(r'\[\^[\w-]+\]', '', md)                    # footnote refs
+    md = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', md)        # links -> their text
+    md = re.sub(r'[*_`>#]+', '', md)                        # emphasis, quotes, headings
+    out = []
+    for block in re.split(r'\n\s*\n', md):
+        t = _norm_text(block)
+        if len(t) >= 40:                                    # skip headings/short lines
+            out.append(t)
+    return out
+
+
+def _strip_page_furniture(page):
+    """Remove what the TEMPLATE adds, so only the author's words are compared.
+
+    Three things, each of which produced false drift before it was handled (2026-09-10):
+
+    - `<script>` / `<style>`. Substack ships the whole post again inside a JSON preload;
+      leaving it in means the comparison can pass against data rather than against the
+      page a reader sees, which is a pass for the wrong reason.
+    - Footnote ANCHORS. A native footnote renders its number inline — "…to steer. 1 It's
+      also the old error…" — and the draft has no such digit, so every paragraph carrying
+      a footnote read as missing.
+    - `<sup>` generally, which is how both outlets mark those numbers.
+    """
+    page = re.sub(r'<script\b.*?</script>', ' ', page, flags=re.S | re.I)
+    page = re.sub(r'<style\b.*?</style>', ' ', page, flags=re.S | re.I)
+    page = re.sub(r'<a\b[^>]*href="#footnote[^"]*"[^>]*>.*?</a>', ' ', page, flags=re.S | re.I)
+    page = re.sub(r'<sup\b.*?</sup>', ' ', page, flags=re.S | re.I)
+    return page
+
+
+def _norm_text(t):
+    t = t.replace('\u2019', "'").replace('\u2018', "'")
+    t = t.replace('\u201c', '"').replace('\u201d', '"')
+    t = t.replace('\u2014', '-').replace('\u2013', '-').replace('\u2026', '...')
+    t = re.sub(r'<[^>]+>', ' ', t)
+    t = html_mod.unescape(t)
+    t = re.sub(r'\s+', ' ', t)
+    # Stripping every tag to a space leaves a space wherever inline formatting ended
+    # mid-sentence: `<strong>…arrived</strong>, by cuts` becomes "arrived , by cuts",
+    # and the paragraph then matches nothing. That is the checker manufacturing its own
+    # drift — it reported 19 false stale paragraphs on a piece substack_verify had just
+    # confirmed identical block for block (2026-09-10). Close the gap the tags opened.
+    t = re.sub(r'\s+([,.;:!?%)\]}])', r'\1', t)
+    t = re.sub(r'([(\[{])\s+', r'\1', t)
+    t = re.sub(r"\s+('s|'t|'re|'ve|'ll|'d|'m)\b", r'\1', t)
+    # A hyphen joining two words loses to the same tag-stripping: `belief-<em>in</em>`
+    # renders as "belief- in". An em-dash is distinguishable because it carries a space on
+    # BOTH sides, so only close the word-hyphen-word case.
+    t = re.sub(r'(\w)-\s+(\w)', r'\1-\2', t)
+    return t.strip()
+
+
+def publishable_body(piece_dir):
+    """The part of draft.md a reader gets: below the first `---`, internal notes stripped."""
+    path = os.path.join(piece_dir, 'draft.md')
+    if not os.path.exists(path):
+        return None
+    src = open(path, encoding='utf-8').read()
+    parts = src.split('\n---\n', 1)
+    body = parts[1] if len(parts) > 1 else src
+    body = re.sub(r'<!--.*?-->', ' ', body, flags=re.S)     # HTML comments
+    body = re.sub(r'\u2020[^\n]*', '', body)                # dagger notes
+    return body
+
+
+def content_drift(piece_dir, page_html):
+    """Does the live page carry the desk's paragraphs?
+
+    Deliberately a PRESENCE check, not an equality one, and the report says so. The
+    outlets render the same source through different templates — wrappers, class names
+    and whitespace differ by design — so comparing whole documents would report drift
+    on every piece forever, which is the fastest way to make a check ignored.
+
+    What it can prove: every paragraph the desk holds is on the page a reader gets. That
+    catches the failure that matters — a stale build serving an old version, or a piece
+    silently truncated — because a changed sentence is a paragraph that is no longer there.
+
+    What it cannot prove: ordering, or that the page carries nothing EXTRA. Say so rather
+    than implying more.
+    """
+    # Use the SAME renderer the converter and substack_verify use, rather than a second
+    # markdown-to-text written for this check. The hand-rolled one had a long tail of
+    # its own bugs — multi-line footnote definitions left phantom paragraphs, censored
+    # profanity (f\*\*k) normalised differently from the page, split links — and every
+    # one of them reported as drift on prose that was correct. A second implementation of
+    # a thing the desk already does right is a second set of bugs. (2026-09-10.)
+    try:
+        want = [n for n in (_norm_text(t) for t in _render_reader(piece_dir)[0]) if len(n) >= 40]
+    except Exception:                                          # noqa: BLE001
+        return None
+    if not want:
+        return None
+    have = _norm_text(_strip_page_furniture(page_html))
+    missing = [w for w in want if w not in have]
+    return {'paragraphs': len(want), 'missing': missing}
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument('--config', default='publishing/outlets.yaml')
     ap.add_argument('--pieces', default='pieces')
     ap.add_argument('--outlet', default=None, help='audit only this outlet')
     ap.add_argument('--no-reverse', action='store_true')
+    ap.add_argument('--content', action='store_true',
+                    help='also compare the WORDS on each outlet against the desk, not just '
+                         'that the URL resolves (a 200 proves a page exists, not that it is '
+                         'the right one)')
     ap.add_argument('--quiet', action='store_true', help='only print problems')
     a = ap.parse_args()
 
@@ -175,10 +299,13 @@ def main():
         for (pc, oname, url), (status, body, final) in zip(
                 jobs, ex.map(lambda j: fetch(j[2]), jobs)):
             ok = status == 200
-            results.append({'piece': pc['name'], 'outlet': oname, 'url': url,
-                            'status': status, 'ok': ok,
-                            'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
-                            'final': final})
+            row = {'piece': pc['name'], 'outlet': oname, 'url': url,
+                   'status': status, 'ok': ok,
+                   'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
+                   'final': final}
+            if a.content and ok and body:
+                row['content'] = content_drift(os.path.join(a.pieces, pc['name']), body)
+            results.append(row)
             if status is None:
                 unreachable += 1
 
@@ -206,6 +333,8 @@ def main():
             reverse[oname] = {'live': live, 'unknown': sorted(live - known)}
 
     # ---- report --------------------------------------------------------------
+    stale = [r for r in results
+             if r.get('content') and r['content']['missing']]
     missing = [r for r in results if not r['ok'] and r['status'] is not None]
     unreach = [r for r in results if r['status'] is None]
     pending = [pc for pc in pieces if pc['declared'] and not pc['published']]
@@ -232,8 +361,14 @@ def main():
         print(f"auditing {len(pieces)} piece(s) across {len(outlets)} outlet(s)  [cache-busted]")
         for r in sorted(results, key=lambda x: (x['piece'], x['outlet'])):
             mark = 'ok  ' if r['ok'] else 'MISS'
+            c = r.get('content')
+            extra = ''
+            if c is not None:
+                n = c['paragraphs']
+                extra = (f"  {n}/{n} paragraphs" if not c['missing']
+                         else f"  STALE {n - len(c['missing'])}/{n} paragraphs")
             if not a.quiet or not r['ok']:
-                print(f"  {mark}  {r['piece']:<{W}}  {r['outlet']:<20} HTTP {r['status']}")
+                print(f"  {mark}  {r['piece']:<{W}}  {r['outlet']:<20} HTTP {r['status']}{extra}")
     else:
         for r in missing + unreach:
             print(f"  MISS  {r['piece']:<{W}}  {r['outlet']:<20} HTTP {r['status']}  {r['url']}")
@@ -259,6 +394,26 @@ def main():
     for name, oname in lying:
         print(f"  UNDECLARED  {name} records a {oname} URL but does not list {oname} in `outlets:`")
 
+    if a.content:
+        checked = [r for r in results if r.get('content') is not None]
+        print(f"  content: {len(checked) - len(stale)}/{len(checked)} page(s) carry every "
+              f"paragraph the desk holds"
+              + (" — presence, not ordering; a page may still carry extra" if checked else ""))
+        for r in stale:
+            c = r['content']
+            print(f"  STALE  {r['piece']} on {r['outlet']}: {len(c['missing'])} of "
+                  f"{c['paragraphs']} paragraph(s) are not on the page")
+            print(f"         first: {c['missing'][0][:100]}")
+            print(f"         {r['url']}")
+
+    if stale:
+        print("\nFAILED: an outlet resolves but serves text the desk does not hold. "
+              "A 200 proves a page exists, not that it is the right one.")
+        print("  On SUBSTACK, `substack_verify --fresh` is the authority and this is the "
+              "coarser instrument: it compares rendered page text across two templates, so "
+              "where the two disagree, believe substack_verify and treat the finding here as "
+              "a lead. On every other outlet this is the only check there is.")
+        sys.exit(3)
     if missing:
         print("\nFAILED: a piece declares an outlet it is not on.")
         sys.exit(3)

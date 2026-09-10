@@ -116,3 +116,12 @@ app's session list then reads as a shelf of pieces instead of a row of identical
     to supply one peaks in an opening, a close, and any passage being rewritten to
     fix an earlier invention. Run the ledger check hardest on the lines you are
     proudest of.
+
+## Images carry alt text, and it is prose you are writing
+
+When a draft references an image, its alt text is **house prose in `draft.md`** — the
+sweeps govern it, and it is the whole of what a reader who cannot see the picture gets.
+**Write it to [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md)**: describe the image,
+and transcribe any text that is *in* it, in quotation marks. A chart is mostly text, so a
+chart's alt is several sentences — its title, both axis labels, its legend and its
+annotations. A figure number is not alt text and neither is a citation.

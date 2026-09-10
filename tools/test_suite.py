@@ -112,6 +112,377 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: substack pages
+def unit_pages(tmp):
+    """A page is a post with type "page" — the checks that must NOT fire on one.
+
+    Measured 2026-09-10: clicking Add page opens /publish/post/<id> in the same composer,
+    and the draft object differs only by `type`. So the transport is shared and the risk
+    is the other direction — a post-shaped check reporting a page as broken because it is
+    absent from a list it was never going to be in.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'sv', os.path.join(os.path.dirname(__file__), 'substack_verify.py'))
+    sv = importlib.util.module_from_spec(spec); spec.loader.exec_module(sv)
+
+    repo = os.path.join(tmp, 'pagerepo'); pieces = os.path.join(repo, 'pieces')
+    for slug, extra in (('an-essay', ''), ('a-colophon', 'substack_type: page\n')):
+        d = os.path.join(pieces, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(
+            f"title: T\nsubtitle: S\n{extra}"
+            f"public_url: https://example.substack.com/p/{slug}\n")
+    man_page = sv.read_manifest(os.path.join(pieces, 'a-colophon', 'publish.yaml'))
+    man_post = sv.read_manifest(os.path.join(pieces, 'an-essay', 'publish.yaml'))
+    check('pages: substack_type is read from the manifest',
+          man_page.get('substack_type') == 'page')
+    check('pages: a post does not accidentally declare itself one',
+          man_post.get('substack_type') is None)
+
+    # The header gate refuses a post with no subtitle — and a PAGE HAS NO SUBTITLE FIELD,
+    # so requiring one refused a compose that was correct. A gate that refuses correct work
+    # is the worst kind: it teaches you to reach for an override. (2026-09-10.)
+    spec2 = importlib.util.spec_from_file_location(
+        'mts', os.path.join(os.path.dirname(__file__), 'md_to_substack.py'))
+    mts = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(mts)
+    pg = os.path.join(pieces, 'a-colophon')
+    open(os.path.join(pg, 'publish.yaml'), 'w').write(
+        'title: A Colophon\nsubstack_type: page\n')
+    errs, _warns = mts.manifest_gate(pg)
+    check('pages: the header gate does not demand a subtitle of a page', not errs)
+    po = os.path.join(pieces, 'an-essay')
+    open(os.path.join(po, 'publish.yaml'), 'w').write('title: An Essay\n')
+    errs2, _ = mts.manifest_gate(po)
+    check('pages: a POST with no subtitle is still refused', bool(errs2))
+
+
+# ---------------------------------------------------------------- unit: scripture check
+def unit_scripture(tmp):
+    """The scripture checker's conventions, which are where it can go wrong.
+
+    A checker that flags correct prose is worse than none — it trains the reader to
+    skim past it. Three of this house's conventions look like drift to a naive
+    string compare, and each one is a case here.
+    """
+    import importlib.util, os, gzip
+    spec = importlib.util.spec_from_file_location(
+        'check_scripture', os.path.join(os.path.dirname(__file__), 'check_scripture.py'))
+    cs = importlib.util.module_from_spec(spec); spec.loader.exec_module(cs)
+
+    idx = os.path.join(tmp, 'idx.tsv.gz')
+    with gzip.open(idx, 'wt') as f:
+        f.write("Matthew\t6\t24\tNo man can serve two masters: for either he will hate "
+                "the one, and love the other; or else he will hold to the one, and despise "
+                "the other. Ye cannot serve God and mammon.\n")
+        f.write("Philippians\t4\t8\tFinally, brethren, whatsoever things are true, "
+                "whatsoever things [are] honest, whatsoever things [are] lovely, "
+                "think on these things.\n")
+        f.write("Exodus\t20\t20\tAnd Moses said unto the people, Fear not: for God is "
+                "come to prove you, and that his fear may be before your faces.\n")
+        f.write("1 Corinthians\t13\t4\tCharity suffereth long, [and] is kind.\n")
+        f.write("1 Corinthians\t13\t5\tSeeketh not her own, is not easily provoked.\n")
+    index = cs.load(idx)
+    canon = lambda k: cs.norm(index[k])
+
+    check('scripture: a whole verse matches',
+          cs.match("No man can serve two masters", canon(('Matthew', 6, 24)))[0])
+    check('scripture: an ellipsis matches fragments in order',
+          cs.match("whatsoever things are true… think on these things",
+                   canon(('Philippians', 4, 8)))[0])
+    check("scripture: the KJV's own [brackets] are words, kept",
+          cs.match("whatsoever things are honest", canon(('Philippians', 4, 8)))[0])
+    check("scripture: a DRAFT's [substitution] is a wildcard, not drift",
+          cs.match("and that [Their] fear may be before your faces",
+                   canon(('Exodus', 20, 20)))[0])
+    check('scripture: real drift is still caught',
+          not cs.match("No man can serve three masters", canon(('Matthew', 6, 24)))[0])
+    check('scripture: fragments out of order are caught',
+          not cs.match("think on these things… whatsoever things are true",
+                       canon(('Philippians', 4, 8)))[0])
+    check('scripture: a quotation spanning two verses fails against just one',
+          not cs.match("Charity suffereth long, and is kind. Seeketh not her own",
+                       canon(('1 Corinthians', 13, 4)))[0])
+    check('scripture: and matches the joined range',
+          cs.match("Charity suffereth long, and is kind. Seeketh not her own",
+                   cs.norm(index[('1 Corinthians', 13, 4)] + ' ' +
+                           index[('1 Corinthians', 13, 5)]))[0])
+    # a locus must come from the closed book set — "And 22:17" is not a citation
+    check('scripture: a non-book word is never read as a locus',
+          not cs.LOCUS_RE.search("And 22:17 says otherwise"))
+    check('scripture: a real locus is read',
+          bool(cs.LOCUS_RE.search("see Revelation 22:17")))
+    # commentary must not be mistaken for a quotation
+    lo, run = cs.overlap("What the ellipsis drops:", canon(('Philippians', 4, 8)))
+    check('scripture: commentary scores below the candidate floor', lo < 0.25 or run < 4)
+    hi, run2 = cs.overlap("whatsoever things are true", canon(('Philippians', 4, 8)))
+    check('scripture: a real quotation scores above it', hi >= 0.6 and run2 >= 4)
+
+
+# ---------------------------------------------------------------- unit: review artifact
+def unit_review_artifact(tmp):
+    """The author-facing review page is generated, so its invariants are testable.
+
+    It exists because two sessions hand-built it in two different formats on 2026-09-09
+    and 2026-09-10. A hand-built page can silently drop a footnote, miscount a delta, or
+    leave a [^marker] on screen; a generated one is checked here instead.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'review_artifact', os.path.join(os.path.dirname(__file__), 'review_artifact.py'))
+    ra = importlib.util.module_from_spec(spec); spec.loader.exec_module(ra)
+
+    d = os.path.join(tmp, 'piece'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'publish.yaml'), 'w').write('title: A Piece\nsubtitle: And its claim.\n')
+    open(os.path.join(d, 'draft.md'), 'w').write(
+        'scaffold\n---\n## I. First\n\nA line with **weight** and a note.[^a]\n\n'
+        '> A quotation.\n\n## II. Second\n\nA [sibling](https://example.com/p/x) and one more.[^b]\n\n'
+        '[^a]: The first note.\n\n[^b]: The second note.\n')
+    facts = {'version': 'v2', 'state': ['not composed'],
+             'prior': {'words': 10, 'movements': 1, 'notes': 1},
+             'gates': [['check_links', '1 live']],
+             'calls': [['A call', 'Its body.']]}
+    h = ra.build(d, facts)
+
+    check('review: both movements render', h.count('class="mv"') == 2)
+    check('review: contents matches movements', h.count('<a href="#m') == 2)
+    check('review: every marker became a numbered ref',
+          len(re.findall(r'id="r\d+"', h)) == 2)
+    check('review: every ref has a definition',
+          len(re.findall(r'id="n\d+"', h)) == len(re.findall(r'id="r\d+"', h)))
+    check('review: no [^marker] reaches the reader', '[^' not in h)
+    check('review: no raw ** reaches the reader', '**' not in h)
+    check('review: deltas are computed, not asserted', 'class="delta"' in h)
+    check('review: state flag is stamped', 'not composed' in h)
+    check('review: the call is listed as a call', 'A call' in h and 'calls' in h)
+    check('review: a sibling link survives', 'https://example.com/p/x' in h)
+    check('review: hero absent renders a marked slot', 'class="slot"' in h)
+    check('review: title and subtitle come from the manifest',
+          'A Piece' in h and 'And its claim.' in h)
+
+    # a one-space inline comment leaked into the headline until 2026-09-10
+    open(os.path.join(d, 'publish.yaml'), 'w').write(
+        'title: A Piece # settled by the author\nsubtitle: And its claim.   # from §V\n')
+    h2 = ra.build(d, facts)
+    check('review: inline comment never reaches the title',
+          '<h1>A Piece</h1>' in h2 and 'settled by the author' not in h2)
+    check('review: inline comment never reaches the subtitle', 'from §V' not in h2)
+
+    # the two failures a hand-built page hides
+    bad = os.path.join(tmp, 'bad'); os.makedirs(bad, exist_ok=True)
+    open(os.path.join(bad, 'draft.md'), 'w').write('s\n---\nText.[^ghost]\n\n[^real]: n.\n')
+    try:
+        ra.build(bad, {}); check('review: undefined marker refuses', False)
+    except SystemExit as e:
+        check('review: undefined marker refuses with exit 2', e.code == 2)
+
+    # --- findings: a proposed change, marked where it lands ------------------
+    # The anchor is the whole mechanism. A finding that fails to highlight leaves a
+    # page that LOOKS complete, so every miss has to be a refusal and not a warning.
+    def fnd(**kw):
+        f = dict(facts); f['findings'] = [kw]; return f
+
+    hf = ra.build(d, fnd(anchor='A line with **weight**', severity='fidelity',
+                         title='T', what='W', evidence='E', now='A line with **heft**'))
+    check('review: the anchored span is marked in place',
+          '<mark class="hl hl-fidelity" id="a1">' in hf)
+    check('review: the mark closes exactly once',
+          hf.count('<mark class="hl') == 1 and hf.count('</mark>') == 1)
+    check('review: markdown inside the REPLACEMENT renders',
+          '<strong>heft</strong>' in hf and '<strong>weight</strong>' not in hf,
+          'the replacement is spliced into the markdown BEFORE the inline pass, so its '
+          'emphasis pairs with the run around it exactly as the original did')
+    check('review: no sentinel reaches the reader',
+          not any(c in hf for c in '\ue000\ue001\ue002\ue003'))
+    check('review: the note hangs under its own paragraph',
+          hf.index('id="a1"') < hf.index('id="f1"') < hf.index('<h2>Second</h2>'),
+          'a change is judged next to the sentence it changes')
+    # THE MARK SHOWS THE PROPOSAL, NOT THE PRESENT (Eric, 2026-09-10). Reading the
+    # highlighted prose has to be reading the piece as it would be if the changes were
+    # taken — that is the thing being decided.
+    hn = ra.build(d, fnd(anchor='and one more', title='T', now='and one fewer'))
+    prose = re.sub(r'<aside class="fx.*?</aside>', '', hn, flags=re.S)
+    check('review: the mark renders the replacement, not the original',
+          'and one fewer' in prose and 'and one more' not in prose)
+    check('review: the original survives in the card as the derived `was`',
+          '<dd class="was">and one more</dd>' in hn,
+          'derived from the anchor, so the two halves of the diff cannot drift')
+    check('review: the stamp says the prose is showing proposals',
+          'prose shows 1 proposed change<' in hn,
+          'the page is not draft.md any more and must not pretend to be')
+    # EVERY FINDING PROPOSES A CHANGE (Eric, 2026-09-10: "this doesn't tell me what the
+    # proposed change is. it should."). A band titled `proposed changes` whose rows
+    # propose nothing is lying about what it is; a diagnosis with no replacement is a
+    # question, and questions have their own band.
+    check('review: a finding with no `now` is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a finding that only diagnoses belongs in `calls`')
+    check('review: a `now` identical to the anchor is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'now': 'x'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'it proposes nothing, and would render as a change')
+    check('review: every finding carries a was/now diff',
+          hf.count('<dt>was</dt>') == 1 and hf.count('<dt>now</dt>') == 1)
+    check('review: `was` as an input is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'was': 'y', 'now': 'z'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a hand-typed `was` can disagree with the anchor; a derived one cannot')
+    check('review: an empty `now` is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'now': ''}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a deletion is a replacement of the wider span, not an invisible mark')
+    check('review: the finding is listed in the index', 'class="fidx"' in hf)
+    check('review: severity colours the mark and the card',
+          'class="fx sev-fidelity"' in hf)
+
+    check('review: a finding may anchor inside a footnote',
+          '<mark class="hl' in ra.build(d, fnd(anchor='The second note.', title='N',
+                                               now='The second note, rewritten.')))
+    check('review: an unknown severity degrades to open, it does not crash',
+          'sev-open' in ra.build(d, fnd(anchor='A quotation.', severity='wat', title='S',
+                                        now='A quotation, amended.')))
+
+    for label, kw, want in (
+            ('matches nothing', dict(anchor='not in the draft at all', title='X', now='q'),
+             'matches nothing'),
+            ('matches twice', dict(anchor='and one more', title='X', now='q'), None),
+            ('is missing', dict(title='X', now='q'), 'no anchor')):
+        errs = ra.place([kw], [{'text': 'and one more … and one more', 'marks': [], 'cards': []}]
+                        if want is None else
+                        [{'text': 'A line with weight', 'marks': [], 'cards': []}])
+        check(f'review: an anchor that {label} is refused', bool(errs),
+              'a silently dropped finding is the one failure this page cannot have')
+
+    hs = [{'text': 'alpha beta gamma', 'marks': [], 'cards': []}]
+    check('review: overlapping anchors are refused',
+          bool(ra.place([{'anchor': 'alpha beta', 'title': 'A', 'now': 'ALPHA BETA'},
+                         {'anchor': 'beta gamma', 'title': 'B', 'now': 'BETA GAMMA'}], hs)),
+          'right-to-left insertion would otherwise produce broken nesting')
+
+    check('review: no findings renders the page unchanged',
+          'class="fidx"' not in ra.build(d, facts))
+
+    # A GRID MAKES AN ANONYMOUS ITEM OUT OF EVERY BARE TEXT RUN. The index row is a
+    # three-column grid, so a title that is raw text (plus any inline markup) is dealt
+    # into the columns one fragment at a time — the row explodes to one word per line.
+    # Shipped 2026-09-10 and caught by Eric on a narrow viewport, because the DOM checks
+    # here read innerText, which cannot see layout. Assert the STRUCTURE instead: every
+    # grid child is exactly one element, with no loose text between them.
+    hg = ra.build(d, fnd(anchor='A quotation.', now='A quotation, amended.',
+                         title='A <em>tell</em> in the <b>text</b> — three times'))
+    row = re.search(r'<a class="sev-\w+" href="#f1">(.*?)</a>', hg, re.S).group(1)
+    check('review: the index row has exactly three grid children',
+          re.fullmatch(r'<b>\d+</b><em class="sev">[a-z]+</em><span class="ft">.*</span>',
+                       row, re.S) is not None,
+          'a bare text run inside a grid becomes its own item and wraps one word per line')
+    check('review: markup inside a finding title survives',
+          '<em>tell</em>' in row and '<b>text</b>' in row)
+
+    # a gate value long enough to be a sentence must not force the page sideways
+    check('review: gate chips wrap rather than overflow',
+          'white-space:nowrap}' not in ra.CSS.split('.gates b{')[0].split('.gates span{')[1])
+
+    # --- images and their ALT TEXT ------------------------------------------
+    # Alt text is house prose, it is the only thing a screen-reader user gets from a
+    # picture, and NOTHING else on this page showed it. Image blocks were skipped
+    # outright, so a piece's body images were simply absent — and an image sharing a
+    # block with an HTML comment was rendered as literal `<!-- slide -->` text.
+    # (Eric, 2026-09-10: "our artifact preview render should show us the alt text".)
+    ip = os.path.join(tmp, 'img'); os.makedirs(os.path.join(ip, 'assets'), exist_ok=True)
+    open(os.path.join(ip, 'publish.yaml'), 'w').write(
+        'title: T\nsubtitle: S\nimages:\n  assets/local.png: https://cdn.example/x_1.png\n')
+    open(os.path.join(ip, 'draft.md'), 'w').write(
+        'scaffold\n---\n![A hero, described](assets/nope.png)\n\n## I. First\n\n'
+        '<!-- slide -->\n<!-- design: internal -->\n![Figure 1: the shape](assets/gone.png)\n\n'
+        'Prose.\n\n![](assets/none.png)\n\n![Remote one](https://cdn.example/x_1.png)\n')
+    # a real (tiny) PNG so the CDN->local mapping is exercised end to end
+    try:
+        from PIL import Image
+        Image.new('RGB', (8, 6), (30, 40, 60)).save(os.path.join(ip, 'assets', 'local.png'))
+        have_pil = True
+    except ImportError:
+        have_pil = False
+    hi = ra.build(ip, {})
+    check('review: an image block renders as a figure, not as skipped text',
+          hi.count('<figure') == 4, 'body images were dropped from the page entirely')
+    check('review: the alt text is shown as prose',
+          'A hero, described' in hi and 'Figure 1: the shape' in hi)
+    check('review: an EMPTY alt is called out, not left blank',
+          'alt-none' in hi and 'MISSING' in hi,
+          'a picture with no alt gives a screen-reader user nothing')
+    check('review: an HTML comment never reaches the page',
+          '&lt;!--' not in hi and 'internal' not in hi,
+          'the converter strips them for the reader; this page is the author reading')
+    check('review: raw image markdown never reaches the page', '![' not in hi)
+    check('review: an image the page cannot show is NAMED, not dropped',
+          hi.count('image not shown') == 3,
+          'three of the four fixture images have no file; the fourth resolves via the map')
+    check('review: a CDN url maps back to its local file via publish.yaml',
+          (not have_pil) or ('no local file for it' not in hi
+                             and hi.count('data:image/jpeg') == 1),
+          'the manifest records which local file each uploaded url came from')
+    check('review: alt text is anchorable like any other prose',
+          'id="a1"' in ra.build(ip, {'findings': [
+              {'anchor': 'A hero, described', 'now': 'A hero, described better', 'title': 'X'}]}),
+          'so a review can propose new alt text and --apply can write it')
+
+    # --- --apply: the contract makes applying a review a substitution, not a retyping ---
+    ap = os.path.join(tmp, 'apply'); os.makedirs(ap, exist_ok=True)
+    src = ('scaffold\n---\n## I. First\n\nThe devil taketh him up, and sheweth him all.[^a]\n\n'
+           'A second line entirely.\n\n[^a]: A note about the world — outside — of it.\n')
+    def fresh():
+        open(os.path.join(ap, 'draft.md'), 'w').write(src)
+    fresh()
+    n, errs = ra.apply_findings(ap, [
+        {'anchor': 'taketh him up, and sheweth him all', 'now': 'taketh Him up, and sheweth Him all'},
+        {'anchor': 'A note about the world', 'now': 'A note about the whole world'}])
+    got = open(os.path.join(ap, 'draft.md')).read()
+    check('apply: every finding is written in', (n, errs) == (2, []))
+    check('apply: the replacement is the `now`, byte for byte',
+          'taketh Him up, and sheweth Him all' in got,
+          'what the author approved and what lands come from the same string')
+    check('apply: a finding may land in a footnote', 'A note about the whole world' in got)
+    check('apply: the scaffold header above --- is untouched', got.startswith('scaffold\n---\n'))
+    check('apply: untouched blocks are not re-flowed', 'A second line entirely.' in got)
+    check('apply: footnote continuations keep the 4-space indent',
+          all(l.startswith('    ') for l in got.split('[^a]: ')[1].split('\n')[1:] if l.strip()))
+
+    fresh()
+    n, errs = ra.apply_findings(ap, [{'anchor': 'not in this draft', 'now': 'x'}])
+    check('apply: an anchor that misses refuses', n == 0 and bool(errs))
+    check('apply: NOTHING is written when any finding misses',
+          open(os.path.join(ap, 'draft.md')).read() == src,
+          'a half-applied review leaves the draft in a state nobody chose')
+
+    fresh()
+    ra.apply_findings(ap, [{'anchor': 'A second line entirely.',
+                            'now': 'A [second line](https://example.com/p/a) entirely, made long '
+                                   'enough that the wrapper has to break it somewhere near here.'}])
+    got = open(os.path.join(ap, 'draft.md')).read()
+    check('apply: a markdown link is never broken across lines',
+          not re.search(r'\[[^\]]*\n[^\]]*\]\(', got),
+          'it still parses, but no draft on this desk carries one that way')
+
+    # the anchor is matched across the draft's own line wraps
+    fresh()
+    open(os.path.join(ap, 'draft.md'), 'w').write(
+        'h\n---\n## I. A\n\nThe devil taketh him up, and\nsheweth him all.\n')
+    n, errs = ra.apply_findings(ap, [{'anchor': 'taketh him up, and sheweth him all',
+                                      'now': 'taketh Him up, and sheweth Him all'}])
+    check('apply: an anchor matches across the file\'s line wraps', (n, errs) == (1, []),
+          'draft.md wraps at ~100 chars; the anchor is written as one line')
+
+    # a headingless piece put the whole prose in BOTH lead and movements: the word
+    # count doubled and every anchor matched twice
+    flat = os.path.join(tmp, 'flat'); os.makedirs(flat, exist_ok=True)
+    open(os.path.join(flat, 'draft.md'), 'w').write('s\n---\nJust one unheaded paragraph here.\n')
+    hflat = ra.build(flat, {'findings': [{'anchor': 'one unheaded paragraph', 'title': 'F',
+                                          'now': 'one unheaded sentence'}]})
+    check('review: a headingless piece counts its words once',
+          '<b>5</b>' in hflat, 'lead and movements are one source of truth')
+    check('review: a headingless piece still anchors', 'id="a1"' in hflat)
+
+
 # ---------------------------------------------------------------- unit: link extraction
 def unit_link_extraction():
     """A cross-link must be seen in every form a draft can carry it.
@@ -802,6 +1173,41 @@ def unit_pronouns(tmp):
           ('He', 'ref:mark440') in E, str(E))
     check('neither E nor F sweeps a footnote definition (the note keeps the source wording)',
           not any('King James reads' in sent for _, _, sent in r['E'] + r['F']), str(r['E'] + r['F']))
+    # E and F take the same escape as C, D, G and H (2026-09-10): a ruled hit must be recordable,
+    # or every later session re-derives the same referent. Not every E hit is even a deity
+    # pronoun -- "He that hath seen Me" is the KJV's sentence-initial capital on "whoever".
+    allow_e = check_pronouns.sweep(d, allow=['Him only shalt thou serve'])
+    check('pronouns_allow silences a justified E hit',
+          not any('Him only shalt thou serve' in sent for _, _, sent in allow_e['E']), str(allow_e['E']))
+    check('a justified E hit does not silence the others',
+          any(ev == 'ref:matt545' for _, ev, _ in allow_e['E']), str(allow_e['E']))
+    allow_f = check_pronouns.sweep(d, allow=['Without me ye can do nothing'])
+    check('pronouns_allow silences a justified F hit',
+          not any(ev == 'ref:john155' for _, ev, _ in allow_f['F']), str(allow_f['F']))
+    # A blockquote's `body` has its `> ` markers stripped, so a PARAGRAPH-relative window drifts
+    # two characters per line and misses the substring on any long quotation. Measured on *The
+    # Towel* 2026-09-10: four hits in one John 13 blockquote could not be justified at all.
+    d7 = os.path.join(tmp, 'pronouns-bq'); os.makedirs(d7, exist_ok=True)
+    with open(os.path.join(d7, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\n"
+                "> *Jesus knowing that the Father had given all things into His hands, and that He\n"
+                "> was come from God, and went to God; He riseth from supper, and laid aside His\n"
+                "> garments; and took a towel, and girded Himself. After that He poureth water into\n"
+                "> a bason, and began to wash the disciples' feet.*[^t]\n\n"
+                "[^t]: John 13:3-5 (KJV).\n")
+    check('the long-blockquote fixture lists every pronoun in the span',
+          len(check_pronouns.sweep(d7)['E']) == 6, str(len(check_pronouns.sweep(d7)['E'])))
+    check('a substring LATE in a long blockquote still silences its hit',
+          not any('poureth water' in sent for _, _, sent in
+                  check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']),
+          str(check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']))
+    check('and a substring late in the span does not silence one at the start',
+          any('given all things' in sent for _, _, sent in
+              check_pronouns.sweep(d7, allow=['After that He poureth water'])['E']))
+
+    check('an unrelated allow entry silences neither E nor F',
+          len(check_pronouns.sweep(d, allow=['nothing to do with this'])['E']) == len(r['E'])
+          and len(check_pronouns.sweep(d, allow=['nothing to do with this'])['F']) == len(r['F']))
     check('the quotation edge still holds for D (lowercase "him" inside *…* is not a D hit)',
           not r['D'], str(r['D']))
 
@@ -1599,6 +2005,9 @@ def main():
         print(f"scratch: {tmp}  (removed on exit)")
         unit_normalization()
         unit_link_extraction()
+        unit_review_artifact(tmp)
+        unit_scripture(tmp)
+        unit_pages(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()

@@ -3,7 +3,15 @@
 title: <post title>
 subtitle: <one-line subtitle>
 footnotes: native        # native | endnotes | none
-send_email: false        # web-only by default; send the email later if you want
+# substack_type: page   # a PAGE rather than a post: undated, not in the archive, never
+#                       # emails, needs no cover. Same composer and same transport — the
+#                       # only thing that differs is which checks apply. Default is post.
+send_email: true         # A FIRST PUBLICATION SENDS THE EMAIL. It is the one notification this
+                         # piece will ever get, and it is the point of having subscribers.
+                         # Every re-sync, update and correction after it sends NOTHING.
+                         # Set false ONLY to suppress a launch deliberately — this key cannot
+                         # cause an email, it records the intent the publish skill checks the
+                         # composer's own delivery control against.
 # cover: assets/hero.jpg  # optional hero image (path relative to the piece)
 
 # --- set these once the piece is live -----------------------------------------

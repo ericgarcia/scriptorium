@@ -13,6 +13,10 @@ each place a rule is broken, with the line and the rule. It finds; it does not f
 Run it to make a pass disciplined instead of impressionistic: coverage of every
 rule, not just whatever jumps out.
 
+**Not the pre-publish read.** That is `review` — the gates, the voice, and the primary
+sources re-opened to test the claims that carry weight, delivered as an artifact with each
+proposed change marked where it lands. This audit is one input to it.
+
 ## Always do this first
 
 1. Identify the **piece** and its **target style** from `pieces/<name>/README.md`

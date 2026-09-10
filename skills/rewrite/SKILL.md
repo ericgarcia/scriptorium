@@ -73,13 +73,15 @@ under a constitution that has changed. Most of the work is deciding what stays f
         case — its §I is universal on purpose (*take a dog out on a leash*, not the author's own
         dog), the corpus holds a real photograph of the author with his dog in another piece, and a
         generated man-and-dog cover would have undone that scoping without a word being changed.
-        The caption and the alt text must not imply a photograph of anyone.
+        The caption and the alt text must not imply a photograph of anyone. **Write the alt to
+        [`framework/docs/ALT-TEXT.md`](../../docs/ALT-TEXT.md)** — describe it, and transcribe
+        any text that is *in* it, in quotation marks.
      4. **Put it in the review artifact**, downscaled to about 1400px and embedded, so the surface
         the author reviews shows the actual cover rather than a description of one.
 
-     **The converter does not set Substack's featured image** — attaching the cover is a composer-UI
-     action and stays on the human's list. Checking it in is what makes that a one-click step rather
-     than a hunt through Downloads.
+     **The cover is set from the repo by `substack_cover.py`** (see `publish`), not by hand — the
+     older note here said the featured image could only be attached in the composer, and that was
+     untested rather than true. The **caption** is set with it, from `cover_caption:`.
    - **Which version seams go?** A published piece accumulates sentences about its own earlier
      versions (*the correction I owe*, *for a while I told it as…*). They are process showing
      through; the reader never saw the earlier version. Cut them, or turn them into direct address
@@ -182,17 +184,23 @@ at it, and it is theirs to make deliberately, not a side effect of a rewrite.
    calls — the close, a paragraph whose last line could read as the old thesis in miniature, a
    chronology rendered from one sentence of the author's — are **flagged for the author, not
    decided**.
-3. **Render a review artifact and give the author the link.** A rewrite asks the author to judge
-   prose, and a `draft.md` full of `[^slug]` markers, scaffold headers and raw markdown is not the
-   thing they are being asked to judge. Publish the piece as an Artifact reading view instead:
-   the title and subtitle as they will appear, the sections in order, **the footnotes rendered as
-   real numbered notes with working jumps**, and the sibling cross-links live. Put the review facts
-   where they can be seen rather than in chat — the word count against the previous version, the
-   section and footnote deltas, which gates passed, and **every open call listed as a call**. Mark
-   the **hero-image slot** explicitly if there is no image yet. **Generate the artifact's content
-   from `draft.md` programmatically** — never retype the prose into the page, for the same reason
-   the composer never retypes it into Substack: a transcription slip becomes an edit nobody can
-   see. Send the link, and send the file too for anyone who would rather read the markdown.
+3. **Render the review artifact with the tool and give the author the link.** A rewrite asks
+   the author to judge prose, and a `draft.md` full of `[^slug]` markers, scaffold headers and raw
+   markdown is not the thing they are being asked to judge. **The format is not yours to design:**
+   write `pieces/<slug>/review.json` and run
+
+       python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+   then publish that file with the **Artifact** tool. The generator parses the prose out of
+   `draft.md` and never retypes it, counts the deltas rather than asserting them, refuses on a
+   footnote marker with no definition, and renders a marked **slot** where a hero is still owed.
+   `review.json` carries only what the generator cannot count — the version label, the state flags
+   (*not composed*, *Substack holds v1*), the gates that ran, the cover caption and provenance, and
+   **every open question, listed as a call**. `framework/docs/REVIEW-ARTIFACT.md` has the contract.
+   **Keep one artifact per piece and republish to the same URL** as versions land; the author's
+   link should not change under them. Send the link, and send the file too for anyone who would
+   rather read the markdown. (Two sessions hand-built this page in two different formats on
+   2026-09-09 and 2026-09-10, which is why it is a tool.)
 4. Log it (append-only): what the rewrite did, what it held constant, what critique changed, what
    is flagged, and that it is **not re-synced**. Update the README stage and next move; update the
    dashboard fragment; `dashboard.py sync`; release the lease.

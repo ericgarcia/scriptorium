@@ -60,6 +60,31 @@ app's session list then reads as a shelf of pieces instead of a row of identical
 - Don't grade with adjectives-as-verdict. Report what's there and what a fix
   would be; the call to accept is the user's.
 
+## Critique, review, audit — which one this is
+
+- **`critique`** (this one) is the **editor mid-draft**: judgment on a passage, and the
+  accepted wording changes go to `corrections.md` so the voice can learn.
+- **`style-audit`** is the **linter**: every rule in the constitution, checked, reported.
+- **`review`** is the **pre-publish read**: the gates, the voice, *and the primary sources
+  re-opened to test the claims that carry weight*, ranked and delivered as an artifact with
+  each proposed change marked where it lands. Reach for it when a piece is finished or
+  composed and the author is deciding whether to ship it.
+
+If the author says "review this" on a finished piece, that is `review`.
+
+## Showing the author the piece
+
+When the author needs to *read* the piece rather than a report on it — a re-voiced draft, a
+pass they have to rule on — render the house review artifact rather than pasting prose into
+chat or building a page by hand:
+
+    python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+then publish that file with the **Artifact** tool, one artifact per piece, republished to the
+same URL as versions land. Facts that cannot be counted go in `pieces/<slug>/review.json` —
+state flags, gates, and every open question listed as a call. Contract:
+`framework/docs/REVIEW-ARTIFACT.md`.
+
 ## When a wording change is accepted
 
 If the user takes a change that reflects the *voice* (not a one-off fix), capture

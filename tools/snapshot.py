@@ -7,7 +7,7 @@ a snapshot is a bundle on disk, in the form BUNDLE.md describes, holding everyth
 needed to rebuild the store or to vendor the corpus into a repo again.
 
   usage: python3 tools/snapshot.py <out-dir> [--config publishing/store.yaml]
-                 [--outlet NAME] [--verify-only]
+                 [--outlet NAME] [--verify-only] [--push] [--list]
 
   OUT   <out>/bundle.json           spec, when, what is inside
         <out>/content/<slug>.md     front matter + markdown body
@@ -24,6 +24,15 @@ backup, so this verifies as it goes and refuses to call the result complete unle
     present on disk and non-empty;
   * every talk carries deck.html, notes.json, deck-stage.js and each asset its slides
     reference, with PNGs complete to their IEND chunk.
+
+--push KEEPS IT OFF THIS MACHINE. A snapshot on the same laptop that runs the desk
+survives a bad publish and nothing else, so `--push` copies the verified tree to a
+second S3 bucket under a timestamped prefix. It is a different bucket from the store on
+purpose: `store_publish.py --prune` deletes every object a bundle does not name, so a
+snapshot kept beside the content would be destroyed by an ordinary publish — and a
+backup sharing a bucket with its source dies with it. Nothing is pushed unless
+verification passed; uploading an archive already known to be broken is worse than
+having none, because it looks like one.
 
 THE STORE CANNOT BE LISTED, ON PURPOSE. The CDN refuses a bucket listing, so this
 cannot ask what is there; it discovers everything from index.json and from the files
@@ -124,6 +133,89 @@ def check_file(path):
     return None
 
 
+def snapshot_bucket(cfg):
+    b = (cfg.get('snapshots') or {}).get('bucket')
+    if not b:
+        die(1, 'snapshots.bucket is not set in the config')
+    return b
+
+
+def s3_client(cfg):
+    try:
+        import boto3
+    except ImportError:
+        die(2, 'missing dependency (boto3); pip install boto3')
+    store = cfg.get('store') or {}
+    return boto3.Session(profile_name=store.get('aws_profile'),
+                         region_name=store.get('region', 'us-east-1')).client('s3')
+
+
+def push(cfg, out, outlet):
+    """Copy a VERIFIED snapshot to the snapshot bucket, under a timestamped prefix.
+
+    Every snapshot is uploaded whole rather than diffed against the last one. At this
+    size that costs pennies, and it buys the property a backup needs most: each prefix
+    stands alone, so restoring never means reassembling one snapshot out of several.
+    """
+    bucket = snapshot_bucket(cfg)
+    s3 = s3_client(cfg)
+    stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')
+    prefix = f'{stamp}-{outlet}' if outlet else stamp
+
+    n = size = 0
+    for root, _dirs, files in os.walk(out):
+        for name in files:
+            if name == '.DS_Store':
+                continue
+            path = os.path.join(root, name)
+            key = f'{prefix}/' + os.path.relpath(path, out).replace(os.sep, '/')
+            s3.upload_file(path, bucket, key)
+            n += 1
+            size += os.path.getsize(path)
+    print(f"pushed    s3://{bucket}/{prefix}/ — {n} file(s), {size / 1e6:.1f} MB")
+    return 0
+
+
+def list_snapshots(cfg):
+    """What has been pushed. The snapshot bucket is private and has no CDN in front of
+    it, so unlike the store it can simply be listed."""
+    bucket = snapshot_bucket(cfg)
+    s3 = s3_client(cfg)
+    seen = {}
+    token = None
+    while True:
+        kw = {'Bucket': bucket, 'Delimiter': '/'}
+        if token:
+            kw['ContinuationToken'] = token
+        page = s3.list_objects_v2(**kw)
+        for p in page.get('CommonPrefixes', []):
+            seen[p['Prefix'].rstrip('/')] = [0, 0]
+        if not page.get('IsTruncated'):
+            break
+        token = page.get('NextContinuationToken')
+    if not seen:
+        print(f's3://{bucket}/ — no snapshots yet')
+        return 0
+    for prefix in sorted(seen):
+        token = None
+        while True:
+            kw = {'Bucket': bucket, 'Prefix': prefix + '/'}
+            if token:
+                kw['ContinuationToken'] = token
+            page = s3.list_objects_v2(**kw)
+            for obj in page.get('Contents', []):
+                seen[prefix][0] += 1
+                seen[prefix][1] += obj['Size']
+            if not page.get('IsTruncated'):
+                break
+            token = page.get('NextContinuationToken')
+    print(f's3://{bucket}/ — {len(seen)} snapshot(s)')
+    for prefix in sorted(seen, reverse=True):
+        n, size = seen[prefix]
+        print(f'  {prefix}   {n} file(s)   {size / 1e6:.1f} MB')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -132,6 +224,10 @@ def main():
     ap.add_argument('--outlet', help='only pieces published to this outlet')
     ap.add_argument('--verify-only', action='store_true',
                     help='re-check an existing snapshot without downloading')
+    ap.add_argument('--push', action='store_true',
+                    help='after verifying, copy the snapshot to the snapshot bucket')
+    ap.add_argument('--list', action='store_true',
+                    help='list the snapshots already pushed, newest first')
     a = ap.parse_args()
 
     if not os.path.exists(a.config):
@@ -141,6 +237,9 @@ def main():
     base = ((cfg.get('store') or {}).get('base_url') or '').rstrip('/')
     if not base:
         die(1, f'{a.config}: store.base_url is required')
+
+    if a.list:
+        return list_snapshots(cfg)
 
     faults = []
     if a.verify_only:
@@ -280,6 +379,9 @@ def main():
             print(f'  … and {len(faults) - 20} more', file=sys.stderr)
         return 1
     print("complete — every piece, image and asset the index names is present and intact")
+
+    if a.push:
+        return push(cfg, a.out, a.outlet)
     return 0
 
 

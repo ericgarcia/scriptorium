@@ -397,6 +397,7 @@ def sweep(piece, names=(), allow=None):
 
     # A and B run over PARAGRAPHS, because a referent is sticky for the length of a passage and a
     # sentence-scoped test cannot see that (2026-09-10).
+    carried = None            # the last figure named — a PRONOUN's antecedent survives a paragraph break
     for flat in paragraphs(text):
         if re.match(r'^\[\^[^\]]+\]:', flat):
             continue
@@ -433,9 +434,23 @@ def sweep(piece, names=(), allow=None):
                 if any(x in w for x in allow):
                     continue
                 kind, who = last_referent(before + s[:m.start()])
-                if kind == 'figure':
-                    continue                                   # this person actually exists
+                # A BARE PRONOUN needs an antecedent, and the last person named is it — so a figure
+                # carries across the paragraph break, the way the prose does.  A NOUN PHRASE (*a
+                # man*, *the man*, *man who*) introduces its own referent and is never attributed
+                # away: that is where a generic masculine actually hides, so those always list.
+                # Splitting the two took B from 904 to the 202 worth reading (2026-09-10).
+                if m.group(1) in ('he', 'him', 'his', 'himself'):
+                    if kind == 'figure' or (kind is None and carried):
+                        continue                               # this person actually exists
                 B.append(('GENERIC?', m.group(1), ctx(s, m, 60)))
+        # Only ANOTHER PERSON displaces the carried antecedent.  God being named does not: a
+        # paragraph can be about Brother Lawrence and about God in the same breath — that is what
+        # these essays are — and the *he* in it is still Lawrence.  Resetting on a God-word left
+        # the carry doing almost nothing, because God is named on nearly every page here.
+        if fig_re:
+            found = fig_re.findall(flat)
+            if found:
+                carried = found[-1]
 
     for s in sents:
         quoted = [(q.start(), q.end()) for q in QUOTE_SPAN.finditer(s)]

@@ -322,16 +322,27 @@ is the only reason that matters: neither one routes the author's prose through t
 > just another edit. The clipboard removes the agent from the transport: the bytes go
 > **disk → system pasteboard → Chrome → ProseMirror** and are never retyped.
 
-**Surface matters, and this is the part that is easy to get wrong.** Measured 2026-09-01:
+**These measurements are about the CLIPBOARD, not about the pane.** Measured 2026-09-01:
 
-| surface | result |
+| surface | result *with the pasteboard transport* |
 |---|---|
 | in-app browser pane + `navigator.clipboard.read()` | ❌ `NotAllowedError: Document is not focused` |
 | in-app browser pane + synthetic `cmd+v` | ❌ no-op, editor stays empty |
 | **real Chrome + real click + real `cmd+v`** | ✅ **works** — `h2`, `em`, `strong`, links, blockquotes all survive |
 
-So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A programmatic
-`.focus()` does **not** satisfy the Clipboard API — the click has to be a real one.
+**The conclusion is that the pane cannot reach the pasteboard — which is why the pane uses
+`pane_carry.py` instead, not why you should leave the pane.** A programmatic `.focus()` does not
+satisfy the Clipboard API, so on real Chrome the click has to be a real one.
+
+> **This block used to end "So compose in real Chrome, not the in-app pane," and that sentence
+> outlived the change that made the pane the default.** It cost a session most of a day on
+> 2026-09-10: the agent read *these* lines rather than the Surface bullet 260 lines above, drove
+> real Chrome, found the window minimized (a hidden zero-size viewport swallows a ⌘V silently),
+> cleared a composed draft to empty before discovering it, and then lost the signed-in tab
+> altogether — while the pane was signed in the whole time and a two-word surgical fix through it
+> took one call. **A skill that says the default in one place and contradicts it in the numbered
+> steps will be obeyed by the numbered steps.** When the default moves, grep the whole file for the
+> old one.
 
 1. **Take the pasteboard and paste in ONE process (the default since 2026-09-08):**
 
@@ -365,7 +376,7 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    **The two-step still exists and is still lease-guarded:** run without `--paste` to load and hold
    the lease, `--verify` immediately before a ⌘V sent from the browser tool, then `--release`. Use it
    only where System Events cannot reach the browser.
-2. **Open the composer in real Chrome** and set Title + Subtitle by JS (small, no prose in it),
+2. **Open the composer on your chosen surface — the pane by default** — and set Title + Subtitle by JS (small, no prose in it),
    then `clearContent(true)` so a retry can't append to a half-paste. **Snapshot any image or embed
    the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
    `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared

@@ -387,15 +387,19 @@ def sweep(piece, names=(), allow=None):
                 # for ever and every session re-derives the same referent — and some referents are
                 # NEITHER the Son nor the Father: *He that hath seen Me* is the King James's own
                 # sentence-initial capital on a generic relative pronoun, *he that* = *whoever*.
-                w = flat[max(0, at - 60):at + 60]
+                # The window is taken from the SPAN'S OWN text, not from the paragraph: for a
+                # blockquote `body` has had its `> ` markers stripped, so a paragraph-relative
+                # window drifts two characters per line and silently misses the substring on any
+                # quotation more than a few lines long (measured on *The Towel*, 2026-09-10).
+                w = body[max(0, at - 60):at + 60]
                 return any(a in w for a in allow)
             for m in re.finditer(r"\b(He|Him|His|Himself)\b", body):
-                if justified(start + m.start()):
+                if justified(m.start()):
                     continue
                 E.append((m.group(1), evidence, sentence_at(flat, start + m.start())))
             if gospel and FIRST_PERSON.search(body):
                 for m in re.finditer(r"\b(me|my|mine|myself)\b", body):
-                    if justified(start + m.start()):
+                    if justified(m.start()):
                         continue
                     F.append((m.group(1), evidence, sentence_at(flat, start + m.start())))
         # G — a mixed-case *Lord* anywhere in a body paragraph (prose or quotation): the house

@@ -209,8 +209,10 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
 ## Sequence
 
 1. Agree this document.
-2. Bundle spec v2: talks as a content type, and a `pieces/<slug>.json` shape the
-   shared renderer and the sites agree on.
+2. ~~Bundle spec v2: talks as a content type, and a `pieces/<slug>.json` shape the
+   shared renderer and the sites agree on.~~ **Done 2026-09-10.** A talk is a piece
+   with a `talk` block, not a second type — see `BUNDLE.md`. quire v0.5.0 carries the
+   type and validates it; the presenter protocol moved there in v0.4.0.
 3. Stand up the store and the shared read client; point one site at it.
 4. Move the second site; retire the vendored-bundle path.
 5. `snapshot.py`, so the portability promise is real before anyone relies on it.

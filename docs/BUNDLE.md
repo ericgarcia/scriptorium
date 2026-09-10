@@ -29,6 +29,10 @@ have to happen in between, and every one of them is a leak if it doesn't:
   bundle.json               # spec version, generator, what's inside
   content/<slug>.md         # YAML front matter + markdown body
   images/<slug>/<name>.webp # derived, web-sized
+  talks/<slug>/deck.html    # a talk's slides, standalone — see Talks
+  talks/<slug>/notes.json   # per-slide speaker notes
+  talks/<slug>/deck-stage.js
+  talks/<slug>/assets/…
 ```
 
 Nothing outside this tree is required to render the bundle. That is the property worth
@@ -83,6 +87,61 @@ Two stores ship:
 
 Originals never go in a bundle. They stay with the piece under `assets/`, full
 resolution and byte-exact, because that is the archive. A bundle carries derivatives.
+
+## Talks
+
+A talk is a piece whose reader is a room. It is **not a second content type** — it is a
+piece with one extra block, so everything already true of a piece stays true: the same
+front matter, the same digest, the same rules about images, the same allowlist.
+
+```yaml
+slug: love-is-not-a-metric-space
+title: Love Is Not a Metric Space
+subtitle: or, Why You Should Go to a Weird Party Instead
+published_at: 2026-09-20
+digest: sha256:…
+talk:
+  deck: ../talks/love-is-not-a-metric-space/deck.html
+  notes: ../talks/love-is-not-a-metric-space/notes.json
+  slide_count: 30
+  delivered_at: 2026-09-20
+  venue: Interintellect
+  duration_minutes: 45
+```
+
+Only `deck`, `notes` and `slide_count` are required; the rest is a talk being more
+specific than the minimum. The presence of `talk` is what makes a piece a talk.
+
+**The body is the transcript.** A talk's `body` is ordinary markdown like any other
+piece's, which is the entire reason a talk is not its own type: it renders through the
+same renderer, syndicates to the same outlets, and verifies with the same digest. A
+reader who never attended gets a piece; the deck is what the room got.
+
+**Deck paths are relative, exactly like images.** Same rule and the same reason — where
+the bytes live is a property of the store, not of the writing. A destination rewrites
+`../talks/<slug>/deck.html` into whatever it serves; the bundle never names a host.
+
+**The deck is opaque to the bundle.** `deck.html` is a built artifact — slides lifted
+out of a Claude Design export by `tools/dc_to_deck.py`, with the design runtime dropped.
+The bundle carries it and does not look inside. What a destination needs to *drive* it
+(the postMessage protocol, the two-device pairing) lives in the renderer, not here.
+
+**`slide_count` is the deck's own count**, copied from `notes.json` so a destination can
+render a position indicator before the deck has loaded. If the two ever disagree, the
+deck is right and the bundle is stale.
+
+### One thing this spec deliberately does not settle
+
+Today the speaker notes are authored in Claude Design and extracted from the export, so
+they flow deck → bundle. This document's *Talks* section in `PUBLISHING.md` says the
+script's source of truth should be the desk, which is the opposite direction.
+
+Both directions produce the same bundle, which is why the spec can be written now and
+that question left open: a bundle is an interchange format, and it should not encode
+which end of the desk authored a sentence. What is still unbuilt is the step that turns
+notes into transcript markdown — until that exists, a destination that wants a
+transcript derives one from `notes.json` at render time. Settle the direction when the
+exporter is built, not before.
 
 ## Verification
 

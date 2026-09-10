@@ -13,7 +13,8 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 
 - The piece is finished (`pieces/<name>/draft.md`) and has a **manifest**
   `pieces/<name>/publish.yaml` — **`outlets`** (see below), `title`, `subtitle`, `footnotes`
-  (native|endnotes|none), `send_email` (default false), optional `cover`, optional **`post_url`**
+  (native|endnotes|none), **`send_email` (default `true` — a first publication sends the email;
+  every re-sync after it sends nothing)**, optional `cover`, optional **`post_url`**
   (record it once the piece is live; its presence switches this skill into **republish mode** —
   see below), and optional **`public_url`**.
 - **`outlets:` says where the piece goes, and this skill NEVER picks one.** It is a list of
@@ -243,6 +244,24 @@ So the rule is **structural, not per-piece**:
 - **Every re-sync, update and correction after that sends NOTHING.** A published post being fixed
   must not mail anyone. Read the *Update* dialog and prove no delivery control is enabled; if one
   is present and cannot be proven off, **stop and ask.**
+
+**The check is symmetric, and only one half of it existed.** The update path had *prove it is off*;
+the first-publication path had nothing — it asserted that publishing sends and then clicked. So a
+launch whose delivery toggle happened to be off would send no email, tell nobody, and look exactly
+like a success. **A silent non-send is a failure of this rule, not a safe outcome:** the piece gets
+no second chance, because every path after the first sends nothing by design.
+
+So, before a **first** publication: read the dialog's text for the delivery section, then **prove the
+control is ON** — `aria-checked="true"` on the toggle, or `should_send_email: true` from
+`GET /api/v1/drafts/<id>`, which is the field that actually governs it. **If it is off, or its state
+cannot be determined, STOP and ask** — exactly as the update path stops when it cannot prove the
+opposite. Do not toggle it silently in either direction; the author gets told which way it reads.
+
+**`send_email:` in the manifest is a record of intent, not a switch.** No tool reads it (verified
+2026-09-10) and it cannot cause or prevent an email — Substack's own control does that. Its job is
+to be the thing you check the composer against: they agree, or you stop. A manifest that says
+`false` on a piece about to go live for the first time is a decision to skip the launch email, and
+should be confirmed with the author rather than obeyed or ignored.
 
 **What this replaced, and why the replacement is narrower rather than looser.** The old rule was
 *never click, never email*, which conflated two very different acts: going live, which the author

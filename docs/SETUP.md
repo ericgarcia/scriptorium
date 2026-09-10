@@ -111,7 +111,8 @@ $EDITOR publishing/substack.md   # byline, subdomain, publication name, bio
 ```
 
 Each piece additionally needs a `publish.yaml` — `title`, `subtitle`, `footnotes`
-(native|endnotes|none), `send_email` (default false), and, once it is live, both `post_url` (the
+(native|endnotes|none), `send_email` (**default `true`** — a first publication sends the one email
+the piece ever gets; every re-sync after it sends nothing), and, once it is live, both `post_url` (the
 **editor** address, `/publish/post/<id>`) and `public_url` (the **reader** address, `/p/<slug>`).
 Those are two different URLs and both are needed: the editor one drives re-syncs, and the reader
 one is the only URL that may appear in another essay's body.

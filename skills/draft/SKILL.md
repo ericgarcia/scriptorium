@@ -46,6 +46,25 @@ the loop — write freely, revise later, let git remember old versions.
    witness/anchor ledger), if they exist. Draft the outline's spine, not whatever
    comes to mind.
 
+## Name the session after the piece
+
+Once you know which piece you are working on, rename the session to that piece's title, by
+calling `mcp__ccd_session_mgmt__set_session_title` with `session_id: "self"` and the title. The
+app's session list then reads as a shelf of pieces instead of a row of identical entries.
+
+- **Take the title from `pieces/<slug>/publish.yaml` (`title:`), falling back to the README's
+  H1.** Titles on this desk move late and often — one was retitled on Substack at publication and
+  pulled back into the manifest — and `publish.yaml` is what actually ships to a reader.
+- **Re-title whenever the piece changes.** A session that opens on one piece and moves to another
+  should carry the name of the one it is on *now*. That is where the value is; naming it once at
+  the start is the part that goes stale.
+- **Best-effort, and silent when it fails.** The tool lives in the Claude Code desktop app. A
+  terminal session does not have it, and there is no way to test for it except by calling. If it
+  is missing, carry on — do not retry, do not mention it, and never let it block the work.
+- **It will not stomp a title the author chose.** The app asks them to approve a rename over a
+  title they set themselves, and replaces its own generated titles without asking. So propose
+  freely; the guard is on their side of it.
+
 ## Drafting
 
 - Write into `pieces/<name>/draft.md`. Keep **one** current draft there; prior

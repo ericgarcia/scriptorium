@@ -1222,6 +1222,86 @@ def unit_store(tmp):
     check('images travel with the piece',
           os.path.exists(os.path.join(b2, 'images', 'a-piece', 'hero.webp')))
 
+    # ---- snapshot: the way back ----
+    # Served from a local directory rather than the real store: the suite makes no
+    # network calls, and a backup tool that needs the thing it is backing up to be
+    # reachable in order to be TESTED is not much of a backup tool.
+    import http.server, socketserver, threading, functools
+    store_root = os.path.join(tmp, 'fake-store')
+    os.makedirs(os.path.join(store_root, 'pieces'), exist_ok=True)
+    os.makedirs(os.path.join(store_root, 'images', 'a-piece'), exist_ok=True)
+    with open(os.path.join(store_root, 'images', 'a-piece', 'hero.webp'), 'wb') as f:
+        f.write(b'RIFF____WEBP')
+    piece = {'slug': 'a-piece', 'title': 'A Piece', 'published_at': '2026-05-04',
+             'digest': 'sha256:abc123def456', 'body': 'Prose.\n',
+             'hero': {'src': '../images/a-piece/hero.webp', 'alt': 'A hero'}}
+    with open(os.path.join(store_root, 'pieces', 'a-piece.json'), 'w', encoding='utf-8') as f:
+        json.dump(piece, f)
+    with open(os.path.join(store_root, 'index.json'), 'w', encoding='utf-8') as f:
+        json.dump({'spec': '2', 'generated_at': '', 'pieces': [
+            {'slug': 'a-piece', 'title': 'A Piece', 'published_at': '2026-05-04',
+             'digest': 'sha256:abc123def456', 'outlets': ['somewhere'], 'kind': 'piece'}]}, f)
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=store_root)
+    class Quiet(handler.func):
+        def log_message(self, *a): pass
+    httpd = socketserver.TCPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=store_root))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        cfg_path = os.path.join(tmp, 'store.yaml')
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            f.write(f'store:\n  base_url: http://127.0.0.1:{port}\n  bucket: b\n'
+                    f'  region: us-east-1\n  distribution_id: d\n')
+        snap = os.path.join(tmp, 'snap')
+        snapshot = os.path.join(HERE, 'snapshot.py')
+        r = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path],
+                           capture_output=True, text=True)
+        check('a snapshot of the store completes', r.returncode == 0,
+              (r.stdout + r.stderr).strip())
+        check('it writes the piece back as front matter + markdown',
+              os.path.exists(os.path.join(snap, 'content', 'a-piece.md')))
+        check('and brings the images with it',
+              os.path.exists(os.path.join(snap, 'images', 'a-piece', 'hero.webp')))
+        if os.path.exists(os.path.join(snap, 'content', 'a-piece.md')):
+            text = open(os.path.join(snap, 'content', 'a-piece.md'), encoding='utf-8').read()
+            check('the date is a bare YYYY-MM-DD, not a quoted string',
+                  'published_at: 2026-05-04' in text, text[:200])
+            check('the body survives the round trip', text.rstrip().endswith('Prose.'))
+
+        rv = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('verify-only passes on a good snapshot', rv.returncode == 0,
+              (rv.stdout + rv.stderr).strip())
+
+        # A verifier that cannot fail is not a verifier. Each of these is a way a
+        # backup rots quietly.
+        os.remove(os.path.join(snap, 'images', 'a-piece', 'hero.webp'))
+        r1 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a missing image fails verification',
+              r1.returncode == 1 and 'missing' in (r1.stdout + r1.stderr), r1.stderr.strip())
+
+        with open(os.path.join(snap, 'images', 'a-piece', 'hero.webp'), 'wb') as f:
+            f.write(b'RIFF____WEBP')
+        md = os.path.join(snap, 'content', 'a-piece.md')
+        body = open(md, encoding='utf-8').read().replace('sha256:abc123def456', 'sha256:0000')
+        open(md, 'w', encoding='utf-8').write(body)
+        r2 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a digest that disagrees with the index fails verification',
+              r2.returncode == 1 and 'digest disagrees' in (r2.stdout + r2.stderr),
+              r2.stderr.strip())
+
+        os.remove(md)
+        r3 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+                             '--verify-only'], capture_output=True, text=True)
+        check('a missing piece fails verification',
+              r3.returncode == 1 and 'missing' in (r3.stdout + r3.stderr), r3.stderr.strip())
+    finally:
+        httpd.shutdown()
+
+
 
 
 # ---------------------------------------------------------------- corpus

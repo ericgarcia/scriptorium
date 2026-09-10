@@ -225,8 +225,23 @@ site is wrong, and nothing fails. Comparing digests is what catches it.
    can only read the store at build time, which takes the dependency and gains none of
    the speed — so **item 5 is now load-bearing**, not optional: the portability promise
    that flag used to keep now rests entirely on the bundle and a snapshot.
-5. `snapshot.py`, so the portability promise is real before anyone relies on it.
+5. ~~`snapshot.py`, so the portability promise is real before anyone relies on it.~~
+   **Done 2026-09-10.** `tools/snapshot.py <out>` writes the whole store back out as a
+   bundle on disk — front matter + markdown, images, decks — and verifies as it goes:
+   a download nobody has checked is a promise, not a backup. Proven by round trip:
+   alignmentfellowship's 32 vendored files, recovered from git, match the snapshot
+   exactly once the documented `/images` → `../images` rewrite is accounted for.
+   `--verify-only` re-checks an existing snapshot and exits non-zero on a fault.
 6. LinkedIn outlet.
+
+### One thing a snapshot does not fix
+
+A snapshotted deck was served with `python -m http.server` and rendered: 30 slides, all
+four figures. It is genuinely standalone — except that the deck's `<helmet>` pulls a
+webfont from Google, inherited from the Claude Design export. It degrades to a system
+face rather than breaking, so the publication survives; but "runs from a thumb drive with
+the network unplugged" is not quite true of a deck, and saying so is cheaper than
+discovering it during an outage. Inlining the font at conversion time would close it.
 
 ## The properties this has to serve
 

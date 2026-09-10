@@ -106,8 +106,12 @@ USAGE
     Lord's Prayer). A justified G-hit is silenced the same way as a C-hit, by a substring under
     `pronouns_allow:` in publish.yaml. Footnote definitions are never swept: the note that records
     the King James's wording keeps the King James's own *Lord*.
-    A C- or D-hit whose referent is NOT God is justified by listing a substring of it in the
-    piece's publish.yaml under `pronouns_allow:` — reviewable, and it survives the session.
+    A hit in C, D, E, F, G or H whose referent has been named is justified by listing a substring
+    of it in the piece's publish.yaml under `pronouns_allow:` — reviewable, and it survives the
+    session.  E and F joined the list on 2026-09-10, for the reason D did: a section that refuses
+    or warns for ever, with no way to record the ruling, makes every later session re-derive the
+    same referent.  Not every E-hit is even a deity pronoun — *He that hath seen Me hath seen the
+    Father* is the King James's own sentence-initial capital on *he that* = *whoever*.
     D honors the list for the same reason C does (2026-09-10): D is a PROXIMITY test, so most of
     what it finds is a pronoun for something else standing near a God-word — *God is black, and
     meant it ontologically* (the claim), *the sentence says it takes both* (an expletive). Both
@@ -378,10 +382,21 @@ def sweep(piece, names=(), allow=None):
         if re.match(r'^\[\^[^\]]+\]:', flat):
             continue
         for start, end, body, evidence, gospel in quotation_spans(flat, defs):
+            def justified(at):
+                # Same escape C, D, G and H have (2026-09-10).  Without it a ruled E-hit re-lists
+                # for ever and every session re-derives the same referent — and some referents are
+                # NEITHER the Son nor the Father: *He that hath seen Me* is the King James's own
+                # sentence-initial capital on a generic relative pronoun, *he that* = *whoever*.
+                w = flat[max(0, at - 60):at + 60]
+                return any(a in w for a in allow)
             for m in re.finditer(r"\b(He|Him|His|Himself)\b", body):
+                if justified(start + m.start()):
+                    continue
                 E.append((m.group(1), evidence, sentence_at(flat, start + m.start())))
             if gospel and FIRST_PERSON.search(body):
                 for m in re.finditer(r"\b(me|my|mine|myself)\b", body):
+                    if justified(start + m.start()):
+                        continue
                     F.append((m.group(1), evidence, sentence_at(flat, start + m.start())))
         # G — a mixed-case *Lord* anywhere in a body paragraph (prose or quotation): the house
         # writes LORD wherever the word names God, so each of these names something else or is a miss.

@@ -860,6 +860,20 @@ def unit_pronouns(tmp):
           ('He', 'ref:mark440') in E, str(E))
     check('neither E nor F sweeps a footnote definition (the note keeps the source wording)',
           not any('King James reads' in sent for _, _, sent in r['E'] + r['F']), str(r['E'] + r['F']))
+    # E and F take the same escape as C, D, G and H (2026-09-10): a ruled hit must be recordable,
+    # or every later session re-derives the same referent. Not every E hit is even a deity
+    # pronoun -- "He that hath seen Me" is the KJV's sentence-initial capital on "whoever".
+    allow_e = check_pronouns.sweep(d, allow=['Him only shalt thou serve'])
+    check('pronouns_allow silences a justified E hit',
+          not any('Him only shalt thou serve' in sent for _, _, sent in allow_e['E']), str(allow_e['E']))
+    check('a justified E hit does not silence the others',
+          any(ev == 'ref:matt545' for _, ev, _ in allow_e['E']), str(allow_e['E']))
+    allow_f = check_pronouns.sweep(d, allow=['Without me ye can do nothing'])
+    check('pronouns_allow silences a justified F hit',
+          not any(ev == 'ref:john155' for _, ev, _ in allow_f['F']), str(allow_f['F']))
+    check('an unrelated allow entry silences neither E nor F',
+          len(check_pronouns.sweep(d, allow=['nothing to do with this'])['E']) == len(r['E'])
+          and len(check_pronouns.sweep(d, allow=['nothing to do with this'])['F']) == len(r['F']))
     check('the quotation edge still holds for D (lowercase "him" inside *…* is not a D hit)',
           not r['D'], str(r['D']))
 

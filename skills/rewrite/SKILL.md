@@ -77,9 +77,9 @@ under a constitution that has changed. Most of the work is deciding what stays f
      4. **Put it in the review artifact**, downscaled to about 1400px and embedded, so the surface
         the author reviews shows the actual cover rather than a description of one.
 
-     **The converter does not set Substack's featured image** — attaching the cover is a composer-UI
-     action and stays on the human's list. Checking it in is what makes that a one-click step rather
-     than a hunt through Downloads.
+     **The cover is set from the repo by `substack_cover.py`** (see `publish`), not by hand — the
+     older note here said the featured image could only be attached in the composer, and that was
+     untested rather than true. The **caption** remains a composer-UI field.
    - **Which version seams go?** A published piece accumulates sentences about its own earlier
      versions (*the correction I owe*, *for a while I told it as…*). They are process showing
      through; the reader never saw the earlier version. Cut them, or turn them into direct address

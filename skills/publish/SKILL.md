@@ -174,9 +174,28 @@ first.
    real person, or re-attach a biographical reading a piece deliberately dropped; the caption and
    alt text then have to avoid implying a photograph. (Precedent: the generated portrait in
    `metric-space`, disclosed in the manifest and in the footnote before its gate cleared.)
-   **The converter does not set the featured image** — attaching it is a composer-UI action and
-   belongs on the human's checklist, not this skill's. What the check-in buys is that the bytes
-   survive a recompose, and that the cover can be reviewed before it is attached.
+   **The cover is settable from the repo, and this skill sets it** (2026-09-10). The older claim
+   here — *the converter does not set the featured image, attaching it is a composer-UI action* —
+   was untested rather than true, and it ended every piece with the author hunting through
+   Downloads for a file the repo already had. Measured on post 214063778:
+
+       POST /api/v1/image        {"image": "<data URI>"}  -> 200 {"id","url","imageWidth",…}
+       PUT  /api/v1/drafts/<id>  {"cover_image": "<url>"} -> 200, persists on read-back
+
+       python3 framework/tools/substack_cover.py pieces/<slug> --post <id> --out cover.js
+
+   Carry the snippet in with `pane_carry.py` and **verify its hash in the page before executing** —
+   the payload is the image itself, so a corrupted carry is a corrupted upload. The tool refuses on
+   a missing `cover:`, a file the manifest names but the disk lacks, a non-image, and **a cover with
+   no provenance recorded**, since a cover is the most public thing a post has. It uploads, sets
+   `cover_image`, reads back, and touches nothing else — **verify the body digest afterwards
+   anyway**, which is how this run proved the body was untouched.
+
+   **Two things are still the author's:** the **caption** (a composer-UI field, not in the API
+   payload) and the Publish click. **And do not probe the contract with a 1×1 test pixel on a real
+   post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and
+   the author saw it and asked whether something was broken. Probe on a throwaway draft, or go
+   straight to the real file.
 
 0b-embeds. **An embed is not an image, and the image checks were blind to it.**
    An image can be made recompose-safe by putting its URL in `draft.md`, because the converter

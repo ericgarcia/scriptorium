@@ -147,6 +147,10 @@ The flow already used once, to be made routine:
    out of the `<x-dc>`/`<x-import>` authoring wrapper, emit plain `<deck-stage>` markup,
    and drop the design runtime (which needs React). Speaker notes come out as a sidecar
    `notes.json` so a phone remote can read them without loading the deck.
+   **Built:** `tools/dc_to_deck.py <src> <out>`. It was ported from the JavaScript
+   the muffinlabs site had been building decks with, so the desk stays one language;
+   the two are pinned byte-for-byte on the first real deck, and `test_suite.py`'s
+   `unit_deck` holds the conversion, the asset guard, and the refusals.
 4. The deck and notes go into the bundle and then the store.
 
 **Streamlining it** means the round trip is one command, not a manual export:

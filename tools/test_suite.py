@@ -967,6 +967,132 @@ def unit_talk(tmp):
           [(t.split('.')[0], b) for t, w, b in per] == [('I', 5), ('II', 12)] and per[0][1] > per[1][1], str(per))
 
 
+# ---------------------------------------------------------------- unit: dc -> deck
+def _tiny_png():
+    """A real, complete 1x1 PNG, built here so the fixture needs no binary in git."""
+    import struct, zlib
+    def chunk(tag, data):
+        return (struct.pack('>I', len(data)) + tag + data
+                + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
+    ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 0, 0, 0, 0)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
+            + chunk(b'IDAT', zlib.compress(b'\x00\x00')) + chunk(b'IEND', b''))
+
+
+DC_FIXTURE = """<helmet><style>body{background:#111}</style></helmet>
+<x-dc><x-import width="1600" height="900">
+<section data-label="Open" data-speaker-notes="Say &#x201c;hello&#x201d; &amp; wait.">
+  <h1>A &mdash; Talk</h1>
+</section>
+<section data-label="Figure">
+  <img src="assets/fig1.png">
+</section>
+</x-import></x-dc>
+"""
+
+
+def _run_deck(src, out):
+    tool = os.path.join(HERE, 'dc_to_deck.py')
+    r = subprocess.run([sys.executable, tool, src, out],
+                       capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr)
+
+
+def unit_deck(tmp):
+    """Every case here is a fault that actually happened, or a footgun the port created.
+
+    The truncated PNG is the real one: a Claude Design asset came back cut off at the
+    export tool's read limit (2026-09-09) and would have shipped as a broken slide.
+    The refuse-to-delete cases are new: in the JavaScript original the output path was
+    computed, and in this port it is an argument.
+    """
+    print("\n-- deck: Claude Design .dc.html -> standalone deck ---------------")
+    src = os.path.join(tmp, 'deck-src')
+    os.makedirs(os.path.join(src, 'assets'), exist_ok=True)
+    with open(os.path.join(src, 'deck.dc.html'), 'w', encoding='utf-8') as f:
+        f.write(DC_FIXTURE)
+    with open(os.path.join(src, 'deck-stage.js'), 'w', encoding='utf-8') as f:
+        f.write('/* stub runtime */\n')
+    png = os.path.join(src, 'assets', 'fig1.png')
+    with open(png, 'wb') as f:
+        f.write(_tiny_png())
+    # an asset no slide references — it must NOT be copied
+    with open(os.path.join(src, 'assets', 'unused.png'), 'wb') as f:
+        f.write(b'not even a png')
+
+    out = os.path.join(tmp, 'deck-out')
+    code, log = _run_deck(src, out)
+    check('a well-formed deck builds', code == 0, log.strip())
+    if code != 0:
+        return
+
+    html = open(os.path.join(out, 'deck.html'), encoding='utf-8').read()
+    notes = json.load(open(os.path.join(out, 'notes.json'), encoding='utf-8'))
+
+    check('the authoring wrapper is gone and deck-stage is the root',
+          '<x-import' not in html and '<x-dc' not in html
+          and '<deck-stage width="1600" height="900">' in html, html[:200])
+    check('the deck is not indexable and does not flash before the runtime defines it',
+          '<meta name="robots" content="noindex">' in html
+          and 'deck-stage:not(:defined) { visibility: hidden; }' in html)
+    check('the helmet head survives into the deck',
+          '<style>body{background:#111}</style>' in html)
+    check('the title comes from the first slide h1, entity-decoded',
+          notes['title'] == 'A — Talk', notes['title'])
+    check('speaker notes are decoded, named and numeric entities alike',
+          notes['slides'][0]['notes'] == 'Say “hello” & wait.', notes['slides'][0]['notes'])
+    check('a slide with no notes still gets an entry, with its label',
+          notes['slideCount'] == 2 and notes['slides'][1]['label'] == 'Figure'
+          and notes['slides'][1]['notes'] == '', str(notes['slides'][1]))
+    check('only referenced assets are copied',
+          sorted(os.listdir(os.path.join(out, 'assets'))) == ['fig1.png'],
+          str(os.listdir(os.path.join(out, 'assets'))))
+
+    # the fault this guard exists for
+    with open(png, 'rb') as f:
+        good = f.read()
+    with open(png, 'wb') as f:
+        f.write(good[:len(good) // 2])
+    code, log = _run_deck(src, out)
+    check('a truncated PNG stops the build and says to re-download it',
+          code == 1 and 'truncated' in log and 'IEND' in log, log.strip())
+    check('and the previous good build is left intact, not half-erased',
+          os.path.exists(os.path.join(out, 'deck.html'))
+          and os.path.exists(os.path.join(out, 'assets', 'fig1.png')))
+    with open(png, 'wb') as f:
+        f.write(good)
+
+    # footguns the port introduced by taking the output path as an argument
+    keep = os.path.join(tmp, 'not-a-deck')
+    os.makedirs(keep, exist_ok=True)
+    with open(os.path.join(keep, 'irreplaceable.txt'), 'w', encoding='utf-8') as f:
+        f.write('do not delete me')
+    code, log = _run_deck(src, keep)
+    check('a directory that is not a deck build is refused, not deleted',
+          code == 2 and 'refusing to delete' in log
+          and os.listdir(keep) == ['irreplaceable.txt'], log.strip())
+    code, log = _run_deck(src, src)
+    check('writing the output over the source is refused',
+          code == 2 and 'same directory' in log, log.strip())
+    check('and the source survived that', os.path.exists(os.path.join(src, 'deck.dc.html')))
+
+    # malformed input fails loudly rather than emitting a deck missing slides
+    bad = os.path.join(tmp, 'deck-unbalanced')
+    shutil.copytree(src, bad)
+    with open(os.path.join(bad, 'deck.dc.html'), 'w', encoding='utf-8') as f:
+        f.write(DC_FIXTURE.replace('</section>', '', 1))
+    code, log = _run_deck(bad, os.path.join(tmp, 'deck-out-bad'))
+    check('an unbalanced <section> is an error, not a silently shortened deck',
+          code == 1 and 'unbalanced' in log, log.strip())
+
+    missing = os.path.join(tmp, 'deck-missing-asset')
+    shutil.copytree(src, missing)
+    os.remove(os.path.join(missing, 'assets', 'fig1.png'))
+    code, log = _run_deck(missing, os.path.join(tmp, 'deck-out-missing'))
+    check('a slide pointing at an asset that is not there names the asset',
+          code == 1 and 'assets/fig1.png' in log, log.strip())
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -1276,6 +1402,7 @@ def main():
         unit_manifest_gate(tmp)
         unit_pronouns(tmp)
         unit_talk(tmp)
+        unit_deck(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

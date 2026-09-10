@@ -219,6 +219,26 @@ def unit_review_artifact(tmp):
     check('review: no findings renders the page unchanged',
           'class="fidx"' not in ra.build(d, facts))
 
+    # A GRID MAKES AN ANONYMOUS ITEM OUT OF EVERY BARE TEXT RUN. The index row is a
+    # three-column grid, so a title that is raw text (plus any inline markup) is dealt
+    # into the columns one fragment at a time — the row explodes to one word per line.
+    # Shipped 2026-09-10 and caught by Eric on a narrow viewport, because the DOM checks
+    # here read innerText, which cannot see layout. Assert the STRUCTURE instead: every
+    # grid child is exactly one element, with no loose text between them.
+    hg = ra.build(d, fnd(anchor='A quotation.',
+                         title='A <em>tell</em> in the <b>text</b> — three times'))
+    row = re.search(r'<a class="sev-\w+" href="#f1">(.*?)</a>', hg, re.S).group(1)
+    check('review: the index row has exactly three grid children',
+          re.fullmatch(r'<b>\d+</b><em class="sev">[a-z]+</em><span class="ft">.*</span>',
+                       row, re.S) is not None,
+          'a bare text run inside a grid becomes its own item and wraps one word per line')
+    check('review: markup inside a finding title survives',
+          '<em>tell</em>' in row and '<b>text</b>' in row)
+
+    # a gate value long enough to be a sentence must not force the page sideways
+    check('review: gate chips wrap rather than overflow',
+          'white-space:nowrap}' not in ra.CSS.split('.gates b{')[0].split('.gates span{')[1])
+
     # a headingless piece put the whole prose in BOTH lead and movements: the word
     # count doubled and every anchor matched twice
     flat = os.path.join(tmp, 'flat'); os.makedirs(flat, exist_ok=True)

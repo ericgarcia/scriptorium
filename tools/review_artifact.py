@@ -230,8 +230,9 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
 .delta{color:var(--accent)}
 .gates{margin:18px 0 0;display:flex;flex-wrap:wrap;gap:6px}
 .gates span{font-family:var(--sans);font-size:12.5px;color:var(--muted);
-  border:1px solid var(--rule);padding:3px 9px;white-space:nowrap}
-.gates b{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink)}
+  border:1px solid var(--rule);padding:3px 9px;max-width:100%;overflow-wrap:anywhere}
+.gates b{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink);
+  white-space:nowrap}
 .calls{margin:34px 0 0;border-left:2px solid var(--flag);padding:2px 0 2px 20px;
   display:flex;flex-direction:column;gap:14px}
 .calls h3{font-family:var(--sans);font-size:12px;letter-spacing:.13em;text-transform:uppercase;
@@ -242,7 +243,7 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
 .fidx{margin:34px 0 0;border:1px solid var(--rule);background:var(--card)}
 .fidx h3{font-family:var(--sans);font-size:12px;letter-spacing:.13em;text-transform:uppercase;
   color:var(--muted);margin:0;padding:14px 18px;border-bottom:1px solid var(--rule)}
-.fidx a{display:grid;grid-template-columns:30px 92px 1fr;gap:12px;align-items:baseline;
+.fidx a{display:grid;grid-template-columns:30px 92px minmax(0,1fr);gap:12px;align-items:baseline;
   padding:11px 18px;border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink);
   font-family:var(--sans);font-size:15px;line-height:1.45}
 .fidx a:last-child{border-bottom:0}
@@ -250,7 +251,8 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
 .fidx a>b{font-family:var(--mono);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
 .fidx a>em.sev{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
   font-style:normal}
-.fidx a em:not(.sev){font-style:italic}
+.fidx a .ft{font-style:normal;min-width:0}
+.fidx a .ft em{font-style:italic}
 .sev-fidelity>em.sev,.sev-fidelity>b{color:var(--flag)}
 .sev-argument>em.sev,.sev-argument>b{color:var(--accent)}
 .sev-voice>em.sev,.sev-voice>b{color:var(--muted)}
@@ -288,7 +290,7 @@ mark.hl-fidelity sup.hlno a,mark.hl-open sup.hlno a{color:var(--flag)}
 .ev b{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
   font-weight:500;color:var(--muted);display:block;margin-bottom:3px}
 .toc{margin:40px 0 0;border-top:1px solid var(--rule)}
-.toc a{display:grid;grid-template-columns:34px 1fr auto;gap:14px;align-items:baseline;
+.toc a{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:14px;align-items:baseline;
   padding:11px 2px;border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink);
   font-family:var(--sans);font-size:15px}
 .toc a span{font-family:var(--mono);font-size:12px;color:var(--accent)}
@@ -325,6 +327,7 @@ a:focus-visible,.toc a:focus-visible{outline:2px solid var(--accent);outline-off
 @media (max-width:720px){
   .fidx a{grid-template-columns:26px 1fr;gap:4px 10px}
   .fidx a>em.sev{grid-column:2}
+  .fidx a>.ft{grid-column:1/-1}
   .mv{grid-template-columns:1fr;gap:10px;padding-top:40px}
   .rail{position:static;flex-direction:row;gap:10px;text-align:left;align-items:baseline}
   .col p{font-size:17.5px}}
@@ -440,7 +443,8 @@ def build(piece_dir, facts):
         label = n.group(1) if n else str(i)
         title = re.sub(r'^([IVXLC]+|\d+)\.\s*', '', head)
         w = words(md)
-        toc.append(f'<a href="#m{i}"><span>{label}</span>{html.escape(title)}<em>{w:,} w</em></a>')
+        toc.append(f'<a href="#m{i}"><span>{label}</span><span class="tt">{html.escape(title)}'
+                   f'</span><em>{w:,} w</em></a>')
         essay.append(
             f'<section class="mv" id="m{i}"><div class="rail"><div class="rn">{label}</div>'
             f'<div class="wc">{w:,} w</div></div><div class="col">'
@@ -468,7 +472,7 @@ def build(piece_dir, facts):
         rows = ''.join(
             f'<a class="sev-{(f.get("severity","open") if f.get("severity","open") in SEVS else "open")}" '
             f'href="#f{i}"><b>{i}</b><em class="sev">{html.escape(f.get("severity","open"))}</em>'
-            f'{f.get("title","")}</a>'
+            f'<span class="ft">{f.get("title","")}</span></a>'
             for i, f in enumerate(findings, 1))
         fidx = (f'<section class="fidx"><h3>{len(findings)} proposed '
                 f'change{"s" if len(findings) != 1 else ""} &mdash; each one marked where it lands'

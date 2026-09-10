@@ -21,6 +21,17 @@ the house capitalizes inside a quotation — *Me*, *My*, *Mine* — as a casing 
 bracketed).  Eric caught the first one reading the page; the rest fell out of the audit it
 prompted.  A sweep that stops at the quotation's edge cannot see any of them.
 
+WHY H EXISTS (2026-09-10).  Section D catches a bare lowercase *it* / *its* within six words
+after a God-word, and that shape is only half of how God gets turned into a *what*.  The other
+half is the REFLEXIVE, which D's window never sees: *They Them* shipped live carrying *the source
+that called itself us before it had made anything at all* and *A plural form, speaking of itself
+in the plural* — both corrected to *Themself* — and again it was Eric, reading the published page,
+who caught them.  A window cannot find these: the antecedent is what matters, and the two
+legitimate uses in the corpus (*a second thing standing outside God on its own ground*, *the
+clutching self is the source of its own suffering*) sit just as close to a God-word as the misses
+do.  So H asks a grammatical question instead of a proximity one — whose reflexive is it? — and
+its two paths are the two ways this corpus's answer comes out *God*.
+
 WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normalized:
 
   A. SENTENCE-INITIAL CAPITALS  He/Him/His/They/Them/She/Her at the head of a sentence.  English
@@ -52,6 +63,20 @@ WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normali
      Luke, John — not 1/2/3 John) and it contains a first-person pronoun.  A Gospel voice is not
      always Jesus (the prodigal's *make me as one of thy hired servants*), so it lists, and the
      operator names the speaker.
+  H. LOWERCASE REFLEXIVE FOR GOD  *itself* / *its own* / *themself* whose antecedent is God.
+     Two paths, each reported with the evidence that qualified it:
+       `subject` / `rel` / `appositive` — the subject of the reflexive's own clause resolves to a
+         God-word.  A relative clause takes the head noun it attaches to (*the source that called
+         itself*), and a head noun that is an appositive in a copular chain resolves through it
+         (*They are the One …, the verb …, the source that called itself*).  A possessive
+         (*God's power … on its own*) is NOT the subject; *power* is.
+       `self-naming` — the reflexive is the object of a verb of self-reference (call, name,
+         describe, reveal, speak of, refer to, show, declare) in a paragraph that names God.  Only
+         a someone can be *called* something, so in a God paragraph the referent is God.
+     The INTENSIVE *itself* is skipped — *the thing itself*, *the wall itself* — where the word
+     emphasizes a noun rather than standing for it; a God-word taking it (*the Father itself*) is
+     kept.  Like C and G, a justified hit is silenced by a substring under `pronouns_allow:`.
+     H warns, it never refuses: the antecedent is a human call, and the tool is guessing at one.
 
   WHAT COUNTS AS A SCRIPTURE QUOTATION, for E and F: an italic span `*…*` that is followed by a
   footnote ref whose definition cites the KJV or a book of the Bible, or a blockquote (`> …`)
@@ -71,9 +96,9 @@ by naming who it points at — that is the sweep, and this tool only makes sure 
 USAGE
     python3 check_pronouns.py <piece-dir> [--names A,B,C] [--strict]
       --names   comma-separated named figures whose pronouns are theirs (Campbell,Peter,...)
-      --strict  exit 3 if any C or D hit remains (for a publish preflight); A, B, E, F and G
-                always exit 0 because they are lists to be justified, not verdicts — E, F and G
-                each need a human call on a referent or a speaker, which no rule can make.
+      --strict  exit 3 if any C or D hit remains (for a publish preflight); A, B, E, F, G and H
+                always exit 0 because they are lists to be justified, not verdicts — E, F, G and
+                H each need a human call on a referent or a speaker, which no rule can make.
     G lists every *Lord* (mixed case) outside a footnote definition — the house sets *the LORD*
     in capitals wherever the word names God (2026-09-07), own prose and quoted scripture alike,
     so each remaining *Lord* is justified by naming what it is instead: a parable's lord, Caesar
@@ -83,7 +108,7 @@ USAGE
     the King James's wording keeps the King James's own *Lord*.
     A C-hit whose referent is NOT God is justified by listing a substring of it in the piece's
     publish.yaml under `pronouns_allow:` — reviewable, and it survives the session.
-EXIT  0 clean or only A/B/E/F/G listings · 3 C/D hits under --strict · 1 usage
+EXIT  0 clean or only A/B/E/F/G/H listings · 3 C/D hits under --strict · 1 usage
 """
 import os, re, sys
 
@@ -107,6 +132,41 @@ KJV_DICTION = re.compile(r"\b(?:thou|thee|thy|thine|ye|hath|doth|saith|shalt|wil
 FIRST_PERSON = re.compile(r"\b(?:I|me|my|mine|myself|Me|My|Mine|Myself)\b")
 FOOTNOTE_REFS_AFTER = re.compile(r'^[.,;:!?”"\)]*((?:\s*\[\^[^\]]+\])+)')
 REF_LABEL = re.compile(r'\[\^([^\]]+)\]')
+
+# --- H: whose reflexive is it? ------------------------------------------------------------
+# A God-word in a subject position, for antecedent purposes.  `the One`/`Someone` are here for
+# the same reason section C capitalizes them; a possessive (`God's`) is excluded at the match,
+# because in *God's power … on its own* the subject is *power*.
+# `[Tt]he` because a subject sits at the head of its clause, where English forces the capital.
+GOD_SUBJECT = (r"(?:God|[Tt]he LORD|[Tt]he Lord|[Tt]he Father|[Tt]he Son|[Tt]he Spirit|"
+               r"[Tt]he Holy Spirit|Christ|Jesus|They|Them|[Tt]he One|Someone)")
+REFLEXIVE = re.compile(r"\b(itself|themself|its own)\b")
+# Clause boundaries, crude but adequate: punctuation, the coordinators, the common subordinators,
+# and existential *there is/are* (which opens a clause of its own inside an *if …* subordinate).
+CLAUSE_BREAK = re.compile(
+    r'(?:[;:—–]|,)\s*'
+    r'|\b(?:because|when|while|whenever|if|unless|though|although|since|so that|where|and|but|or)\s+'
+    r'|\bthere\s+(?:is|are|was|were)\s+')
+RELATIVIZER = re.compile(r'\b(that|which|who|whom)\b')
+DETERMINER = (r"(?:the|a|an|this|these|those|its|his|her|their|our|my|one|no|every|each|some|any)")
+# *the thing itself* — the intensive, emphasizing a noun rather than standing for it.  `that`,
+# `which` and `who` are deliberately NOT determiners here: *the source that called itself* is a
+# relative clause, not a noun phrase, and must not be read as one.
+INTENSIVE = re.compile(r'\b' + DETERMINER + r"\s+([\w'’-]+)\s+itself\b", re.I)
+# Leading discourse markers to strip before reading a clause's subject.
+SUBJ_LEAD = re.compile(r"^(?:and|but|so|then|now|yet|for|because|if|when|while|where|though|"
+                       r"although|since|that|as|to|of|in|it is)\s+", re.I)
+# Only a someone is *called* something.  In a paragraph that names God, a reflexive under one of
+# these verbs is God's — the second of the two 2026-09-10 misses was exactly this shape.
+SELF_NAMING = re.compile(
+    r"\b(?:call(?:s|ed|ing)?|nam(?:e|es|ed|ing)|describ(?:e|es|ed|ing)|reveal(?:s|ed|ing)?|"
+    r"speak(?:s|ing)?\s+of|refer(?:s|red|ring)?\s+to|show(?:s|ed|ing)?|declar(?:e|es|ed|ing))"
+    r"\s+(itself|themself)\b")
+GOD_NAMED = re.compile(r"\b(?:God|the LORD|the Lord|the Father|the Spirit|Christ|Jesus|They|Them|the One)\b")
+IS_GOD = re.compile(r"^\W*" + GOD_SUBJECT + r"(?!['’]s)\b")
+# *They are X, Y, the source that called itself …* — a copular chain whose appositives are the subject.
+COPULAR_GOD = re.compile(r"^\W*(?:And |But |So |Yet |Then |Now )?(" + GOD_SUBJECT +
+                         r")(?!['’]s)\s+(?:is|are|was|were)\b")
 
 def body_of(piece_dir):
     src = open(os.path.join(piece_dir, 'draft.md'), encoding='utf-8').read()
@@ -132,10 +192,14 @@ def sentences(text):
         out.extend(s.strip() for s in SENT_SPLIT.split(flat) if s.strip())
     return out
 
+def sentence_bounds(flat):
+    """(start, end) of each sentence in a flattened paragraph — the same split as sentences()."""
+    marks = [0] + [m.end() for m in SENT_SPLIT.finditer(flat)] + [len(flat)]
+    return list(zip(marks, marks[1:]))
+
 def sentence_at(flat, i):
     """The sentence of a flattened paragraph that contains offset i (same split as sentences())."""
-    bounds = [0] + [m.end() for m in SENT_SPLIT.finditer(flat)] + [len(flat)]
-    for a, b in zip(bounds, bounds[1:]):
+    for a, b in sentence_bounds(flat):
         if a <= i < b:
             return flat[a:b].strip()
     return flat.strip()
@@ -180,6 +244,65 @@ def quotation_spans(flat, defs):
             spans.append((start, end, body, 'kjv-diction', False))
     return spans
 
+def clause_subject(sent, i):
+    """The subject of the clause containing offset `i`, as (text, how).
+
+    A reflexive takes the subject of its own clause, so that is what H asks for.  Inside a
+    relative clause the subject is the relative pronoun, which stands for the head noun the
+    clause attaches to — so on that path the head noun is returned instead."""
+    starts = [m.end() for m in CLAUSE_BREAK.finditer(sent) if m.end() <= i]
+    cs = starts[-1] if starts else 0
+    clause = sent[cs:i]
+    rel = None
+    for m in RELATIVIZER.finditer(clause):
+        rel = m
+    if rel is not None:
+        head = clause[:rel.start()].strip()
+        if not head:                       # the relativizer opens the clause; its head is behind it
+            head = sent[:cs].rstrip().rstrip(',;:—– ')
+        head = head.strip().rstrip('*"“”)]').strip()
+        m = re.search(r"((?:" + DETERMINER + r"|[A-Z][\w'’]*)\s+(?:[\w'’-]+\s+){0,3}[\w'’-]+|" +
+                      GOD_SUBJECT + r")$", head)
+        return ((m.group(1) if m else head[-40:]).strip(), 'rel')
+    lead = clause.strip().lstrip('*"“”([')
+    return (SUBJ_LEAD.sub('', lead).strip()[:60], 'clause')
+
+def reflexive_hits(flat, allow=()):
+    """Section H over one flattened paragraph: [(word, evidence, sentence), ...]."""
+    hits = []
+    god_paragraph = bool(GOD_NAMED.search(flat))
+    for a, b in sentence_bounds(flat):
+        s = flat[a:b].strip()
+        if not s:
+            continue
+        quoted = [(q.start(), q.end()) for q in QUOTE_SPAN.finditer(s)]
+        for m in REFLEXIVE.finditer(s):
+            if any(x <= m.start() < y for x, y in quoted):
+                continue                                   # the source's own words
+            window = s[max(0, m.start() - 60):m.end() + 60]
+            if any(x in window for x in allow):
+                continue                                   # justified in publish.yaml
+            if m.group(1) == 'itself':
+                em = INTENSIVE.search(s[max(0, m.start() - 40):m.end()])
+                if em and not IS_GOD.match(em.group(1)) and not IS_GOD.match('the ' + em.group(1)):
+                    continue                               # *the thing itself* — an intensive
+            subj, how = clause_subject(s, m.start())
+            evidence = None
+            if IS_GOD.match(subj):
+                evidence = 'subject' if how == 'clause' else 'rel'
+            else:
+                cop = COPULAR_GOD.match(s)
+                if cop and how == 'rel' and ',' in s[:m.start()] and ';' not in s[:m.start()]:
+                    subj, evidence = cop.group(1), 'appositive'
+            if evidence is None and god_paragraph:
+                lead = s[max(0, m.start() - 20):m.end()]    # the verb, if any, governing THIS reflexive
+                sm = SELF_NAMING.search(lead)
+                if sm and sm.end() == len(lead):
+                    subj, evidence = sm.group(0).rsplit(None, 1)[0], 'self-naming'
+            if evidence:
+                hits.append((m.group(1), f'{evidence}:{subj[:32]}', s))
+    return hits
+
 def load_allow(piece):
     # Justified C-hits live in publish.yaml under `pronouns_allow:` (one substring per line),
     # so the preflight can pass a hit whose referent has been named, and the justification
@@ -199,11 +322,11 @@ def load_allow(piece):
     return allow
 
 def sweep(piece, names=(), allow=None):
-    """Run every section over the piece.  Returns {'sentences': n, 'A': [...], ... 'G': [...]}."""
+    """Run every section over the piece.  Returns {'sentences': n, 'A': [...], ... 'H': [...]}."""
     allow = load_allow(piece) if allow is None else allow
     text = body_of(piece)
     sents = sentences(text)
-    A, B, C, D, E, F, G = [], [], [], [], [], [], []
+    A, B, C, D, E, F, G, H = [], [], [], [], [], [], [], []
     name_re = re.compile(r'\b(' + '|'.join(map(re.escape, names)) + r')\b') if names else None
     for s in sents:
         # A — sentence-initial forced capitals
@@ -258,7 +381,10 @@ def sweep(piece, names=(), allow=None):
             if any(a in window for a in allow):
                 continue                                       # justified in publish.yaml
             G.append(ctx(flat, m, 70))
-    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G}
+        # H — a lowercase reflexive whose antecedent is God.  It runs on the paragraph because the
+        # self-naming path asks whether the paragraph names God at all, which a sentence cannot say.
+        H.extend(reflexive_hits(flat, allow))
+    return {'sentences': len(sents), 'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G, 'H': H}
 
 def _clip(s, n=200):
     return s if len(s) <= n else s[:n] + '…'
@@ -276,7 +402,7 @@ def main():
         i = sys.argv.index('--names'); names = [n.strip() for n in sys.argv[i+1].split(',')]
     strict = '--strict' in sys.argv
     r = sweep(piece, names)
-    A, B, C, D, E, F, G = (r[k] for k in 'ABCDEFG')
+    A, B, C, D, E, F, G, H = (r[k] for k in 'ABCDEFGH')
     print(f"check_pronouns — {os.path.basename(piece)}: {r['sentences']} sentences")
     print(f"\nA. sentence-initial capitals to justify ({len(A)}):")
     for p, c in A: print(f"   {p:5s} {c}")
@@ -292,9 +418,11 @@ def main():
     for w, ev, c in F: print(f"   {w:8s} {ev:14s} {_clip(c)}")
     print(f"\nG. mixed-case *Lord* in the body — the house writes LORD wherever it names God; justify each as a figure, another tradition, a fixed text or a title ({len(G)}):")
     for c in G: print(f"   {_clip(c)}")
+    print(f"\nH. lowercase reflexive whose antecedent reads as God — the house never lets God be a *what*: *Themself*, never *itself* ({len(H)}):")
+    for w, ev, c in H: print(f"   {w:8s} {ev:42s} {_clip(c)}")
     if strict:
-        if E or F or G:
-            print("\nSTRICT: E/F/G hits are warnings — each needs a referent or speaker named; not refused.")
+        if E or F or G or H:
+            print("\nSTRICT: E/F/G/H hits are warnings — each needs a referent or speaker named; not refused.")
         if C or D:
             print("\nSTRICT: C/D hits remain — justify or fix before compose.")
             sys.exit(3)

@@ -730,6 +730,37 @@ the elder says *We love [Them], because [They] first loved us.*[^1john] The poin
 """
 
 
+# Section H's fixture: the two reflexives that shipped live in *They Them* (2026-09-10) as they
+# read before the correction to *Themself*, the two legitimate uses the same day's corpus sweep
+# turned up, and the shapes that must stay quiet — the intensive, a possessive subject, a
+# quotation, a footnote definition, and the corrected wording itself.
+REFLEXIVE_FIXTURE = """*Draft — fixture for section H.*
+
+---
+
+Read it as a plural of majesty if you like, or as God in deliberation — the *form* is still
+plural, in the mouth of God, in the first chapter. And the likeness that comes out the far side of
+that sentence is, we've already seen, itself two: male and female. A plural form, speaking of
+itself in the plural, and making an image that isn't one thing either.
+
+God is not male. They are the One Xenophanes' oxen could not draw, the no-form seen at Horeb, the
+verb that refused to harden into a noun, the source that called itself *us* before They had made
+anything at all.
+
+God knows themself the way no creature is known. The Father itself is a phrase this house would
+never write. They are doing the thing itself, and *I am that I am, saith the LORD unto itself*[^ex]
+is the source's wording, not ours.
+
+Press *all-powerful* hard enough and it leaves no room for a second thing standing outside God on
+its own ground. That the clutching self is the source of its own suffering is not a finding a
+follower of Jesus has to hold at arm's length.
+
+If God's power is total there is no second engine running anywhere on its own. And the corrected
+line reads: the source that called Themself *us*, a plural form speaking of Themself in the plural.
+
+[^ex]: Exodus 3:14 (KJV). The King James reads *I AM THAT I AM*.
+"""
+
 def unit_pronouns(tmp):
     print("\n-- pronoun sweep: E and F look inside a scripture quotation ---------")
     d = os.path.join(tmp, 'pronouns'); os.makedirs(d, exist_ok=True)
@@ -778,7 +809,7 @@ def unit_pronouns(tmp):
     tool = os.path.join(HERE, 'check_pronouns.py')
     p = subprocess.run([sys.executable, tool, d, '--strict'], capture_output=True, text=True)
     check('--strict exits 0 with only E/F/G hits, and says they are warnings',
-          p.returncode == 0 and 'E/F/G hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+          p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
     d2 = os.path.join(tmp, 'pronouns-d'); os.makedirs(d2, exist_ok=True)
     with open(os.path.join(d2, 'draft.md'), 'w', encoding='utf-8') as f:
         f.write("*Draft.*\n\n---\n\nGod made the world and he saw that it was good.\n")
@@ -801,7 +832,55 @@ def unit_pronouns(tmp):
     check('G does not list LORD, a lowercase lord, or a footnote definition\'s King James wording',
           not check_pronouns.sweep(d4)['G'], str(check_pronouns.sweep(d4)['G']))
     p = subprocess.run([sys.executable, tool, d3, '--strict'], capture_output=True, text=True)
-    check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'E/F/G hits are warnings' in p.stdout, f"rc={p.returncode}")
+    check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}")
+
+    # H — a lowercase reflexive whose antecedent is God (2026-09-10).  The two hits are the two
+    # misses that shipped live in *They Them*; the two non-hits are the only two legitimate uses
+    # a corpus sweep found the same day, and both sit as close to a God-word as the misses do.
+    d5 = os.path.join(tmp, 'pronouns-h'); os.makedirs(d5, exist_ok=True)
+    with open(os.path.join(d5, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(REFLEXIVE_FIXTURE)
+    r5 = check_pronouns.sweep(d5)
+    H = [(w, ev.split(':', 1)[0]) for w, ev, _ in r5['H']]
+    h_sent = {(w, ev.split(':', 1)[0]): sent for w, ev, sent in r5['H']}
+    check('H catches "the source that called itself" — an appositive in a copular God chain',
+          ('itself', 'appositive') in H, str(r5['H']))
+    check('the appositive hit carries its sentence',
+          'called itself' in h_sent.get(('itself', 'appositive'), ''), str(h_sent))
+    check('H catches "A plural form, speaking of itself" — a self-naming verb in a God paragraph',
+          ('itself', 'self-naming') in H, str(r5['H']))
+    check('H does not fire on "standing outside God on its own ground" (the second thing owns it)',
+          not any('outside God' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H does not fire on "the source of its own suffering" (the clutching self owns it)',
+          not any('clutching self' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H skips the intensive "the thing itself" under a God subject',
+          not any('doing the thing' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H keeps a God-word taking the intensive ("the Father itself")',
+          any('The Father itself' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H reads a possessive as the subject it is ("God\'s power ... on its own" is not God\'s)',
+          not any("God's power" in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H catches a plain God subject ("God knows themself")',
+          ('themself', 'subject') in H, str(r5['H']))
+    check('H leaves a quotation alone (the source\'s own case is evidence)',
+          not any('saith the LORD' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('H skips a footnote definition', not any('KJV' in sent for _, _, sent in r5['H']), str(r5['H']))
+    check('the corrected wording is clean — Themself and Their own are never H hits',
+          not any('Themself' in w or 'Their' in w for w, _, _ in r5['H']), str(r5['H']))
+    d6 = os.path.join(tmp, 'pronouns-h2'); os.makedirs(d6, exist_ok=True)
+    with open(os.path.join(d6, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write("*Draft.*\n\n---\n\nGod knows themself the way no creature is known.\n")
+    r6 = check_pronouns.sweep(d6)
+    check('the H-only fixture really is H-only (no C or D hit riding along)',
+          r6['H'] and not r6['C'] and not r6['D'], str(r6['C'] + r6['D']))
+    p = subprocess.run([sys.executable, tool, d6, '--strict'], capture_output=True, text=True)
+    check('--strict exits 0 on H hits — an antecedent is a human call, so H warns and never refuses',
+          p.returncode == 0 and 'E/F/G/H hits are warnings' in p.stdout, f"rc={p.returncode}\n{p.stdout[-400:]}")
+    # a justified hit is silenced the way a C or G hit is, in a reviewable file
+    with open(os.path.join(d5, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write("title: T\nsubtitle: S\npronouns_allow:\n  - called itself\n")
+    check('publish.yaml pronouns_allow silences a justified H hit',
+          not any('called itself' in sent for _, _, sent in check_pronouns.sweep(d5)['H']),
+          str(check_pronouns.sweep(d5)['H']))
 
 
 TALK_FIXTURE = """*Draft — v0. Header is scaffold.*

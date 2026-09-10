@@ -64,6 +64,16 @@ are reading.
 narrower number than a `wc -w` of the file and it is the one the strip and the contents list
 both use, so deltas between versions compare like with like.
 
+## Naming it
+
+**The artifact is named by the piece's title, exactly — no prefix, no label, no version.** The
+generator sets `<title>` from `publish.yaml`, so this is not a thing to remember; it is a thing that
+cannot go wrong. The reason it matters: the gallery is a shelf of pieces, and a reader picks one out
+by its name. A prefix pushes the identifying half of the title out of view and puts a word in front
+that could sit on any page — which is precisely the failure a name is supposed to avoid. (Eric,
+2026-09-10: *"i dont want 'The Galley' prefixes."*) The state — *galley proof*, *v2*, *not composed*
+— belongs in the stamp, where it is read once and never mistaken for the work's name.
+
 ## Publishing it
 
 The tool writes HTML; the **Artifact** tool publishes it. Keep one artifact per piece and

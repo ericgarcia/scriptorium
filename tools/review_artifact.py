@@ -238,7 +238,16 @@ def build(piece_dir, facts):
         return '\n'.join(out)
 
     def words(md):
-        return len(re.sub(r'!\[[^\]]*\]\([^)]*\)', '', md).split())
+        # Count WORDS, not whitespace-separated tokens.  A bare em-dash, a blockquote
+        # marker and a footnote reference are all separated by spaces and none of them is
+        # a word: `.split()` made this piece read 4,179 against the 4,164 recorded in its
+        # README, log, dashboard and three commit messages, and the artifact is the one
+        # surface an author checks the number on.  This regex is the one the rest of the
+        # desk counts with, so the artifact and the scaffold now agree by construction.
+        md = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', md)   # images
+        md = re.sub(r'\[\^[^\]]+\]', '', md)             # footnote references
+        md = re.sub(r'^\s*>\s?', '', md, flags=re.M)      # blockquote markers
+        return len(re.findall(r"[A-Za-z0-9’'\-]+", md))
 
     body_words = words(lead) + sum(words(b) for _, b in movements)
 

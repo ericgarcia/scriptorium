@@ -649,6 +649,25 @@ def unit_converter(tmp):
     check('escaped asterisks do not open emphasis',
           '<strong>' not in render_block(r'F\*\*k a F\*\*k b', '.'))
 
+    # An alt that transcribes text in the image quotes it, and a bare `"` ended the attribute:
+    # love-is-not-a-metric-space's 608-char alt parsed back as 103 chars. Parse, don't grep.
+    from html.parser import HTMLParser
+    class _Alts(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.alts = []
+        def handle_starttag(self, tag, attrs):
+            if tag == 'img':
+                self.alts.append(dict(attrs).get('alt'))
+    alt = 'an arrow labeled "featurize." & a column headed "<vector>"'
+    p = _Alts()
+    p.feed(render_block(f'![{alt}](https://example.com/fig.png)', '.'))
+    check('an alt with double quotes survives a parse round trip intact',
+          p.alts == [alt], repr(p.alts))
+    check('body-text quotes stay bare (reader digests depend on it)',
+          render_block('she said "hi"', '.') == '<p>she said "hi"</p>',
+          render_block('she said "hi"', '.'))
+
     ul = render_block('- one\n- two\n  continued', '.')
     check('a bullet list renders as a list', ul.startswith('<ul>') and ul.count('<li>') == 2, ul[:60])
     check('a list item absorbs its indented continuation', 'two continued' in ul, ul[:80])

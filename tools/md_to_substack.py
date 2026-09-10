@@ -170,8 +170,14 @@ def inline(text, piece_dir):
     for ch, token in _ESCAPES.items():                               # \* -> sentinel
         text = text.replace('\\' + ch, token)
     text = re.sub(r'\[\^(\w+)\]', r'[[FN\1]]', text)                 # footnote refs -> markers
+    # The alt is an ATTRIBUTE, so it also needs `"` escaped: the house rule quotes any text in
+    # the image (ALT-TEXT.md), and a bare quote ended the attribute there — a 608-char alt parsed
+    # back as 103 chars stopping at *labeled*. m.group(1) is already esc()'d by the first line of
+    # this function, so only the quote is added here; esc()ing it again made `&` read `&amp;`.
+    # Body text keeps its bare quotes, which is what the reader digests are built on.
     def img(m):
-        return f'<figure><img src="{img_src(piece_dir, m.group(2))}" alt="{esc(m.group(1))}"></figure>'
+        alt = m.group(1).replace('"', '&quot;')
+        return f'<figure><img src="{img_src(piece_dir, m.group(2))}" alt="{alt}"></figure>'
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', img, text)
     # link text may not contain brackets, so a nearby footnote marker ([[FNx]]) can't be
     # swallowed into the link when a link and a marker share a paragraph

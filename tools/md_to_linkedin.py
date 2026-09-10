@@ -108,10 +108,11 @@ def build(piece_dir):
     """Body HTML, the notes, and the image slots. Pure: no network, no gates.
 
     Figures are taken from each block's markdown SOURCE, never recovered from the rendered
-    HTML: the shared renderer's esc() leaves double quotes unescaped, so an alt text that
-    quotes a label ("labeled \"featurize.\"") ends the alt attribute early and cannot be
-    parsed back out of it. The first cut of this tool did exactly that and rendered zero
-    slots for five figures."""
+    HTML. The shared renderer used to leave double quotes unescaped in the alt attribute, so
+    an alt text that quotes a label ("labeled \"featurize.\"") ended the attribute early and
+    could not be parsed back out of it. The first cut of this tool did exactly that and
+    rendered zero slots for five figures. The renderer now escapes the quote, but the source
+    is still the one place the alt is guaranteed whole."""
     blocks, ordered, _stripped, residual, unverified, fn_issues, sources = parse_blocks(piece_dir)
     number = {n: i + 1 for i, (n, _c) in enumerate(ordered)}
 

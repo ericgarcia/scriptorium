@@ -84,6 +84,19 @@ app's session list then reads as a shelf of pieces instead of a row of identical
   title they set themselves, and replaces its own generated titles without asking. So propose
   freely; the guard is on their side of it.
 
+## Showing the author the piece
+
+When the author needs to *read* the piece rather than a report on it — a re-voiced draft, a
+pass they have to rule on — render the house review artifact rather than pasting prose into
+chat or building a page by hand:
+
+    python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+then publish that file with the **Artifact** tool, one artifact per piece, republished to the
+same URL as versions land. Facts that cannot be counted go in `pieces/<slug>/review.json` —
+state flags, gates, and every open question listed as a call. Contract:
+`framework/docs/REVIEW-ARTIFACT.md`.
+
 ## Preflight — critique gate, verify & strip editorial notes (DO THIS FIRST)
 
 A published draft must be **critiqued**, carry **verified** claims, and carry **zero** internal

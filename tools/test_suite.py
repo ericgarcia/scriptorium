@@ -112,6 +112,56 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: review artifact
+def unit_review_artifact(tmp):
+    """The author-facing review page is generated, so its invariants are testable.
+
+    It exists because two sessions hand-built it in two different formats on 2026-09-09
+    and 2026-09-10. A hand-built page can silently drop a footnote, miscount a delta, or
+    leave a [^marker] on screen; a generated one is checked here instead.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'review_artifact', os.path.join(os.path.dirname(__file__), 'review_artifact.py'))
+    ra = importlib.util.module_from_spec(spec); spec.loader.exec_module(ra)
+
+    d = os.path.join(tmp, 'piece'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'publish.yaml'), 'w').write('title: A Piece\nsubtitle: And its claim.\n')
+    open(os.path.join(d, 'draft.md'), 'w').write(
+        'scaffold\n---\n## I. First\n\nA line with **weight** and a note.[^a]\n\n'
+        '> A quotation.\n\n## II. Second\n\nA [sibling](https://example.com/p/x) and one more.[^b]\n\n'
+        '[^a]: The first note.\n\n[^b]: The second note.\n')
+    facts = {'version': 'v2', 'state': ['not composed'],
+             'prior': {'words': 10, 'movements': 1, 'notes': 1},
+             'gates': [['check_links', '1 live']],
+             'calls': [['A call', 'Its body.']]}
+    h = ra.build(d, facts)
+
+    check('review: both movements render', h.count('class="mv"') == 2)
+    check('review: contents matches movements', h.count('<a href="#m') == 2)
+    check('review: every marker became a numbered ref',
+          len(re.findall(r'id="r\d+"', h)) == 2)
+    check('review: every ref has a definition',
+          len(re.findall(r'id="n\d+"', h)) == len(re.findall(r'id="r\d+"', h)))
+    check('review: no [^marker] reaches the reader', '[^' not in h)
+    check('review: no raw ** reaches the reader', '**' not in h)
+    check('review: deltas are computed, not asserted', 'class="delta"' in h)
+    check('review: state flag is stamped', 'not composed' in h)
+    check('review: the call is listed as a call', 'A call' in h and 'calls' in h)
+    check('review: a sibling link survives', 'https://example.com/p/x' in h)
+    check('review: hero absent renders a marked slot', 'class="slot"' in h)
+    check('review: title and subtitle come from the manifest',
+          'A Piece' in h and 'And its claim.' in h)
+
+    # the two failures a hand-built page hides
+    bad = os.path.join(tmp, 'bad'); os.makedirs(bad, exist_ok=True)
+    open(os.path.join(bad, 'draft.md'), 'w').write('s\n---\nText.[^ghost]\n\n[^real]: n.\n')
+    try:
+        ra.build(bad, {}); check('review: undefined marker refuses', False)
+    except SystemExit as e:
+        check('review: undefined marker refuses with exit 2', e.code == 2)
+
+
 # ---------------------------------------------------------------- unit: link extraction
 def unit_link_extraction():
     """A cross-link must be seen in every form a draft can carry it.
@@ -1262,6 +1312,7 @@ def main():
         print(f"scratch: {tmp}  (removed on exit)")
         unit_normalization()
         unit_link_extraction()
+        unit_review_artifact(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()

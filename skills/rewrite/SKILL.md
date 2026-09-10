@@ -182,17 +182,23 @@ at it, and it is theirs to make deliberately, not a side effect of a rewrite.
    calls — the close, a paragraph whose last line could read as the old thesis in miniature, a
    chronology rendered from one sentence of the author's — are **flagged for the author, not
    decided**.
-3. **Render a review artifact and give the author the link.** A rewrite asks the author to judge
-   prose, and a `draft.md` full of `[^slug]` markers, scaffold headers and raw markdown is not the
-   thing they are being asked to judge. Publish the piece as an Artifact reading view instead:
-   the title and subtitle as they will appear, the sections in order, **the footnotes rendered as
-   real numbered notes with working jumps**, and the sibling cross-links live. Put the review facts
-   where they can be seen rather than in chat — the word count against the previous version, the
-   section and footnote deltas, which gates passed, and **every open call listed as a call**. Mark
-   the **hero-image slot** explicitly if there is no image yet. **Generate the artifact's content
-   from `draft.md` programmatically** — never retype the prose into the page, for the same reason
-   the composer never retypes it into Substack: a transcription slip becomes an edit nobody can
-   see. Send the link, and send the file too for anyone who would rather read the markdown.
+3. **Render the review artifact with the tool and give the author the link.** A rewrite asks
+   the author to judge prose, and a `draft.md` full of `[^slug]` markers, scaffold headers and raw
+   markdown is not the thing they are being asked to judge. **The format is not yours to design:**
+   write `pieces/<slug>/review.json` and run
+
+       python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+   then publish that file with the **Artifact** tool. The generator parses the prose out of
+   `draft.md` and never retypes it, counts the deltas rather than asserting them, refuses on a
+   footnote marker with no definition, and renders a marked **slot** where a hero is still owed.
+   `review.json` carries only what the generator cannot count — the version label, the state flags
+   (*not composed*, *Substack holds v1*), the gates that ran, the cover caption and provenance, and
+   **every open question, listed as a call**. `framework/docs/REVIEW-ARTIFACT.md` has the contract.
+   **Keep one artifact per piece and republish to the same URL** as versions land; the author's
+   link should not change under them. Send the link, and send the file too for anyone who would
+   rather read the markdown. (Two sessions hand-built this page in two different formats on
+   2026-09-09 and 2026-09-10, which is why it is a tool.)
 4. Log it (append-only): what the rewrite did, what it held constant, what critique changed, what
    is flagged, and that it is **not re-synced**. Update the README stage and next move; update the
    dashboard fragment; `dashboard.py sync`; release the lease.

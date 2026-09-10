@@ -60,6 +60,19 @@ app's session list then reads as a shelf of pieces instead of a row of identical
 - Don't grade with adjectives-as-verdict. Report what's there and what a fix
   would be; the call to accept is the user's.
 
+## Showing the author the piece
+
+When the author needs to *read* the piece rather than a report on it — a re-voiced draft, a
+pass they have to rule on — render the house review artifact rather than pasting prose into
+chat or building a page by hand:
+
+    python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
+
+then publish that file with the **Artifact** tool, one artifact per piece, republished to the
+same URL as versions land. Facts that cannot be counted go in `pieces/<slug>/review.json` —
+state flags, gates, and every open question listed as a call. Contract:
+`framework/docs/REVIEW-ARTIFACT.md`.
+
 ## When a wording change is accepted
 
 If the user takes a change that reflects the *voice* (not a one-off fix), capture

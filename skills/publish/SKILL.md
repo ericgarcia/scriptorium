@@ -49,15 +49,13 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
   editor** (`https://<pub>.substack.com/publish/post/<id>`). Either way the user is **logged
   in** — automation cannot enter credentials.
-- **Surface: default to the BUILT-IN BROWSER PANE for a re-sync; a fresh compose still needs
-  REAL Chrome.** Measured 2026-09-10 (Eric's preference: *"if we can publish using the built in
-  browser instead of the plugin that would be preferable for the skill in general"*). A re-sync is
-  pure JS, and the one thing that made it look Chrome-only — getting the 80–125 KB snippet into
-  the page without the agent retyping it — is solved by the **`window.name` carrier** below. Two
-  live posts were re-synced from the pane that day with no Chrome, no clipboard and no
-  Accessibility permission. A **fresh compose** is still Chrome, because its body arrives by a real
-  ⌘V and **the pane cannot reach the pasteboard**. Never switch transports silently: say which
-  surface you are on.
+- **Surface: the BUILT-IN BROWSER PANE is the default for BOTH a re-sync and a fresh compose.**
+  Measured 2026-09-10 (Eric's preference: *"if we can publish using the built in browser instead
+  of the plugin that would be preferable for the skill in general"*). The pane only ever looked
+  Chrome-only because both paths need a generated snippet **inside the page** and the agent must
+  never retype it; the **`window.name` carrier** below solves that, and it is surface-independent.
+  Real Chrome plus the clipboard remains a working fallback, not the default. **Never switch
+  transports silently: say which surface you are on.**
 - **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
   *Requirements* in the framework README for install and troubleshooting. In short: extension
   **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or
@@ -297,7 +295,13 @@ first.
    (below), which reads the **publication's** list rather than the repo's and is the only check
    that can see a post the desk never composed.
 
-## Steps — clipboard transport (the default; use this)
+## Steps — composing the body
+
+**Two transports, and the choice is the surface, not the quality.** On the **built-in pane**
+(the default) carry `md_to_substack.py`'s snippet in with `pane_carry.py` and let its synthetic
+paste do the work — measured 2026-09-10, digest-identical to the draft. On **real Chrome** use
+the system clipboard and a real ⌘V, described below. **Both are safe for the same reason and it
+is the only reason that matters: neither one routes the author's prose through the agent.**
 
 > **Never retype the essay.** The older JS-snippet path bakes the whole piece into a string
 > literal, so driving it means the agent reproducing every byte of the author's prose into a
@@ -417,12 +421,14 @@ So compose in **real Chrome** (`claude-in-chrome`), not the in-app pane. A progr
    the author's, and asking for permission does not transfer it. *(Shipping a later **edit** to an
    already-published post is a different act with a different rule — see Republish step 5.)*
 
-### Fallback — the JS-snippet path
+### The JS-snippet path — the pane's default, and Chrome's fallback
 
-`md_to_substack.py` still exists and still works; use it only where the clipboard cannot be
-reached (not macOS, no real-Chrome surface, a headless run). If you fall back, **say so**, and
-be aware you are accepting the transcription risk the clipboard exists to remove — verify with
-step 6 without exception.
+`md_to_substack.py` emits a self-contained snippet that sets title and subtitle and pastes the
+body as a synthetic ProseMirror paste. **Deliver it with `pane_carry.py`, never by retyping it
+into an eval** — the transcription warning above is about *delivery*, and it is the whole of the
+objection to this path. Delivered by carrier it is digest-identical to the clipboard route
+(measured 2026-09-10) and it is the **default on the pane**. On Chrome it stays the fallback for
+when the pasteboard is unavailable. Verify with step 6 either way, without exception.
 
 1. **Convert:** `python3 framework/tools/md_to_substack.py pieces/<name> <out.js>`
 2. **Focus** the composer body (click into it).
@@ -477,6 +483,35 @@ fails loudly rather than sharing**, and prints the carry URL and the payload's *
 
 Don't hand-write the carrier page: a transport that is reassembled from memory each time is a
 transport whose hash check eventually goes missing.
+
+### The measurement, so nobody has to repeat it
+
+**Fresh compose, from the pane, 2026-09-10.** *A Mother Bird Over the Deep* (54 body blocks, 12
+native footnotes, 1 hero, 97 marked runs) composed into a **new empty draft** with
+`md_to_substack.py` carried in by `pane_carry.py`. No real Chrome, no clipboard, no Accessibility
+permission.
+
+| check | result |
+|---|---|
+| title / subtitle | both set |
+| body blocks | 7 headings + 45 paragraphs + 2 blockquotes + 1 image + 1 rule = **56 nodes** |
+| **fidelity digest vs `render_reader`** | **all 54 body blocks identical, all 12 footnotes identical** |
+| footnote pass | `{inserted: 12, missing: []}`, **0 `[[FN]]` markers left** |
+| empty paragraphs | **0** — the composer's initial node is consumed by the paste |
+| marked runs | 67 `em` + 25 `strong` + 5 `link` = **97**, equal to the live post's |
+| cross-links | both sibling URLs resolved correctly |
+| hero | `image2` with the recorded S3 `src` — **and its `alt` populated from the draft** |
+
+Two things worth carrying away.
+
+**The trailing "extra" block is the divider, not a stray.** A naive block count reads 55 against
+the draft's 54, because `render_reader` does not emit the `---` before the footnotes and the
+editor does. Subtract the rule before you go hunting for a phantom paragraph.
+
+**A fresh compose sets the image `alt`; adding a hero in the Substack UI does not.** 23 of 34 live
+posts carry no `alt` on the hero while the desk holds good alt text for 21 of them — this compose
+is the evidence that the converter's `alt` reaches Tiptap intact, so those posts lost it to the
+path they were composed by, not to Substack discarding it.
 
 ## Republish — surgically re-sync a live post
 
@@ -761,14 +796,12 @@ outlet in the list, every time, and say which ones you confirmed.
   `public.utf8-plain-text`, which pastes as flat text and loses every heading and italic. Use
   AppleScript's `«data HTML<hex>»` (what `md_to_clipboard.py` does), and pass the script on
   **stdin** — a 32KB essay overruns the argv length limit.
-- **Body, fallback:** dispatch a synthetic `paste` `ClipboardEvent` carrying `text/html` on
-  `.ProseMirror`. Works on either surface, but requires the agent to reproduce the whole essay
-  into the eval — see the transcription warning above. **Note the open question this leaves:** the
-  only defect in this path is the transcription, and the `window.name` carrier removes
-  transcription entirely. So a **fresh compose from the pane** looks reachable — carry the
-  `md_to_substack.py` snippet in, hash-check it, inject it. **Nobody has measured it**, so it is
-  not the default and must not be written up as working until someone composes a throwaway draft
-  and checks the fidelity digest.
+- **Body, on the pane:** dispatch a synthetic `paste` `ClipboardEvent` carrying `text/html` on
+  `.ProseMirror` — which is what `md_to_substack.py` already emits. This path was long written off
+  as a fallback because it "requires the agent to reproduce the whole essay into the eval," but
+  that was a fact about *delivery*, not about the paste: the `window.name` carrier removes the
+  transcription entirely, and the paste itself never touches the Clipboard API, so the pane's
+  pasteboard ban does not apply to it. **Measured 2026-09-10** — see the compose result below.
 - The paste is applied **asynchronously**, so the footnote pass MUST be a separate call
   (B) after the body is in the doc model.
 - **Images:** an `<img>` with a `data:` URI is uploaded to Substack's CDN on paste.

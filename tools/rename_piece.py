@@ -102,6 +102,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('old'); ap.add_argument('new', nargs='?')
     ap.add_argument('--apply', action='store_true')
+    ap.add_argument('--force-common-word', action='store_true',
+                    help='allow renaming a single-token slug that may also occur as prose')
     o = ap.parse_args()
 
     old_dir = os.path.join(ROOT, 'pieces', o.old)
@@ -115,6 +117,24 @@ def main():
         print(f"{o.old}: already matches its title — nothing to do"); return 0
     if os.path.exists(os.path.join(ROOT, 'pieces', new)):
         die(f"pieces/{new} already exists")
+
+    # A SLUG CAN ALSO BE AN ORDINARY ENGLISH WORD, and then the sweep rewrites prose.
+    # `distinction` is a piece and a noun; on 2026-09-10 the unguarded sweep wrote
+    # "the the-distance-that-love-needs is worth being exact about" into 30 drafts, several
+    # of them published. The URL guard is no help — that is not a URL. A hyphenated slug
+    # cannot collide this way, so only single-token slugs need the check.
+    if '-' not in o.old and not o.force_common_word:
+        prose = 0
+        for path in glob.glob(os.path.join(ROOT, 'pieces', '*', 'draft.md')):
+            body = URL.sub('', open(path, encoding='utf-8').read())
+            prose += len(re.findall(r'(?<![A-Za-z0-9_-])' + re.escape(o.old) +
+                                    r'(?![A-Za-z0-9_-])', body))
+        if prose:
+            die(f"{o.old!r} is a single word and appears {prose} time(s) in draft prose, "
+                f"where it is almost certainly the English word and not a reference to the "
+                f"piece. Renaming would rewrite published sentences.\n"
+                f"Move the directory and sweep the identifier references by hand, or pass "
+                f"--force-common-word if you have checked every occurrence.")
 
     plan = {'dir': (f'pieces/{o.old}', f'pieces/{new}'), 'dashboard': None, 'edits': [], 'skipped_urls': 0}
 

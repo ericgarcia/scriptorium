@@ -1710,6 +1710,113 @@ def unit_store(tmp):
 
 
 
+
+# ---------------------------------------------------------------- unit: linkedin outlet
+def unit_linkedin(tmp):
+    """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
+    here is a refusal: every case is a way the copy could go up wrong or go up first."""
+    print("\n-- linkedin: the Article copy, and the audit that checks it ---------")
+    import outlet_audit
+
+    # --- the audit: a missing Article redirects to a live page -----------------------
+    li = {'reader_base': 'https://www.linkedin.com/pulse/', 'manifest_url_key': 'linkedin_url',
+          'derive': False, 'not_found_markers': ['article_not_found']}
+    check('a redirect to LinkedIn\'s not-found page is a miss, not a 200',
+          outlet_audit.landed_on_not_found(
+              'https://www.linkedin.com/top-content/?trk=article_not_found', li))
+    check('a live Article is not mistaken for a miss',
+          not outlet_audit.landed_on_not_found(
+              'https://www.linkedin.com/pulse/some-essay-eric-garcia-abc123/', li))
+    check('an outlet with no markers never reads a redirect as a miss',
+          not outlet_audit.landed_on_not_found('https://x.test/top-content/?trk=article_not_found',
+                                               {'reader_base': 'https://x.test/'}))
+    check('a LinkedIn URL is never guessed from a slug',
+          outlet_audit.slug_of({}, 'some-essay', li) is None)
+    check('a recorded LinkedIn URL is used as recorded',
+          outlet_audit.slug_of({'linkedin_url': 'https://www.linkedin.com/pulse/x-y-1/'},
+                               'x', li) == 'https://www.linkedin.com/pulse/x-y-1/')
+
+    # --- the converter ---------------------------------------------------------------
+    piece = os.path.join(tmp, 'li-piece')
+    os.makedirs(os.path.join(piece, 'assets'), exist_ok=True)
+    with open(os.path.join(piece, 'assets', 'fig.png'), 'wb') as f:
+        f.write(_tiny_png())
+    quoted_alt = 'A chart with an arrow labeled "featurize." and a second labeled "d"'
+    with open(os.path.join(piece, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('*scaffold, never published*\n\n---\n\n'
+                'Opening paragraph with a claim.[^a]\n\n'
+                '## A heading\n\n'
+                f'![{quoted_alt}](assets/fig.png)\n\n'
+                'Closing paragraph with *emphasis* and a second note.[^b]\n\n'
+                '[^a]: The first note.\n\n[^b]: The second note.\n')
+    manifest = ('title: A Piece\nsubtitle: Its subtitle\n'
+                'outlets:\n  - muffinlabs\n  - linkedin\n'
+                'blog_url: https://www.muffinlabs.ai/blog/a-piece\n'
+                'verified:\n  date: 2026-09-10\n  by: test\n  covers: the fixture\n')
+    with open(os.path.join(piece, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write(manifest)
+    ocfg = os.path.join(tmp, 'li-outlets.yaml')
+    with open(ocfg, 'w', encoding='utf-8') as f:
+        f.write('outlets:\n  muffinlabs:\n    reader_base: https://www.muffinlabs.ai/blog/\n'
+                '    manifest_url_key: blog_url\n'
+                '  linkedin:\n    reader_base: https://www.linkedin.com/pulse/\n'
+                '    manifest_url_key: linkedin_url\n    derive: false\n')
+
+    tool = os.path.join(HERE, 'md_to_linkedin.py')
+    def run(*extra):
+        r = subprocess.run([sys.executable, tool, piece, '--outlets', ocfg, '--no-fetch', *extra],
+                           capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    out = os.path.join(tmp, 'li-out')
+    code, log = run('--out', out)
+    check('a verified piece with a recorded canonical composes', code == 0, log.strip())
+    if code == 0:
+        a = open(os.path.join(out, 'article.html'), encoding='utf-8').read()
+        j = json.load(open(os.path.join(out, 'article.json'), encoding='utf-8'))
+        check('the first line says where the original lives',
+              a.splitlines()[0].startswith('<p><em>Originally published at '
+                                            '<a href="https://www.muffinlabs.ai/blog/a-piece">'),
+              a.splitlines()[0])
+        check('the subtitle becomes the lede, since an Article has no subtitle field',
+              a.splitlines()[1] == '<p><em>Its subtitle</em></p>', a.splitlines()[1])
+        check('footnotes become [n] in first-reference order, with Notes at the end',
+              'claim.[1]' in a and 'note.[2]' in a and '<h2>Notes</h2>' in a
+              and '[1] The first note.' in a and '[2] The second note.' in a, a[-300:])
+        check('no raw footnote marker survives', '[[FN' not in a)
+        check('a figure is a marked slot, not an inlined data: image',
+              '[Figure 1 — upload here]' in a and 'data:image' not in a)
+        # The Substack renderer truncates this alt at its first double quote. Here it must
+        # arrive whole, because it is read from the markdown, not recovered from HTML.
+        check('an alt text containing double quotes survives whole',
+              j['images'][0]['alt'] == quoted_alt, repr(j['images'][0]['alt']))
+        check('the figure is listed with the file to upload',
+              j['images'][0]['file'].endswith('assets/fig.png'))
+
+    # --- the refusals ---------------------------------------------------------------
+    def refuses(mutate, why_fragment, label):
+        good = open(os.path.join(piece, 'publish.yaml'), encoding='utf-8').read()
+        with open(os.path.join(piece, 'publish.yaml'), 'w', encoding='utf-8') as f:
+            f.write(mutate(good))
+        code, log = run('--check')
+        with open(os.path.join(piece, 'publish.yaml'), 'w', encoding='utf-8') as f:
+            f.write(good)
+        check(label, code == 1 and why_fragment in log, log.strip()[:300])
+
+    refuses(lambda m: m.replace('blog_url: https://www.muffinlabs.ai/blog/a-piece\n', ''),
+            'publish the canonical first',
+            'no recorded canonical: refused — the copy never goes up first')
+    refuses(lambda m: m.replace('  - linkedin\n', ''),
+            'does not name `linkedin`',
+            'a piece that does not name linkedin is refused, not syndicated anyway')
+    refuses(lambda m: m.replace('verified:\n  date: 2026-09-10\n  by: test\n  covers: the fixture\n', ''),
+            'check_verified refuses',
+            'an unverified piece is refused — syndication does not weaken verification')
+
+    code, _log = run('--check')
+    check('--check writes nothing', code == 0 and not os.path.exists(os.path.join(piece, 'linkedin')))
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -2024,6 +2131,7 @@ def main():
         unit_talk(tmp)
         unit_deck(tmp)
         unit_store(tmp)
+        unit_linkedin(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

@@ -93,6 +93,18 @@ def fetch(url, timeout=20):
         return None, '', url
 
 
+def landed_on_not_found(final_url, outlet_cfg):
+    """A missing page that REDIRECTS to a page that exists answers 200.
+
+    Measured 2026-09-10: a LinkedIn article that does not exist answers 301 to
+    /top-content/?trk=article_not_found, which is a real page and returns 200. The
+    forward check followed the redirect and read that 200 as the article being live —
+    the audit would have reported every missing LinkedIn copy as present. An outlet
+    names the markers that mean "this is where you land when it is not there"."""
+    markers = outlet_cfg.get('not_found_markers') or []
+    return any(m in (final_url or '') for m in markers)
+
+
 def slug_of(manifest, piece_name, outlet_cfg):
     """The piece's address on this outlet: the manifest's own URL if it records one,
     else reader_base + the slug. A recorded URL always wins — a piece whose live slug
@@ -100,6 +112,11 @@ def slug_of(manifest, piece_name, outlet_cfg):
     key = outlet_cfg.get('manifest_url_key')
     if key and manifest.get(key):
         return str(manifest[key])
+    # An outlet whose addresses cannot be derived — LinkedIn's /pulse/<slug>-<author>-<id>
+    # carries an id nothing on the desk knows — is checked only at a RECORDED url. Guessing
+    # one would audit a page that never existed and call the miss a finding.
+    if outlet_cfg.get('derive') is False:
+        return None
     base = outlet_cfg.get('reader_base', '')
     if not base:
         return None
@@ -283,7 +300,7 @@ def main():
         die(1, f"no publish.yaml under {a.pieces}")
 
     # ---- forward: declared + published -> must resolve -----------------------
-    jobs = []
+    jobs, unrecorded = [], []
     for pc in pieces:
         for oname in pc['declared']:
             if oname not in outlets:
@@ -293,12 +310,14 @@ def main():
             url = slug_of(pc['manifest'], pc['name'], outlets[oname])
             if url:
                 jobs.append((pc, oname, url))
+            elif outlets[oname].get('derive') is False:
+                unrecorded.append((pc['name'], oname, outlets[oname].get('manifest_url_key')))
 
     results, unreachable = [], 0
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for (pc, oname, url), (status, body, final) in zip(
                 jobs, ex.map(lambda j: fetch(j[2]), jobs)):
-            ok = status == 200
+            ok = status == 200 and not landed_on_not_found(final, outlets[oname])
             row = {'piece': pc['name'], 'outlet': oname, 'url': url,
                    'status': status, 'ok': ok,
                    'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
@@ -393,6 +412,9 @@ def main():
             print(f"  reverse {oname}: all {len(info['live'])} live URL(s) are known to the desk")
     for name, oname in lying:
         print(f"  UNDECLARED  {name} records a {oname} URL but does not list {oname} in `outlets:`")
+    for name, oname, key in unrecorded:
+        print(f"  UNRECORDED  {name} is published and declares {oname}, whose URLs cannot be "
+              f"derived — record it under `{key}` or the copy is unaudited")
 
     if a.content:
         checked = [r for r in results if r.get('content') is not None]
@@ -419,6 +441,11 @@ def main():
         sys.exit(3)
     if undeclared or lying:
         print("\nFAILED: an outlet carries something the manifests do not declare.")
+        sys.exit(3)
+    if unrecorded:
+        # Not 'missing' — the copy may well be up. But nothing can check it, and a check
+        # that silently skips is the blind spot this audit was written to close.
+        print("\nFAILED: a published piece declares an outlet whose address was never recorded.")
         sys.exit(3)
     if results and len(unreach) == len(results):
         print("\nFAILED: nothing could be reached — that is not a pass.")

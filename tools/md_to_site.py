@@ -62,19 +62,32 @@ def die(code, msg):
 
 
 def slug_of(piece_dir):
-    """The DESK's identifier: the directory name. Stable for the life of the piece,
-    because the desk cross-references by slug and titles move."""
+    """The DESK's identifier: the directory name.
+
+    It used to be described here as "stable for the life of the piece". IT IS NOT, as of
+    2026-09-10: Eric reversed the keep-the-slug practice, and a retitled piece now has its
+    directory renamed to match (see the `rewrite` skill, "Renaming: the slug follows the
+    title"). The desk had drifted far enough that 25 of 40 pieces answered to an address
+    describing something they were not.
+
+    THE CONSEQUENCE FOR THIS FILE IS THE REDIRECT MAP, and it is not obvious. `renames` was
+    derived purely from "directory differs from title-slug", so renaming a directory made its
+    entry disappear — and `import-bundle.sh` REPLACES vercel.json's redirect list rather than
+    merging, which would have deleted the redirect for a URL that is already published and in
+    a submitted sitemap. `former_slugs` in publish.yaml is what keeps those alive; see
+    `renames_for`."""
     return os.path.basename(os.path.normpath(piece_dir))
 
 
 def site_slug_of(man, source_slug):
     """The PUBLIC identifier: derived from the title, so a URL reads as what it is.
 
-    These are two different jobs and they want two different names. The desk needs a
-    handle that never moves; a reader needs an address that says what they are about to
-    read. Substack already resolves it this way — 33 of the desk's 34 published pieces
-    have a Substack slug equal to slugify(title) while their directory kept its original
-    name — so deriving the same way keeps the two publications addressing a piece alike.
+    Historically these were two different jobs wanting two different names: a desk handle
+    that never moved, and a reader-facing address that said what the piece was. Since
+    2026-09-10 the desk handle follows the title too, so the two now normally AGREE and this
+    function is usually the identity. It is kept because it still does real work: it is what
+    an un-renamed piece falls back on, it honours an explicit `site_slug`, and it is the
+    single definition of the public address regardless of what the directory is called.
 
     An explicit `site_slug` in publish.yaml wins, for the case where the derivation is
     wrong or a published URL must be preserved verbatim."""
@@ -222,6 +235,34 @@ def reader_digest(piece_dir):
     return 'sha256:' + h.hexdigest()
 
 
+def renames_for(man, source_slug, slug):
+    """Every OLD public address for this piece, mapped to its address now.
+
+    Two sources, unioned, and the second is the one that matters:
+
+      1. the live divergence — the directory still differs from the title-slug;
+      2. `former_slugs:` in publish.yaml — every address this piece has ANSWERED TO BEFORE.
+
+    (2) exists because (1) is self-erasing. `renames` was once derived from (1) alone, so the
+    moment a piece was renamed to match its title the entry vanished — and `import-bundle.sh`
+    ASSIGNS vercel.json's redirect list rather than merging it, so the redirect was deleted
+    outright. The old URL is published and in a submitted sitemap; deleting its redirect turns
+    a live link into a 404, and `outlet_audit` cannot see it, because the audit checks the
+    RECORDED site_url, which is the new one. A rename must therefore leave a trace that
+    outlives the rename, and this is it.
+
+    `rename_piece.py` appends to `former_slugs` as part of the move. Never remove an entry:
+    it is the only record that an address was ever handed to a reader."""
+    out = {}
+    for old in (man.get('former_slugs') or []):
+        old = str(old).strip()
+        if old and old != slug:
+            out[old] = slug
+    if source_slug != slug:
+        out[source_slug] = slug
+    return out
+
+
 def export_piece(piece_dir, bundle, opts):
     source_slug = slug_of(piece_dir)
     man = load_manifest(piece_dir)
@@ -265,7 +306,7 @@ def export_piece(piece_dir, bundle, opts):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'w') as f:
             f.write(doc)
-    return slug, len(images), len(doc), len(stripped), source_slug
+    return slug, len(images), len(doc), len(stripped), source_slug, renames_for(man, source_slug, slug)
 
 
 def main():
@@ -322,21 +363,32 @@ def main():
 
     rows = [export_piece(p, o.bundle, o) for p in selected]
 
+    # Union every piece's old public addresses. A collision means two pieces claim the same
+    # old URL, which a redirect cannot express — refuse rather than silently pick one.
+    renames = {}
+    for _s, _n, _z, _k, _src, rn in rows:
+        for old, new in rn.items():
+            if old in renames and renames[old] != new:
+                die(7, f"two pieces claim the old address {old!r}: "
+                       f"{renames[old]!r} and {new!r}. A redirect cannot point both ways; "
+                       f"fix `former_slugs` in one of their manifests.")
+            renames[old] = new
+
     meta = {'bundle_spec': BUNDLE_SPEC,
             'generator': 'scriptorium md_to_site.py',
             'generated_at': datetime.datetime.now(datetime.timezone.utc)
                             .replace(microsecond=0).isoformat(),
             'image_store': o.image_store,
-            'pieces': [s for s, _n, _z, _k, _src in rows],
-            'renames': {src: s for s, _n, _z, _k, src in rows if src != s}}
+            'pieces': [s for s, _n, _z, _k, _src, _rn in rows],
+            'renames': renames}
     if o.apply:
         os.makedirs(o.bundle, exist_ok=True)
         with open(os.path.join(o.bundle, 'bundle.json'), 'w') as f:
             json.dump(meta, f, indent=2)
             f.write('\n')
 
-    notes = sum(k for _s, _n, _z, k, _src in rows)
-    for s, n, size, k, src in rows:
+    notes = sum(k for _s, _n, _z, k, _src, _rn in rows)
+    for s, n, size, k, src, _rn in rows:
         print(f"  {s:38} {n} image(s)  {size/1024:4.0f} KB"
               + (f"  [{k} note(s) stripped]" if k else '')
               + (f"  (was {src})" if src != s else ''))

@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT that a human publishes — that first click is never delegated. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. NEVER sends email — the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT; the author says publish and this skill clicks it. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. A FIRST publication SENDS the subscriber email — that is the only email a piece ever gets. Every re-sync after that sends NOTHING: the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks.
 ---
 
 # Publish (to Substack)
@@ -224,7 +224,40 @@ first.
    through the API, and stale from the moment the body half existed. It was repeated to the author
    several times after it had stopped being true.)
 
-   **One thing is still the author's: the Publish click.** **And do not probe the contract with a 1×1 test pixel on a real
+   **The Publish click is delegable on the author's explicit say-so** (Eric, 2026-09-10: *"we
+   should fix the skill so that we just require user confirmation to go live"*). The older rule —
+   *the first click is never delegated, and asking for permission does not transfer it* — is
+   retired. **What replaces it is confirmation, not ceremony:** the author says publish, and this
+   skill publishes.
+
+### Email: once, on going live, and never again
+
+**The policy, in the author's words** (Eric, 2026-09-10): *"when we go live for the first time, we
+send an email. That is the only time we send an email."*
+
+So the rule is **structural, not per-piece**:
+
+- **A FIRST publication SENDS the email.** It is the one notification a piece ever gets, and it is
+  the point of having subscribers. `should_send_email: true` on a draft about to go live is
+  **correct**, not a defect to reconcile away.
+- **Every re-sync, update and correction after that sends NOTHING.** A published post being fixed
+  must not mail anyone. Read the *Update* dialog and prove no delivery control is enabled; if one
+  is present and cannot be proven off, **stop and ask.**
+
+**What this replaced, and why the replacement is narrower rather than looser.** The old rule was
+*never click, never email*, which conflated two very different acts: going live, which the author
+asks for, and mailing a list, which is irreversible. Splitting them means the click is delegable and
+**the one genuinely irreversible thing still gets checked every time** — on the update path, where a
+stray email would be a mistake nobody can take back.
+
+**A correction worth carrying, because it nearly produced the wrong call.** On 2026-09-10 this skill
+inferred *"this publication has never emailed"* from eight archive rows showing `email_sent_at:
+null`. **The archive endpoint does not return `email_sent_at` or `should_send_email` at all** — the
+nulls were absent keys read as values. **A missing field is not a `false`.** Read delivery state
+from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — never from the archive.
+
+**Then verify on the cache-busted public URL.** *"Your post is live!"* is a claim; `substack_verify
+--fresh` is the evidence. **And do not probe the contract with a 1×1 test pixel on a real
    post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and
    the author saw it and asked whether something was broken. Probe on a throwaway draft, or go
    straight to the real file.

@@ -191,6 +191,22 @@ first.
    `cover_image`, reads back, and touches nothing else — **verify the body digest afterwards
    anyway**, which is how this run proved the body was untouched.
 
+   **`cover_image` is NOT the hero.** They are two different images and setting one is not
+   setting the other: `cover_image` is the drafts-list thumbnail, the archive card, the social
+   preview and the email header, and **it does not appear in the post.** The hero a reader sees on
+   opening the piece is a **body** image — a `captionedImage` node at the top of the doc. The first
+   version of this tool set the cover and stopped, and the author reported the image *"shows up in
+   substack but not in the piece itself at the top where it should."* `substack_cover.py` now does
+   both from one upload; `--cover-only` opts out of the body half.
+
+   **And the body half is not durable on its own.** A recompose rebuilds the body from `draft.md`,
+   so an image inserted only into the live post is dropped the next time, silently. The durable form
+   is `0b-images`: reference it in `draft.md` as `![alt](assets/hero.png)` **and** record the
+   uploaded URL under `images:` in `publish.yaml`. Then the converter emits `<img src="<that URL>">`
+   and a recompose reuses the asset rather than orphaning it — measured on this piece, **25 KB
+   emitted with the mapping against ~3.4 MB without it.** The alt text is read out of the draft's
+   image markdown, because the hero is a piece's most-seen image and a screen reader gets only that.
+
    **Two things are still the author's:** the **caption** (a composer-UI field, not in the API
    payload) and the Publish click. **And do not probe the contract with a 1×1 test pixel on a real
    post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and

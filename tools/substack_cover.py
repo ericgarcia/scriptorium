@@ -14,10 +14,28 @@ So the cover is settable, and it should come from `pieces/<slug>/assets/` — th
 repo already holds and has already disclosed the provenance of — rather than from whatever
 is in the author's Downloads folder.
 
+TWO DIFFERENT IMAGES, AND SETTING ONE IS NOT SETTING THE OTHER (2026-09-10, Eric caught it)
+    `cover_image` is the FEATURED image: the drafts-list thumbnail, the archive card, the
+    social preview, the email header.  It does NOT appear in the post.  The hero a reader sees
+    when they open the piece is a BODY image — a `captionedImage` node at the top of the doc.
+    The first version of this tool set the cover and stopped, and the author reported the
+    image "shows up in substack but not in the piece itself at the top where it should".
+
+    So this tool does both, and `--cover-only` opts out of the body half.
+
 WHAT THIS EMITS
-    A self-contained JS snippet that uploads the image, sets `cover_image`, reads the draft
-    back, and returns the result.  It does NOT publish, does not touch the body, and does
-    not send email.  Run it in the post's editor.
+    A self-contained JS snippet that uploads the image once, sets `cover_image`, inserts a
+    `captionedImage` at the top of the body unless it already has one, reads the draft back,
+    and returns the result.  It does NOT publish and does not send email.  Run it in the
+    post's editor.
+
+    THE BODY HALF IS NOT ENOUGH ON ITS OWN.  A recompose rebuilds the body from `draft.md`,
+    so an image inserted only into the live post is dropped silently the next time.  The
+    durable form is the one `0b-images` already specifies and this tool prints a reminder for:
+    reference it in `draft.md` as `![alt](assets/hero.png)` and record the uploaded URL under
+    `images:` in publish.yaml, so the converter emits `<img src="<that URL>">` and a recompose
+    reuses the asset instead of orphaning it.  (Measured on this piece: with the mapping the
+    emitted snippet is 25 KB; without it, the bytes inline and it is ~3.4 MB.)
 
     In the BUILT-IN PANE, carry it in with `pane_carry.py` — never retype it; the payload is
     the image, and a transcription slip is a corrupted upload.
@@ -108,9 +126,19 @@ def main():
     b64 = base64.b64encode(raw).decode('ascii')
     data_uri = f"data:{mime};base64,{b64}"
     caption = man.get('cover_caption', '')
+    cover_only = '--cover-only' in sys.argv
+    # alt text: the hero is the piece's most-seen image and a screen reader gets only this
+    alt = ''
+    m = re.search(r'!\[([^\]]+)\]\([^)]*' + re.escape(os.path.basename(src)) + r'\)',
+                  open(os.path.join(piece, 'draft.md'), encoding='utf-8').read()
+                  if os.path.exists(os.path.join(piece, 'draft.md')) else '')
+    if m: alt = m.group(1)
 
     snippet = """(async () => {
   const POST = %s;
+  const ALT = %s;
+  const CAPTION = %s;
+  const WITH_BODY = %s;
   const DATA = "%s";
   const up = await fetch('/api/v1/image', {
     method: 'POST', credentials: 'include',
@@ -125,13 +153,37 @@ def main():
     body: JSON.stringify({cover_image: img.url})
   });
   if (!put.ok) return JSON.stringify({step: 'set', status: put.status, uploaded: img.url});
+  // the BODY hero — a separate image from the cover, and the one a reader actually sees
+  let bodyInserted = false, bodyAlready = false;
+  if (WITH_BODY) {
+    const ed = document.querySelector('.ProseMirror') && document.querySelector('.ProseMirror').editor;
+    if (ed) {
+      ed.state.doc.forEach(n => { if (/image/i.test(n.type.name)) bodyAlready = true; });
+      if (!bodyAlready) {
+        ed.chain().focus().insertContentAt(0, {
+          type: 'captionedImage',
+          content: [
+            {type: 'image2', attrs: {src: img.url, alt: ALT, width: img.imageWidth,
+              height: img.imageHeight, bytes: img.bytes, type: img.contentType,
+              topImage: true, belowTheFold: false, isProcessing: false,
+              resizeWidth: null, imageSize: null, fullscreen: null, href: null,
+              internalRedirect: null, align: null}},
+            ...(CAPTION ? [{type: 'caption', content: [{type: 'text', text: CAPTION}]}] : [])
+          ]
+        }).run();
+        bodyInserted = true;
+      }
+    }
+  }
   const back = await (await fetch('/api/v1/drafts/' + POST, {credentials: 'include'})).json();
   return JSON.stringify({
     uploaded: img.url, width: img.imageWidth, height: img.imageHeight, bytes: img.bytes,
     coverNow: back.cover_image, matches: back.cover_image === img.url,
+    bodyInserted, bodyAlready,
     stillUnpublished: back.is_published === false
   });
-})()""" % (json.dumps(post_id or ''), data_uri)
+})()""" % (json.dumps(post_id or ''), json.dumps(alt), json.dumps(caption),
+                   'false' if cover_only else 'true', data_uri)
 
     open(out_js, 'w', encoding='utf-8').write(snippet)
     print(f"{os.path.basename(src)}  {len(raw):,} bytes  {mime}  sha256={hashlib.sha256(raw).hexdigest()[:16]}")
@@ -141,9 +193,16 @@ def main():
     if not post_id:
         print("NOTE: no --post given, so the snippet has an empty id and will fail. Pass the "
               "draft id from the editor URL.")
-    print("\nRun it in the post's editor. In the built-in pane, carry it with pane_carry.py; "
-          "never retype it.\nIt uploads, sets cover_image, and reads back — it does not publish "
-          "and does not send email.")
+    if not alt and not cover_only:
+        print("note: no alt text — draft.md has no `![alt](" + cover + ")`. The hero is the "
+              "piece's most-seen image and a screen reader gets only the alt.")
+    if f'images:' not in man.get('_raw', ''):
+        print(f"note: publish.yaml has no `images:` mapping for {cover}. Add one with the URL "
+              f"this prints, or a recompose re-inlines the bytes and orphans the uploaded copy.")
+    did = "uploads, sets cover_image, and reads back" if cover_only else \
+          "uploads once, sets cover_image, inserts the hero at the top of the body, and reads back"
+    print(f"\nRun it in the post's editor. In the built-in pane, carry it with pane_carry.py; "
+          f"never retype it.\nIt {did} — it does not publish and does not send email.")
 
 if __name__ == '__main__':
     main()

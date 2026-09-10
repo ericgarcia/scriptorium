@@ -815,6 +815,20 @@ def unit_pronouns(tmp):
         f.write("*Draft.*\n\n---\n\nGod made the world and he saw that it was good.\n")
     p = subprocess.run([sys.executable, tool, d2, '--strict'], capture_output=True, text=True)
     check('--strict still exits 3 on a D hit', p.returncode == 3, f"rc={p.returncode}")
+    # D refuses under --strict exactly as C does, so it takes the same escape (2026-09-10): D is a
+    # proximity test, and most of what it finds is a pronoun for something else standing near a
+    # God-word. Without this the only way to clear a D hit is to reword the draft.
+    with open(os.path.join(d2, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write("title: T\nsubtitle: S\npronouns_allow:\n  - and he saw that it was good\n")
+    r2 = check_pronouns.sweep(d2)
+    check('publish.yaml pronouns_allow silences a justified D hit', not r2['D'], str(r2['D']))
+    p = subprocess.run([sys.executable, tool, d2, '--strict'], capture_output=True, text=True)
+    check('--strict exits 0 once the only D hit is justified', p.returncode == 0, f"rc={p.returncode}")
+    with open(os.path.join(d2, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write("title: T\nsubtitle: S\npronouns_allow:\n  - some unrelated phrase\n")
+    check('an unrelated pronouns_allow entry does NOT silence a D hit',
+          len(check_pronouns.sweep(d2)['D']) == 1, str(check_pronouns.sweep(d2)['D']))
+    os.remove(os.path.join(d2, 'publish.yaml'))
 
     # G — the LORD takes capitals (2026-09-07): a mixed-case Lord in the body is listed, a
     # footnote definition's King James wording is not, and LORD itself is never a hit

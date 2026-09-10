@@ -25,8 +25,8 @@ TWO DIFFERENT IMAGES, AND SETTING ONE IS NOT SETTING THE OTHER (2026-09-10, Eric
 
 WHAT THIS EMITS
     A self-contained JS snippet that uploads the image once, sets `cover_image`, inserts a
-    `captionedImage` at the top of the body unless it already has one, reads the draft back,
-    and returns the result.  It does NOT publish and does not send email.  Run it in the
+    `captionedImage` at the top of the body unless it already has one — WITH ITS CAPTION, taken
+    from `cover_caption:` — reads the draft back, and returns the result.  It does NOT publish and does not send email.  Run it in the
     post's editor.
 
     THE BODY HALF IS NOT ENOUGH ON ITS OWN.  A recompose rebuilds the body from `draft.md`,
@@ -188,7 +188,7 @@ def main():
     open(out_js, 'w', encoding='utf-8').write(snippet)
     print(f"{os.path.basename(src)}  {len(raw):,} bytes  {mime}  sha256={hashlib.sha256(raw).hexdigest()[:16]}")
     if caption:
-        print(f"caption (set in the composer; the API field is separate): {caption}")
+        print(f"caption (set on the body hero from cover_caption:): {caption}")
     print(f"wrote {out_js} ({len(snippet):,} bytes)")
     if not post_id:
         print("NOTE: no --post given, so the snippet has an empty id and will fail. Pass the "

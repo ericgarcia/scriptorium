@@ -218,8 +218,13 @@ first.
    is the standing rule that a passage written after a check does not inherit that check's clean
    bill. Re-run the sweeps after adding a hero.
 
-   **Two things are still the author's:** the **caption** (a composer-UI field, not in the API
-   payload) and the Publish click. **And do not probe the contract with a 1×1 test pixel on a real
+   **The caption comes with the body hero.** `cover_caption:` becomes a `caption` node inside the
+   `captionedImage`, so it is set in the same pass and needs no visit to the composer. (This line
+   used to say the caption was the author's job — true while only `cover_image` was being set
+   through the API, and stale from the moment the body half existed. It was repeated to the author
+   several times after it had stopped being true.)
+
+   **One thing is still the author's: the Publish click.** **And do not probe the contract with a 1×1 test pixel on a real
    post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and
    the author saw it and asked whether something was broken. Probe on a throwaway draft, or go
    straight to the real file.

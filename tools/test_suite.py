@@ -176,13 +176,15 @@ def unit_review_artifact(tmp):
         f = dict(facts); f['findings'] = [kw]; return f
 
     hf = ra.build(d, fnd(anchor='A line with **weight**', severity='fidelity',
-                         title='T', what='W', evidence='E'))
+                         title='T', what='W', evidence='E', now='A line with **heft**'))
     check('review: the anchored span is marked in place',
           '<mark class="hl hl-fidelity" id="a1">' in hf)
     check('review: the mark closes exactly once',
           hf.count('<mark class="hl') == 1 and hf.count('</mark>') == 1)
-    check('review: markdown inside the anchor still renders',
-          '<strong>weight</strong>' in hf, 'the mark is placed BEFORE the inline pass')
+    check('review: markdown inside the REPLACEMENT renders',
+          '<strong>heft</strong>' in hf and '<strong>weight</strong>' not in hf,
+          'the replacement is spliced into the markdown BEFORE the inline pass, so its '
+          'emphasis pairs with the run around it exactly as the original did')
     check('review: no sentinel reaches the reader',
           not any(c in hf for c in '\ue000\ue001\ue002\ue003'))
     check('review: the note hangs under its own paragraph',
@@ -201,10 +203,22 @@ def unit_review_artifact(tmp):
     check('review: the stamp says the prose is showing proposals',
           'prose shows 1 proposed change<' in hn,
           'the page is not draft.md any more and must not pretend to be')
-    check('review: a note-only finding leaves the prose alone',
-          'class="diff"' not in hf and 'prose shows' not in hf)
+    # EVERY FINDING PROPOSES A CHANGE (Eric, 2026-09-10: "this doesn't tell me what the
+    # proposed change is. it should."). A band titled `proposed changes` whose rows
+    # propose nothing is lying about what it is; a diagnosis with no replacement is a
+    # question, and questions have their own band.
+    check('review: a finding with no `now` is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'a finding that only diagnoses belongs in `calls`')
+    check('review: a `now` identical to the anchor is refused',
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'now': 'x'}],
+                        [{'text': 'x', 'marks': [], 'cards': []}])),
+          'it proposes nothing, and would render as a change')
+    check('review: every finding carries a was/now diff',
+          hf.count('<dt>was</dt>') == 1 and hf.count('<dt>now</dt>') == 1)
     check('review: `was` as an input is refused',
-          bool(ra.place([{'anchor': 'x', 'title': 'T', 'was': 'y'}],
+          bool(ra.place([{'anchor': 'x', 'title': 'T', 'was': 'y', 'now': 'z'}],
                         [{'text': 'x', 'marks': [], 'cards': []}])),
           'a hand-typed `was` can disagree with the anchor; a derived one cannot')
     check('review: an empty `now` is refused',
@@ -216,15 +230,17 @@ def unit_review_artifact(tmp):
           'class="fx sev-fidelity"' in hf)
 
     check('review: a finding may anchor inside a footnote',
-          '<mark class="hl' in ra.build(d, fnd(anchor='The second note.', title='N')))
+          '<mark class="hl' in ra.build(d, fnd(anchor='The second note.', title='N',
+                                               now='The second note, rewritten.')))
     check('review: an unknown severity degrades to open, it does not crash',
-          'sev-open' in ra.build(d, fnd(anchor='A quotation.', severity='wat', title='S')))
+          'sev-open' in ra.build(d, fnd(anchor='A quotation.', severity='wat', title='S',
+                                        now='A quotation, amended.')))
 
     for label, kw, want in (
-            ('matches nothing', dict(anchor='not in the draft at all', title='X'),
+            ('matches nothing', dict(anchor='not in the draft at all', title='X', now='q'),
              'matches nothing'),
-            ('matches twice', dict(anchor='and one more', title='X'), None),
-            ('is missing', dict(title='X'), 'no anchor')):
+            ('matches twice', dict(anchor='and one more', title='X', now='q'), None),
+            ('is missing', dict(title='X', now='q'), 'no anchor')):
         errs = ra.place([kw], [{'text': 'and one more … and one more', 'marks': [], 'cards': []}]
                         if want is None else
                         [{'text': 'A line with weight', 'marks': [], 'cards': []}])
@@ -233,8 +249,8 @@ def unit_review_artifact(tmp):
 
     hs = [{'text': 'alpha beta gamma', 'marks': [], 'cards': []}]
     check('review: overlapping anchors are refused',
-          bool(ra.place([{'anchor': 'alpha beta', 'title': 'A'},
-                         {'anchor': 'beta gamma', 'title': 'B'}], hs)),
+          bool(ra.place([{'anchor': 'alpha beta', 'title': 'A', 'now': 'ALPHA BETA'},
+                         {'anchor': 'beta gamma', 'title': 'B', 'now': 'BETA GAMMA'}], hs)),
           'right-to-left insertion would otherwise produce broken nesting')
 
     check('review: no findings renders the page unchanged',
@@ -246,7 +262,7 @@ def unit_review_artifact(tmp):
     # Shipped 2026-09-10 and caught by Eric on a narrow viewport, because the DOM checks
     # here read innerText, which cannot see layout. Assert the STRUCTURE instead: every
     # grid child is exactly one element, with no loose text between them.
-    hg = ra.build(d, fnd(anchor='A quotation.',
+    hg = ra.build(d, fnd(anchor='A quotation.', now='A quotation, amended.',
                          title='A <em>tell</em> in the <b>text</b> — three times'))
     row = re.search(r'<a class="sev-\w+" href="#f1">(.*?)</a>', hg, re.S).group(1)
     check('review: the index row has exactly three grid children',
@@ -264,7 +280,8 @@ def unit_review_artifact(tmp):
     # count doubled and every anchor matched twice
     flat = os.path.join(tmp, 'flat'); os.makedirs(flat, exist_ok=True)
     open(os.path.join(flat, 'draft.md'), 'w').write('s\n---\nJust one unheaded paragraph here.\n')
-    hflat = ra.build(flat, {'findings': [{'anchor': 'one unheaded paragraph', 'title': 'F'}]})
+    hflat = ra.build(flat, {'findings': [{'anchor': 'one unheaded paragraph', 'title': 'F',
+                                          'now': 'one unheaded sentence'}]})
     check('review: a headingless piece counts its words once',
           '<b>5</b>' in hflat, 'lead and movements are one source of truth')
     check('review: a headingless piece still anchors', 'id="a1"' in hflat)

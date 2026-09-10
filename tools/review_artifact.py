@@ -153,9 +153,16 @@ def place(findings, holders):
             errs.append(f'finding {i} ({label!r}): `was` is derived from the anchor — '
                         f'remove it, and make `anchor` the text being replaced')
             continue
-        if 'now' in f and not ' '.join(str(f['now']).split()):
-            errs.append(f'finding {i} ({label!r}): `now` is empty — express a deletion as a '
-                        f'replacement, widening the anchor to the text that survives')
+        n = ' '.join(str(f.get('now', '')).split())
+        if not n:
+            errs.append(f'finding {i} ({label!r}): no `now` — EVERY FINDING PROPOSES A CHANGE. '
+                        f'A diagnosis with no replacement is a question, and belongs in `calls`. '
+                        f'(A deletion is a replacement of a wider span: anchor what goes AND what '
+                        f'survives, and let `now` be what remains.)')
+            continue
+        if n == a:
+            errs.append(f'finding {i} ({label!r}): `now` is identical to the anchor — '
+                        f'it proposes nothing')
             continue
         hits = [(h, m.start(), m.end())
                 for h in holders for m in re.finditer(re.escape(a), h['text'])]
@@ -180,8 +187,7 @@ def place(findings, holders):
         for st, en, i, sev in sorted(h['marks'], key=lambda t: -t[0]):
             f = findings[i - 1]
             f['_was'] = h['text'][st:en]              # the diff's other half, derived
-            shown = ' '.join(str(f['now']).split()) if f.get('now') else f['_was']
-            f['_changed'] = shown != f['_was']
+            shown = ' '.join(str(f['now']).split())
             h['text'] = (h['text'][:st] + f'{OPEN}{i}{SEP}{sev}{SHUT}' + shown
                          + f'{SHUT}{i}{END}' + h['text'][en:])
         h['cards'].sort()
@@ -443,11 +449,10 @@ def build(piece_dir, facts):
                f'<b>{f.get("title", "")}</b><em class="sev">{html.escape(sev)}</em></div>']
         if f.get('what'):
             out.append(f'<p>{f["what"]}</p>')
-        if f.get('_changed'):
-            rows = (f'<dt>was</dt><dd class="was">{html.escape(f["_was"])}</dd>'
-                    f'<dt>now</dt><dd class="now">'
-                    f'{html.escape(" ".join(str(f["now"]).split()))}</dd>')
-            out.append(f'<dl class="diff">{rows}</dl>')
+        rows = (f'<dt>was</dt><dd class="was">{html.escape(f["_was"])}</dd>'
+                f'<dt>now</dt><dd class="now">'
+                f'{html.escape(" ".join(str(f["now"]).split()))}</dd>')
+        out.append(f'<dl class="diff">{rows}</dl>')
         if f.get('evidence'):
             out.append(f'<div class="ev"><b>checked against</b>{f["evidence"]}</div>')
         out.append(f'<p><a class="back" href="#a{i}">&#8617; back to the line</a></p></aside>')
@@ -493,12 +498,9 @@ def build(piece_dir, facts):
             f'href="#f{i}"><b>{i}</b><em class="sev">{html.escape(f.get("severity","open"))}</em>'
             f'<span class="ft">{f.get("title","")}</span></a>'
             for i, f in enumerate(findings, 1))
-        shown = sum(1 for f in findings if f.get('_changed'))
-        note = (f'{shown} of them rewritten in the prose below' if shown
-                else 'each one marked where it lands')
         fidx = (f'<section class="fidx"><h3>{len(findings)} proposed '
-                f'change{"s" if len(findings) != 1 else ""} &mdash; {note}'
-                f'</h3>{rows}</section>')
+                f'change{"s" if len(findings) != 1 else ""} &mdash; '
+                f'each one written into the prose below</h3>{rows}</section>')
 
     calls = facts.get('calls', [])
     callsblk = ''
@@ -530,10 +532,10 @@ def build(piece_dir, facts):
     # replacement. Every one of them is highlighted and numbered, so it is not a silent
     # edit — but the stamp says so, because an author must never have to wonder whether
     # what they are reading is the draft or the proposal.
-    nchg = sum(1 for f in findings if f.get('_changed'))
     flags = list(facts.get('state', []))
-    if nchg:
-        flags.append(f'prose shows {nchg} proposed change{"s" if nchg != 1 else ""}')
+    if findings:
+        flags.append(f'prose shows {len(findings)} proposed '
+                     f'change{"s" if len(findings) != 1 else ""}')
     stamp = ' '.join([f'<span>{html.escape(facts.get("version","draft"))}</span>']
                      + [f'<b>{html.escape(s)}</b>' for s in flags]
                      + ([f'<b>{html.escape(facts["date"])}</b>'] if facts.get('date') else []))

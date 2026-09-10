@@ -91,8 +91,17 @@ prose type).
 
 **`was` is not an input.** It is the anchored text itself, derived. Supplying it is
 refused, because two hand-typed strings can disagree with the span they claim to
-describe and nothing would catch it. A finding with no `now` is a **note** about a
-passage: it marks the span and changes nothing.
+describe and nothing would catch it.
+
+### Every finding proposes a change
+
+`now` is **required**, and a `now` identical to its anchor is refused. A band titled
+*proposed changes* whose rows propose nothing is lying about what it is — and a
+diagnosis the author has to turn into a rewrite themselves has left the hard half
+undone. **If you can name what is wrong but cannot write the replacement, the finding
+is a question, and questions go in `calls`.** That is the whole difference between the
+two bands. (Eric, 2026-09-10, on a finding that diagnosed a real fault and stopped:
+*"this doesn't tell me what the proposed change is. it should."*)
 
 **A deletion is a replacement of a wider span**, not an empty `now` — anchor the text
 that survives along with the text that goes, and let `now` be what remains. An empty

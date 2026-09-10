@@ -118,10 +118,14 @@ page marks that span in place and hangs the note under the paragraph:
   every change were taken. **`now` must be an exact replacement for `anchor`** — the
   same span, rewritten. Write it as real markdown; it goes through the same inline
   pass as the prose around it.
-- **`was` is not an input** — it is the anchored text, derived, and supplying it is
-  refused so the two halves of the diff cannot disagree. A finding with **no `now`** is
-  a note: it marks the span and changes nothing. **A deletion is a replacement of a
-  wider span** — anchor what goes *and* what survives, and let `now` be what remains.
+- **`was` is not an input** — it is the anchored text, derived, so the two halves of
+  the diff cannot disagree. **A deletion is a replacement of a wider span** — anchor
+  what goes *and* what survives, and let `now` be what remains.
+- **Every finding proposes a change.** `now` is required and a no-op `now` is refused.
+  Naming the fault is the easy half; **if you cannot write the replacement, you have not
+  finished the finding.** Write the rewrite even when it is one clause, and say in `what`
+  what it costs. A fault you genuinely cannot resolve is a **question** — put it in
+  `calls`, which is the band for the author's decisions, and do not dress it as a change.
 - **`evidence` says what you checked it against.** A finding the author has to take
   on trust is a finding they have to re-derive.
 - **Anchors are not allowed to miss.** An anchor matching nothing, matching twice, or
@@ -131,7 +135,8 @@ page marks that span in place and hangs the note under the paragraph:
 - Contract and every other key: `framework/docs/REVIEW-ARTIFACT.md`.
 
 Put the author's decisions in `calls`, not in `findings` — a question is not a
-proposed change, and the two bands are read differently.
+proposed change, the two bands are read differently, and the tool now enforces the line:
+a finding without a replacement is refused.
 
 ## Then say it in chat, briefly
 

@@ -295,8 +295,8 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
 **Then verify on the cache-busted public URL.** *"Your post is live!"* is a claim; `substack_verify
 --fresh` is the evidence. **And do not probe the contract with a 1×1 test pixel on a real
    post** — Substack renders a transparent 1×1 as a green placeholder block in the drafts list, and
-   the author saw it and asked whether something was broken. Probe on a throwaway draft, or go
-   straight to the real file.
+   the author saw it and asked whether something was broken. Probe on the outlet's scratch draft
+   (`tools/scratch_draft.py <outlet>`), or go straight to the real file.
 
 0b-embeds. **An embed is not an image, and the image checks were blind to it.**
    An image can be made recompose-safe by putting its URL in `draft.md`, because the converter
@@ -805,11 +805,14 @@ path they were composed by, not to Substack discarding it.
 > first publication of a **duplicate** of an already-live post, which is the one click that can mail
 > the subscriber list, and it was created by the test itself.
 >
-> So: set `title` to something like **`TEST — DELETE ME (pane transport)`** before composing, or
-> compose a short fixture rather than a real piece. The fidelity digest does not care what the title
-> says. **And clean up in the same session** — a test artifact left in someone's publication is a
-> loaded gun, not a loose end. Deleting it is the author's click, never the agent's; say plainly
-> that it is waiting and where.
+> ~~So: set `title` to something like `TEST — DELETE ME (pane transport)` before composing, and
+> clean up in the same session.~~ **Superseded 2026-09-11 (Eric): a test never creates a draft.**
+> Deleting one is the author's click, never the agent's, so every throwaway became a chore left
+> for him. Each outlet now keeps **one standing scratch draft**, recorded in `outlets.yaml` as
+> `scratch_draft:`; `python3 framework/tools/scratch_draft.py <outlet>` prints its edit URL and
+> the title to set. Open it, set that title, clear the body, paste — and never Continue or
+> Publish from it. An outlet with none: create one, give it that title, and record it in the
+> same session. The fidelity digest does not care what the title says.
 
 ## Pages — the same machinery, three differences
 

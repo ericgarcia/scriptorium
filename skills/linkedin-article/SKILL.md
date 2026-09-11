@@ -65,6 +65,13 @@ Driven once, against a draft titled `[TEST — do not publish]`, and every step 
 actually happened. **The pane is the default surface** (Eric, 2026-09-10); it holds none of the
 author's sessions, so they sign in there themselves.
 
+**Testing a step? Use the scratch draft, never `article/new/`** (Eric, 2026-09-11). The agent
+cannot delete a draft, so a new one per test is a chore left for the author.
+`python3 framework/tools/scratch_draft.py linkedin` prints `/article/edit/<id>/`: the draft
+already exists, so setting the title does not remount the editor (step 3's trap), and the body is
+cleared with `el.editor.commands.clearContent()` in place of step 4's refuse-if-not-empty — the
+scratch is the one editor allowed to be overwritten. Never Publish from it.
+
 1. **Sign-in is the author's.** LinkedIn answers a new device with an *app challenge* ("Check
    your LinkedIn app… tap Yes"). Never touch Resend, SMS, or "Recognize this device". Then
    **confirm it took before navigating** — read `document.title`/`location.pathname` and stop on

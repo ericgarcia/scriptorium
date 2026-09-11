@@ -2403,6 +2403,36 @@ def unit_linkedin(tmp):
 
 
 
+# ---------------------------------------------------------------- unit: scratch drafts
+def unit_scratch(tmp):
+    """A test writes into the outlet's ONE standing draft, never a new one (2026-09-11)."""
+    print("\n-- scratch drafts: one per outlet, reused ------------------------------")
+    import scratch_draft as sd
+    cfg = {'outlets': {
+        'sub': {'scratch_draft': {'id': 215233016,
+                                  'edit_url': 'https://x.substack.com/publish/post/215233016'}},
+        'bare': {'reader_base': 'https://y.test/'},
+        'half': {'scratch_draft': {'id': 1}},
+        'wrong': {'scratch_draft': {'id': 7, 'edit_url': 'https://x.test/publish/post/8'}}}}
+    check('a recorded scratch draft is returned as recorded',
+          sd.scratch_for(cfg, 'sub') == {'id': '215233016',
+                                         'edit_url': 'https://x.substack.com/publish/post/215233016'})
+    check('an outlet with none recorded says so rather than inventing one',
+          sd.scratch_for(cfg, 'bare') is None)
+    for name, why in (('half', 'no edit URL'), ('wrong', 'an edit URL for another draft')):
+        try:
+            sd.scratch_for(cfg, name); ok = False
+        except ValueError:
+            ok = True
+        check(f'a scratch draft with {why} is refused', ok)
+    try:
+        sd.scratch_for(cfg, 'nope'); ok = False
+    except KeyError:
+        ok = True
+    check('an outlet outlets.yaml does not define is an error, not a None', ok)
+    check('the title says what the draft is', sd.TITLE.startswith('TEST') and 'never publish' in sd.TITLE)
+
+
 # ---------------------------------------------------------------- unit: tags
 def unit_tags(tmp):
     """Tags are a controlled vocabulary written into heavily commented manifests (2026-09-11).
@@ -3229,6 +3259,7 @@ def main():
         unit_substack_tags(tmp)
         unit_linkedin(tmp)
         unit_linkedin_post(tmp)
+        unit_scratch(tmp)
         unit_captions(tmp)
         unit_prose(tmp)
         corpus_integrity()

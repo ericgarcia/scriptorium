@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """check_stage_direction.py — the commonest breach in the argued voice, in a sweep.
 
-The essay constitution calls stage direction "the commonest breach ... it recurs more than
-any other fault here", and names FOUR SHAPES.  Until now none of them was in any checker, and
-the desk's own rule is that A RULE NOT IN THE SWEEP LIST IS NOT IN FORCE — the 2026-09-02
+The essay constitution ranks stage direction as its most frequent fault, and names FOUR
+SHAPES.  Until now none of them was in any checker, and
+the desk's own rule is that A RULE NO SWEEP CHECKS IS NOT ENFORCED — the 2026-09-02
 corpus audit found it in 20 of 21 essay-voice pieces, by hand.
 
 The sort that decides every case:
@@ -13,10 +13,10 @@ The sort that decides every case:
   procedure   — announcing the move instead of making it
   provenance  — revision history, discovery, formation, expectation.  A steelman describes
                 the OBJECTION itself, not how highly the author rates it.
-  terms       — naming this voice's own vocabulary to the reader.  THE WORST FORM: it stops
-                arguing and starts explaining the technique.
-  impersonal  — the same move with the *I* removed ("the limit has to be stated before the
-                observation is used").  The constitution says WATCH THIS ONE HARDEST, because
+  terms       — naming this voice's own vocabulary to the reader.  THE WORST FORM: the essay
+                turns from its argument to a lesson in its own method.
+  impersonal  — the same move with the *I* removed ("a caveat is owed here before going
+                on").  The constitution singles it out as the hardest to catch, because
                 it carries no first person and so reads as argument.
   architecture— pointing at the essay's own parts or the corpus ("this essay", "section four").
 

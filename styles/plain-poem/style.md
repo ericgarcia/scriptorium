@@ -22,7 +22,7 @@ It never summarizes the piece and never advertises it.
 
 ## Form
 
-- Free verse. No rhyme scheme or meter to fill; an unforced rhyme may stay.
+- Free verse. Rhyme and meter are optional; keep a rhyme only if it arrived on its own.
 - Break a line where a reader would breathe, or to hold a beat before a turn. Never for looks.
 - Stanzas of one to five lines. Sentence case; normal punctuation.
 - Length has no floor. Stop when it lands.

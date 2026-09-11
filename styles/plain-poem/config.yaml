@@ -3,7 +3,7 @@ form: poem              # see docs/COMPANIONS.md for the forms
 verse: free             # rhyme and meter optional, never required
 line: breath-or-beat    # end the line at a natural pause, or to delay the next word
 stanza: 1-5 lines
-length: no floor        # stop when it lands
+length: no floor        # end wherever the poem is finished
 title: plain-noun
 capitalization: sentence-case
 person: first

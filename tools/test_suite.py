@@ -1504,11 +1504,11 @@ def unit_pronouns(tmp):
     # footnote definition's King James wording is not, and LORD itself is never a hit
     d3 = os.path.join(tmp, 'pronouns-g'); os.makedirs(d3, exist_ok=True)
     with open(os.path.join(d3, 'draft.md'), 'w', encoding='utf-8') as f:
-        f.write("*Draft.*\n\n---\n\nI turned my life over to the Lord. *Wait on the LORD.*[^ps] "
+        f.write("*Draft.*\n\n---\n\nThe choir sang to the Lord. *Wait on the LORD.*[^ps] "
                 "The steward's lord came home.\n\n[^ps]: Psalm 27:14 (KJV): *Wait on the LORD*; "
                 "Matthew 22:37 reads *love the Lord thy God*.\n")
     r3 = check_pronouns.sweep(d3)
-    check('G lists the mixed-case "the Lord" in the author\'s prose', len(r3['G']) == 1 and 'over to the Lord' in r3['G'][0], str(r3['G']))
+    check('G lists the mixed-case "the Lord" in the author\'s prose', len(r3['G']) == 1 and 'sang to the Lord' in r3['G'][0], str(r3['G']))
     d4 = os.path.join(tmp, 'pronouns-g2'); os.makedirs(d4, exist_ok=True)
     with open(os.path.join(d4, 'draft.md'), 'w', encoding='utf-8') as f:
         f.write("*Draft.*\n\n---\n\n*Wait on the LORD.*[^ps] The steward's lord came home.\n\n"

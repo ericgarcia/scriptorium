@@ -79,8 +79,8 @@ not on disk, and on a slide with no script over it.
 
 ## Drafting
 
-- **Say it, then show it.** A figure is introduced in the script before the slide that carries
-  it, and read aloud after: what the axes are, where to look, what it means. The room cannot
+- **Introduce, then show.** The script sets up each figure before its slide appears and walks
+  through it once it is up: what the axes are, where to look, what it means. The room cannot
   study a chart while listening to a sentence.
 - **One claim per slide, and the slide carries only what listening can't** — a figure, a
   number, a source, one line meant to stick. Slide text is never the script and the
@@ -91,8 +91,8 @@ not on disk, and on a slide with no script over it.
   usually names it; the draft owes it.
 - **Figures are code.** Every figure the talk needs is produced by a script in
   `pieces/<slug>/assets/` (deterministic seed, one palette, one aspect ratio) and the output is
-  checked in beside it. A figure that cannot be regenerated cannot be corrected; a figure that
-  is not checked in is not in the piece. Name the figure in the outline first, generate it,
+  checked in beside it. If a figure can't be rebuilt it can't be fixed, and a figure missing
+  from the repo is missing from the piece. Name the figure in the outline first, generate it,
   then write the slide that shows it — the draft never references a figure that does not
   exist.
 - **Budget by the clock.** `md_to_marp.py` prints spoken words and minutes at the style's pace;
@@ -115,7 +115,7 @@ not on disk, and on a slide with no script over it.
 - Never edit `styles/<style>/style.md` or `config.yaml`; wording feedback goes to
   `corrections.md`.
 - Never invent a citation, a number, or a study result. The talk's sources are in `notes.md`
-  or they are `[bracketed]` for the author. A number spoken to a room is harder to retract
-  than one printed.
+  or they are `[bracketed]` for the author. A room cannot re-check a figure it only heard,
+  and a spoken error is hard to take back.
 - The deck is a rendering of the draft. Never edit `deck.md` by hand — it is regenerated; an
   edit there is lost at the next run and is not in the piece.

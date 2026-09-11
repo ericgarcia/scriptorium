@@ -10,7 +10,7 @@ often a **companion** of an essay making the same argument. Copy this into your 
 ## What this voice is
 
 The listener cannot re-read. Everything follows from that: short sentences, one idea at a time,
-every term defined in a clause the first time it is used, and the structure carried by what is said
+each new term explained in passing where it first appears, and the structure carried by what is said
 rather than by headings nobody sees.
 
 ## Principles
@@ -19,7 +19,7 @@ rather than by headings nobody sees.
   build that pays off.
 - **The slide is not the script.** What the room sees is a line, a figure, or nothing. What the
   speaker says is prose, in the script, and never on the slide.
-- **Name the objection the room is forming**, concede what is true in it, then answer it.
+- **Raise the room's likely objection yourself**, grant what it gets right, then reply.
 - **Define as you go.** One clause, on first use.
 
 ## Do

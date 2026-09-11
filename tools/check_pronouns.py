@@ -5,16 +5,16 @@ WHY THIS EXISTS (2026-09-03).  Three pronoun rules live in the constitutions and
 were being enforced by ad-hoc greps typed fresh in each session — and a rule no sweep checks
 is a rule nobody enforces.  *The Mask Comes Off Last* reached a composed Substack draft
 carrying twenty-one generic masculines for the villain (the 2026-09-01 rule said they/them),
-and then a lowercase *the one* for God (the essay voice capitalizes an oblique reference to
-God: *the One*, *Someone*).  Both were caught by Eric, after compose, reading the page.
+and then a lowercase *the one* for God (the essay voice capitalizes God named indirectly:
+*the One*, *Someone*).  Both were caught by Eric, after compose, reading the page.
 
 WHY E AND F EXIST (2026-09-07).  The first four sections stop at a quotation's edge — inside
 one, the source's case was taken as evidence and left alone.  But the constitution's casing and
 bracket rules reach INSIDE this house's own scripture (see `God_in_quotations`,
 `God_in_quotations_casing`, `God_in_quotations_exclusions` in the essay voice's config.yaml), and
 nothing was sweeping there.  *False Light*, 2026-09-07, measured four misses in one draft, all
-inside italic King James quotations: Matthew 4:10 *Him only shalt thou serve* (a capitalized
-*Him* whose referent is the Father — the house pronoun is *[Them]*, bracketed, since that is a
+inside italic King James quotations: Matthew 4:10 *Him only shalt thou serve* (a capital
+*Him* that refers to the Father — the house pronoun is *[Them]*, bracketed, since that is a
 substitution); Matthew 5:45 *He maketh His sun* (same: Father, so *[They make] [Their] sun*);
 John 5:30 *of mine own self* and John 15:5 *without me* (the Son speaking, whose own pronouns
 the house capitalizes inside a quotation — *Me*, *My*, *Mine* — as a casing convention, never
@@ -43,22 +43,22 @@ WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normali
      who is meant.  The capital can only be MISREAD where God is in play in the same paragraph, so
      both a figure and a God-word must be present, the figure nearer.  Listing every capital buried
      the real ones 485-deep, and listing every human-antecedent one still put 51 correct sentences
-     up for review (narrowed twice on 2026-09-10, Eric's call).  The repair is to restructure so
-     the pronoun falls mid-sentence, or to name the person.
+     up for review (narrowed twice on 2026-09-10, Eric's call).  Fix it by recasting the sentence
+     so the pronoun is not its first word, or by using the name.
      KNOWN LIMIT: `nearest antecedent` mis-attributes where a person's NAME sits beside a divine
      pronoun — a scripture citation (*John 10*), or an author quoted about God.  *None but He and
      I* reads its *He* as Brother Lawrence when the word is God's, in Lawrence's own phrase.
-  B. GENERIC MASCULINE  he/him/his/himself and *a man / the man / one man / any man*.  A
-     hypothetical person takes they/them; the exception is *this person actually exists*
-     (scripture, history, a named character, the author).  A person named in `figures:` in the
+  B. GENERIC MASCULINE  he/him/his/himself, and *a man*, *any man*, *one man*, *the man*.
+     An imagined person is they/them; a real one — from scripture, history or a story, or the
+     author — keeps their own pronouns.  A person named in `figures:` in the
      piece's publish.yaml — or passed with --names — is STICKY FOR THE REST OF ITS PARAGRAPH, and
      hits after them are theirs.  The old test was a 120-character lookback, far shorter than this
      desk's prose: *Rising After Falls* names Brother Lawrence once and then says *he* for two
      hundred words, and 85 of its 98 hits read GENERIC? when every one was Lawrence.
-  C. GOD AS A LOWERCASE OBLIQUE, OR AS A *WHAT*  lowercase *the one / someone / whoever /
-     something / a mind / one mind* in a sentence that also names God (God, Lord, Father,
-     Spirit, Them, infinite, dream(ing), remembering, the One).  The essay voice capitalizes
-     these (*the One who*, *Someone infinite*) and never lets God be a *what*.
+  C. GOD AS A LOWERCASE OBLIQUE, OR AS A *WHAT*  lowercase *someone / whoever / the one /
+     a mind / one mind / something* where the same sentence names God (God, Lord, Father,
+     Spirit, Them, infinite, dream(ing), remembering, the One).  The house capitalizes
+     these when they mean God, and never refers to God as a thing.
   D. LOWERCASE DEITY PRONOUN  he/him/his/it within six words after God / the Lord / the Father /
      the Spirit / Christ / Jesus, outside a verbatim quotation.  Inside a quotation the source's
      own case is evidence and stays (the KJV lowercases; the house capitalizes in its own prose
@@ -97,7 +97,7 @@ WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normali
   diction (thou / thee / thy / ye / hath / shalt / -eth …) also counts — the Matthew 4:10 miss
   was exactly a span whose ref sat on a different span two sentences earlier.  Each hit says
   which evidence qualified it (`ref:matt4` or `kjv-diction`).  Footnote DEFINITIONS are never
-  swept by E or F: the footnote that records the source wording keeps it unaltered, and is the
+  swept by E or F: a footnote carries the source's own wording unchanged, and that is the
   disclosure.  The three exclusions in the constitution (another organization's fixed text; a
   text quoted as evidence about its translators; any non-Judeo-Christian scripture) are
   judgments the tool cannot make — a hit inside one of those is justified by naming the
@@ -114,9 +114,8 @@ USAGE
                 H each need a human call on a referent or a speaker, which no rule can make.
     G lists every *Lord* (mixed case) outside a footnote definition — the house sets *the LORD*
     in capitals wherever the word names God (2026-09-07), own prose and quoted scripture alike,
-    so each remaining *Lord* is justified by naming what it is instead: a parable's lord, Caesar
-    as lord, another tradition's Lord, a made-up god, a fixed text, a work's received title (the
-    Lord's Prayer). A justified G-hit is silenced the same way as a C-hit, by a substring under
+    so each remaining *Lord* is justified by naming what it is instead: the lord in a parable, an emperor called lord, the Lord of another faith, an invented deity, an
+    institution's fixed wording, or a title such as the Lord's Prayer. A justified G-hit is silenced the same way as a C-hit, by a substring under
     `pronouns_allow:` in publish.yaml. Footnote definitions are never swept: the note that records
     the King James's wording keeps the King James's own *Lord*.
     A hit in C, D, E, F, G or H whose referent has been named is justified by listing a substring
@@ -474,8 +473,8 @@ def sweep(piece, names=(), allow=None):
             D.append((m.group(3), ctx(s, m, 50)))
     # E and F look INSIDE scripture quotations, which A–D deliberately do not.  They run on
     # paragraphs, not sentences, because a quotation can hold more than one sentence and its
-    # footnote ref sits after the closing `*`.  Footnote definitions are skipped: the note that
-    # records the source wording keeps it unaltered, and is the disclosure.
+    # footnote ref sits after the closing `*`.  Footnote definitions are skipped: a footnote
+    # carries the source's own wording unchanged, and that is the disclosure.
     defs = footnote_defs(text)
     for flat in paragraphs(text):
         if re.match(r'^\[\^[^\]]+\]:', flat):
@@ -513,9 +512,9 @@ def sweep(piece, names=(), allow=None):
         H.extend(reflexive_hits(flat, allow))
         # I — a creature rendered as a *what*.  The publication's position is that God, any person
         # and any ANIMAL is a *who*; the pronoun rules forbid *it* but govern only PRONOUNS, and the
-        # *what* rule had named God and persons and stopped — so "Something came through here," said
+        # *what* rule covered God and people but not animals — so "Something came through here," said
         # of whatever a dog is smelling, was compliant with both and shipped through a draft, two
-        # critiques and a compose (Eric, 2026-09-10: animals are never things).
+        # critiques and a compose (2026-09-10: an animal is never a thing).
         # This flags the WORD and asks about the REFERENT, because the same sentence can hold both:
         # in "the dog dug something up by the fence" the dog is a who and the bone is a what.
         for m in re.finditer(r"\b(Something|something|Anything|anything|Nothing|nothing)\b", flat):

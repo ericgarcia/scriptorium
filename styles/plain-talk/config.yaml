@@ -3,7 +3,7 @@ form: talk              # the form this voice writes in — see docs/COMPANIONS.
 formality: 2
 sentence_length: short-to-medium
 person: we/you
-pace_wpm: 130           # md_to_marp.py and the review page report minutes at this pace
+pace_wpm: 130           # spoken words per minute; the timing estimates use it
 slide_text_max_words: 20
 bullets_max: 3
 closing: do-then-line

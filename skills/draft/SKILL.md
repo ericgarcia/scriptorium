@@ -127,7 +127,7 @@ app's session list then reads as a shelf of pieces instead of a row of identical
     Inventing plausible detail about a real thing is the same fault as inventing it
     about a real person, and it is easier to commit because the thing has no
     feelings to bruise.
-  - **The check is weakest exactly where the prose is strongest.** A made-up
+  - **Invention hides best in the strongest prose.** A made-up
     detail looks no different on the page from a true one, and the temptation to
     supply one is greatest in an opening, a close, and any passage being rewritten to
     repair an earlier invention. The most satisfying lines are the first ones to hold

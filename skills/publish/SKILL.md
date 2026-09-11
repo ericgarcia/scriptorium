@@ -401,8 +401,8 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
 0b-pronouns. **Run the pronoun sweep, and justify every hit by naming who it points at:**
    `python3 framework/tools/check_pronouns.py pieces/<name> --names <the named figures> --strict`
    It lists sentence-initial forced capitals (a capital *He* silently reassigns a referent to the
-   Son), every masculine pronoun and *a man / the man* (a hypothetical person takes they/them; the
-   exception is *this person actually exists*), any lowercase *the one / someone / a mind* in a
+   Son), every masculine pronoun and the phrases *a man*, *the man* (an imagined person is they/them;
+   a real person's own pronouns stand), any lowercase *the one / someone / a mind* in a
    sentence that names God (this voice writes *the One*, *Someone*, and never lets God be a
    *what*), and any lowercase deity pronoun outside a quotation. **`--strict` refuses on those
    last two.** Added 2026-09-03 after *The Mask Comes Off Last* reached a composed draft with

@@ -259,8 +259,8 @@ verified:
     <what was actually checked, in a sentence a stranger could audit — which sources,
     against what, and anything deliberately left unchecked>
 
-Write what is true. A clearance that overstates what was checked is worse than none,
-because it ends the search."""
+Say only what was actually checked. An inflated clearance does more harm than a missing
+one: it stops anyone from looking further."""
 
 
 def main():

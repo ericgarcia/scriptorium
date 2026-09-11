@@ -405,8 +405,8 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    *what*), and any lowercase deity pronoun outside a quotation. **`--strict` refuses on those
    last two.** Added 2026-09-03 after *The Mask Comes Off Last* reached a composed draft with
    twenty-one generic masculines and a lowercase *the one* for God — both rules were in force,
-   neither was in any sweep, and both were caught by the author reading the page. **A rule that
-   is not in the sweep list is not in force.**
+   neither was in any sweep, and both were caught by the author reading the page. **A rule no
+   sweep checks is a rule nobody enforces.**
    Two more sections look **inside** a scripture quotation, where the first four stop (added
    2026-09-07): **E** lists every capitalized *He / Him / His / Himself* inside an italic or
    blockquoted scripture quotation, with its sentence — justify each as the Son, or, where the

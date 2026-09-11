@@ -131,9 +131,9 @@ landed on shared singletons**, so those are the things with rules.
   style constitution is load-bearing and changes slowly.
 - **Add structure only when it's used.** A new skill, style, or template earns
   its place by being used, not by being anticipated.
-- **The scaffold holds the reasoning; the prose carries only the result.** When a
-  correction lands, regenerate the prose to be simply *right* — never write a
-  defense of the change into the draft. The reader never saw the earlier version; a
-  clause arguing against it ("but that was never really about X") only shows the
-  seams of the process. Corrections, facts, and notes stay in the scaffold; the
-  draft reads as if it had always been correct.
+- **The scaffold holds the reasoning; the prose carries only the result.** A correction
+  replaces the wrong text with the corrected text and adds nothing: no sentence in
+  the draft explains or justifies the change. Readers only ever meet the current
+  version, so a line that disputes an earlier one ("but that was never really about
+  X") exposes the editing instead of advancing the argument. The why belongs in the
+  scaffold — corrections, facts, notes — and the draft stays clean of it.

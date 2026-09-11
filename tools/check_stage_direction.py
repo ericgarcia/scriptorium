@@ -7,12 +7,12 @@ the desk's own rule is that A RULE NOT IN THE SWEEP LIST IS NOT IN FORCE — the
 corpus audit found it in 20 of 21 essay-voice pieces, by hand.
 
 The sort that decides every case:
-    CONCEDING A WEAKNESS IS CONTENT.  NARRATING HOW YOU CAME TO CONCEDE IT IS NOT.
-    "So, precisely:" stays.  "let me be precise about what I am not claiming" goes.
+    ADMITTING A LIMIT IS PART OF THE ARGUMENT.  NARRATING THE ADMISSION IS NOT.
+    "Strictly, then:" stays.  "I want to be careful here about the scope of my claim" goes.
 
   procedure   — announcing the move instead of making it
-  provenance  — revision history, discovery, formation, expectation.  The steelman is a claim
-                about the OBJECTION, never about the author's estimate of it.
+  provenance  — revision history, discovery, formation, expectation.  A steelman describes
+                the OBJECTION itself, not how highly the author rates it.
   terms       — naming this voice's own vocabulary to the reader.  THE WORST FORM: it stops
                 arguing and starts explaining the technique.
   impersonal  — the same move with the *I* removed ("the limit has to be stated before the

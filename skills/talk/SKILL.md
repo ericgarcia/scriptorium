@@ -82,12 +82,12 @@ not on disk, and on a slide with no script over it.
 - **Say it, then show it.** A figure is introduced in the script before the slide that carries
   it, and read aloud after: what the axes are, where to look, what it means. The room cannot
   study a chart while listening to a sentence.
-- **One claim per slide; the slide holds what the ear cannot** — a figure, a number, a
-  citation, a single line the speaker wants remembered. Slide text is never the script and the
+- **One claim per slide, and the slide carries only what listening can't** — a figure, a
+  number, a source, one line meant to stick. Slide text is never the script and the
   script never reads the slide.
 - **The movement boundary is spoken once**, in one sentence, and the slide's section title
   does the rest. No "in this section I will."
-- **Land each movement on one line** the audience could repeat in the hallway. The outline
+- **End each movement on a single line** someone could quote back after the talk. The outline
   usually names it; the draft owes it.
 - **Figures are code.** Every figure the talk needs is produced by a script in
   `pieces/<slug>/assets/` (deterministic seed, one palette, one aspect ratio) and the output is
@@ -105,8 +105,8 @@ not on disk, and on a slide with no script over it.
    minute count per movement against the outline, and a fresh `slides/` folder.
 2. Render the deck once and look at it: a figure that is unreadable at slide size is a figure
    to regenerate, not to caption around.
-3. `check_pronouns.py` on the draft as for any piece (an invented person is *they/them*; the
-   house's deity conventions stand wherever God is named).
+3. `check_pronouns.py` on the draft as for any piece (a hypothetical person takes
+   *they/them*, and the house's conventions for naming God apply to a talk as to a page).
 4. Log the session (dated, append-only), update the piece README's `Stage:` and `Next move:`,
    refresh the dashboard fragment, `dashboard.py sync`.
 

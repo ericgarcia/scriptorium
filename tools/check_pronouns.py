@@ -2,8 +2,8 @@
 """check_pronouns.py — the pronoun sweeps this desk kept doing by hand, as one tool.
 
 WHY THIS EXISTS (2026-09-03).  Three pronoun rules live in the constitutions and all three
-were being enforced by ad-hoc greps typed fresh in each session — and a rule that is not in
-the sweep list is not in force.  *The Mask Comes Off Last* reached a composed Substack draft
+were being enforced by ad-hoc greps typed fresh in each session — and a rule no sweep checks
+is a rule nobody enforces.  *The Mask Comes Off Last* reached a composed Substack draft
 carrying twenty-one generic masculines for the villain (the 2026-09-01 rule said they/them),
 and then a lowercase *the one* for God (the essay voice capitalizes an oblique reference to
 God: *the One*, *Someone*).  Both were caught by Eric, after compose, reading the page.
@@ -427,7 +427,7 @@ def sweep(piece, names=(), allow=None):
                     A.append((m.group(1), f'God is named in this paragraph too; nearest is {who}',
                               s[:130]))
             # B — generic masculine, with a declared figure sticky for the rest of its paragraph
-            for m in re.finditer(r"\b(he|him|his|himself|a man|the man|one man|any man|man who)\b", s):
+            for m in re.finditer(r"\b(himself|him|his|he|any man|one man|the man|a man|man who)\b", s):
                 if in_quote(m.start()):
                     continue
                 w = s[max(0, m.start()-60):m.end()+60]
@@ -517,7 +517,7 @@ def sweep(piece, names=(), allow=None):
         # of whatever a dog is smelling, was compliant with both and shipped through a draft, two
         # critiques and a compose (Eric, 2026-09-10: animals are never things).
         # This flags the WORD and asks about the REFERENT, because the same sentence can hold both:
-        # in "someone ate something worth knowing about" the eater moves and the meal does not.
+        # in "the dog dug something up by the fence" the dog is a who and the bone is a what.
         for m in re.finditer(r"\b(Something|something|Anything|anything|Nothing|nothing)\b", flat):
             window = flat[max(0, m.start()-90):m.end()+90]
             if not CREATURE_NEAR.search(window):

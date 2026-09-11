@@ -10,8 +10,8 @@ e.g. "a 45-minute argued talk to a mixed technical room; deadpan, generous to th
 the slides carry what the ear cannot and never the script.">
 
 ## The rule every slide obeys
-- **One claim per slide.** The slide holds what the ear cannot: a figure, a number, a citation,
-  or one line to remember. It is never the script, and the speaker never reads it.
+- **One claim per slide.** A slide shows only what a listener can't take in by ear: a figure,
+  a number, a source, or one line to keep. It is never the script, and the speaker never reads it.
 - **Nothing on a slide the speaker did not write.** The per-slide brief gives the text
   verbatim; do not add, cut, or rephrase it. Design the presentation of it.
 - **The back row is the reader.** Minimum type size on a body line: <NN pt at 16:9 1280×720>.

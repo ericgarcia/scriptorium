@@ -1327,9 +1327,9 @@ PRONOUN_FIXTURE = """*Draft — fixture for the pronoun sweep; the four False Li
 
 ---
 
-And the answer: *Get thee hence.*[^matt4] Not riches in the abstract. And the reason He gives is
-worth the whole essay: *Thou shalt worship the Lord thy God, and Him only shalt thou serve.* The
-question on the mountain was never competence.
+And the answer: *Get thee hence.*[^matt4] And the reason He gives is
+short: *It is written, Him only shalt thou serve.* The fixture needs
+no more of the passage than that.
 
 *For He maketh His sun to rise on the evil and on the good, and sendeth rain on the just and on
 the unjust.*[^matt545] The rain is not a reward.

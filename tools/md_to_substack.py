@@ -85,6 +85,39 @@ def read_manifest(path):
 UNSETTLED = re.compile(r'\b(?:proposed|proposal|not (?:yet )?settled|unsettled|placeholder|tbd|tk|working title)\b', re.I)
 SETTLED = re.compile(r'(?<!not )(?<!not yet )(?<!un)settled\b', re.I)
 
+# A caption says what the image REPRESENTS in the piece. Provenance ("generated", "not a
+# photograph") is recorded in publish.yaml beside `cover:`, and a disclaimer ("not a likeness
+# of") is a warning label, not a caption. Measured 2026-09-10: a hero was captioned "... An
+# imagined scene, not a likeness of ...", because the rule said only that a caption "must not
+# imply a photograph". Rule: framework/docs/ALT-TEXT.md, Captions.
+CAPTION_PROVENANCE = re.compile(
+    r"\b(?:ai[- ]generated|generated (?:image|by|with)|not a (?:photo(?:graph)?|likeness|portrait)|"
+    r"imagined scene|artist'?s (?:impression|rendering)|illustration of|stock (?:photo|image)|"
+    r"(?:photo(?:graph)?|image) (?:by|credit)|courtesy of)\b", re.I)
+
+def _strip_comment(v):
+    return re.split(r'\s+#', v, maxsplit=1)[0].strip() if isinstance(v, str) else ''
+
+def _hero_alt(piece_dir, cover):
+    """The alt text the draft gives its hero image, or ''."""
+    fp = os.path.join(piece_dir, 'draft.md')
+    if not cover or not os.path.exists(fp):
+        return ''
+    m = re.search(r'!\[([^\]]*)\]\(' + re.escape(cover) + r'\)', open(fp, encoding='utf-8').read())
+    return m.group(1) if m else ''
+
+def _shared_run(a, b):
+    """The longest run of consecutive words two strings share, normalized."""
+    norm = lambda t: re.sub(r"[^a-z0-9 ]", '', re.sub(r'\s+', ' ', t.lower().replace('\u2019', "'").replace("'", ''))).split()
+    wa, hay, best = norm(a), ' ' + ' '.join(norm(b)) + ' ', ''
+    for i in range(len(wa)):
+        for j in range(len(wa), i, -1):
+            run = ' '.join(wa[i:j])
+            if len(run) > len(best) and (' ' + run + ' ') in hay:
+                best = run
+                break
+    return best
+
 def manifest_gate(piece_dir):
     """Is the reader-facing header of this post complete?  Returns (errors, warnings).
 
@@ -125,6 +158,17 @@ def manifest_gate(piece_dir):
             if UNSETTLED.search(note) and not (SETTLED.search(note)
                                                 and not re.search(r'not (?:yet )?settled|unsettled', note, re.I)):
                 warnings.append(f'{key} is marked unsettled: {note[:70]}')
+    # The caption: a WARNING, never a refusal -- the wording is the author's, and a warning is
+    # how this gate already treats a header line the author has not signed off.
+    cap = _strip_comment(man.get('cover_caption', ''))
+    if cap and cap not in ('>', '>-', '|', '|-'):
+        if CAPTION_PROVENANCE.search(cap):
+            warnings.append(f'cover_caption reads as provenance or a disclaimer, not meaning: "{cap[:70]}" '
+                            '-- a caption says what the image represents (framework/docs/ALT-TEXT.md, Captions)')
+        run = _shared_run(cap, _hero_alt(piece_dir, _strip_comment(man.get('cover', ''))))
+        if len(run.split()) >= 4:
+            warnings.append(f'cover_caption repeats the alt ("{run}") -- the alt describes the image, '
+                            'the caption says what it means (framework/docs/ALT-TEXT.md, Captions)')
     return errors, warnings
 
 def esc(s):

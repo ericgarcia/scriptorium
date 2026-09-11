@@ -48,8 +48,8 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
 - **In auto mode, the pane's snippet path needs its standing rule in force:**
   `python3 framework/tools/automode.py check` (exit 0). Exit 3 means missing or stale: run
   `automode.py install` on the author's yes. It writes their user settings, the only scope the
-  classifier reads. A session started before the install may not see the rule. See *Getting a
-  snippet into the page* below.
+  classifier reads. A running session picks the rule up without restarting (measured). See
+  *Getting a snippet into the page* below.
 - **Which mode:** no `post_url` → **fresh compose** (the default flow below), browser open on a
   **fresh empty** composer (`https://<pub>.substack.com/publish/post?type=newsletter`).
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
@@ -864,7 +864,12 @@ it builds the rule from this desk's Substack outlets in `outlets.yaml`, and re-r
 only its own entry. It writes the author's user settings, so it runs on the author's yes, once per
 machine. **`automode.py check`** reads `claude auto-mode config`, the rules actually in force,
 not a settings file. (Measured 2026-09-11: a rule in `settings.local.json` did not appear in
-`auto-mode config`.) **If the
+`auto-mode config`.) **The rule takes effect at once, in sessions that predate it** — measured
+2026-09-11 in a session that had been running for hours before `install` ran, and had been
+refused twice that afternoon: `check` reported it in force, and the same no-op re-sync of *Son of
+Joseph* was then allowed (`stagedEdits: 0`, `failed: []`, marks unchanged 116, **Continue**
+disabled before and after, `substack_verify --fresh` MATCH). So nobody has to restart a session
+to pick it up. **If the
 classifier refuses, stop and tell the author.** Do not go looking for a way around the refusal:
 a standing rule is the author's authorization to give, and a workaround would be the agent
 granting itself one.

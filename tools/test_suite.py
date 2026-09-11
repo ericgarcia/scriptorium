@@ -1851,6 +1851,62 @@ def unit_store(tmp):
           and store_publish.content_type('a/b.js').startswith('text/javascript')
           and store_publish.content_type('a/b.json') == 'application/json')
 
+    # --- revalidate: a publish is visible at once, but never before the CDN turns over ---
+    check('revalidate: only the JSON a site reads is sent, never an image or a deck',
+          store_publish.revalidate_keys(['images/a/hero.webp', 'pieces/a.json', 'index.json',
+                                         'talks/t/deck.html']) == ['index.json', 'pieces/a.json'])
+    import hashlib as _hl
+    new, old = b'{"v": 2}', b'{"v": 1}'
+    md5_new = _hl.md5(new).hexdigest()
+    serving = {'pieces/a.json': old}
+    seen_urls = []
+    def fake_get(url):
+        seen_urls.append(url)
+        key = url.split('/', 3)[3]
+        return (200, serving[key]) if key in serving else (404, b'')
+    check('revalidate: the CDN still holding the old bytes is not current',
+          not store_publish.cdn_current(fake_get, 'https://cdn.test', 'pieces/a.json', md5_new))
+    check('revalidate: the CDN is polled with no cache-busting query — what the site would get',
+          seen_urls and '?' not in seen_urls[-1])
+    check('revalidate: a deleted key is current once the CDN answers 404',
+          store_publish.cdn_current(fake_get, 'https://cdn.test', 'pieces/gone.json', None))
+    clock = [0.0]
+    def fake_sleep(s):
+        clock[0] += s
+        serving['pieces/a.json'] = new                 # the edge turns over during the wait
+    late = store_publish.wait_for_cdn(fake_get, 'https://cdn.test', {'pieces/a.json': md5_new},
+                                      timeout=30, every=3, sleep=fake_sleep, clock=lambda: clock[0])
+    check('revalidate: the wait returns as soon as the CDN serves the new bytes', late == [] and clock[0] == 3)
+    serving['pieces/a.json'] = old
+    clock[0] = 0.0
+    late = store_publish.wait_for_cdn(fake_get, 'https://cdn.test', {'pieces/a.json': md5_new},
+                                      timeout=9, every=3, sleep=lambda s: clock.__setitem__(0, clock[0] + s),
+                                      clock=lambda: clock[0])
+    check('revalidate: an edge that never turns over is reported, not waited on forever',
+          late == ['pieces/a.json'] and clock[0] == 9, f'{late} at t={clock[0]}')
+    posted = []
+    def fake_post(answer):
+        def post(url, data, headers):
+            posted.append((url, json.loads(data), headers.get('Authorization')))
+            return answer
+        return post
+    ok, msg = store_publish.ping(fake_post((200, '{"revalidated": ["quire:piece:a"], "ignored": []}')),
+                                 'https://site.test/api/revalidate/', 'SEKRIT', ['pieces/a.json'])
+    check('revalidate: the keys go with the bearer, and the site\'s expired tags are reported',
+          ok and 'quire:piece:a' in msg
+          and posted[-1] == ('https://site.test/api/revalidate/', {'keys': ['pieces/a.json']}, 'Bearer SEKRIT'))
+    check('revalidate: a refusal is not a pass',
+          not store_publish.ping(fake_post((401, '{"error": "unauthorized"}')), 'u', 's', ['x.json'])[0])
+    check('revalidate: a 200 that expired nothing is not a pass',
+          not store_publish.ping(fake_post((200, '{"revalidated": [], "ignored": ["x.json"]}')), 'u', 's', ['x.json'])[0])
+    check('revalidate: an unreachable site is not a pass',
+          not store_publish.ping(fake_post((None, 'timed out')), 'u', 's', ['x.json'])[0])
+    class _R:
+        def __init__(self, rc, out): self.returncode, self.stdout = rc, out
+    check('revalidate: the secret is read from the Keychain, and a missing one is None',
+          store_publish.keychain_secret('svc', run=lambda *a, **k: _R(0, 'abc\n')) == 'abc'
+          and store_publish.keychain_secret('svc', run=lambda *a, **k: _R(44, '')) is None)
+
     # a bundle from a fixture deck
     talk = os.path.join(tmp, 'talk-src'); os.makedirs(talk, exist_ok=True)
     deck = os.path.join(tmp, 'talk-deck'); os.makedirs(os.path.join(deck, 'assets'), exist_ok=True)

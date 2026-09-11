@@ -29,6 +29,25 @@ Three properties worth stating, because each is a decision:
   FIRE AND     An invalidation is created and not waited on. The publishing role can
   FORGET       create invalidations but cannot read them back, so a wait step fails with
                AccessDenied and looks like a broken publish. Confirm by re-fetching.
+
+Then, for every site under `revalidate:` in the config, the publish is made visible at once
+rather than within a minute (quire 0.17, `quire/next`):
+
+  REVALIDATE   Wait until the CDN serves the uploaded bytes of every JSON key that changed —
+               re-fetching, since the invalidation cannot be read back — then POST those keys
+               to the site, which expires exactly their cache tags. Order matters: a site
+               told to refetch while the edge still holds the old copy re-caches the old text
+               for another window, so a key the CDN has not yet turned over is never pinged.
+               The secret comes from the macOS Keychain (`secret_keychain`), never the config.
+
+    revalidate:
+      - site: alignmentfellowship
+        url: https://alignmentfellowship.org/api/revalidate/
+        secret_keychain: quire-revalidate-alignmentfellowship
+
+Exit 0 published (and revalidated, where configured); 1 usage or config; 4 and 7 refusals
+(see below); 5 uploaded, but a site could not be confirmed revalidated — it catches up by
+itself within its revalidate window, so this is a delay, not a lost publish.
 """
 
 import argparse
@@ -36,7 +55,11 @@ import hashlib
 import json
 import mimetypes
 import os
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 
 try:
     import boto3
@@ -171,6 +194,89 @@ def publication_conflicts(live, bundle):
     return sorted(out)
 
 
+def revalidate_keys(changed):
+    """The changed keys a site reads as data: its JSON. An image or a deck is immutable by
+    name (see cache_control), so a site has nothing to expire for it."""
+    return sorted(k for k in changed if k.endswith('.json'))
+
+
+def http_get(url, timeout=20):
+    """(status, body bytes); status None when the request itself failed."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, b''
+    except Exception:                                             # noqa: BLE001
+        return None, b''
+
+
+def http_post(url, data, headers, timeout=20):
+    """(status, body text); status None when the request itself failed."""
+    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode('utf-8', 'replace')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8', 'replace')
+    except Exception as e:                                        # noqa: BLE001
+        return None, str(e)
+
+
+def cdn_current(fetch, base_url, key, want_md5):
+    """Does the CDN serve what was just published at this key? `want_md5` None means the key
+    was deleted, so current is 404/403.
+
+    Fetched WITHOUT a cache-busting query on purpose: the site's own fetch carries none, and
+    the question is what the site would get, not what the origin holds."""
+    status, body = fetch(base_url.rstrip('/') + '/' + key)
+    if want_md5 is None:
+        return status in (403, 404)
+    return status == 200 and hashlib.md5(body).hexdigest() == want_md5
+
+
+def wait_for_cdn(fetch, base_url, want, timeout=120, every=3, sleep=time.sleep, clock=time.monotonic):
+    """Re-fetch until the CDN serves every key in `want` ({key: md5 or None}) as published.
+    -> the keys still stale when time ran out; [] when all are current."""
+    deadline = clock() + timeout
+    pending = dict(want)
+    while True:
+        pending = {k: m for k, m in pending.items() if not cdn_current(fetch, base_url, k, m)}
+        if not pending or clock() >= deadline:
+            return sorted(pending)
+        sleep(every)
+
+
+def keychain_secret(service, run=subprocess.run):
+    """The site's revalidation secret from the macOS Keychain, or None. Never logged."""
+    try:
+        r = run(['security', 'find-generic-password', '-s', service, '-w'],
+                capture_output=True, text=True)
+    except OSError:
+        return None
+    s = (r.stdout or '').strip()
+    return s if r.returncode == 0 and s else None
+
+
+def ping(post, url, secret, keys):
+    """POST the changed keys to one site. -> (ok, message). The site answers with the tags it
+    expired, so a 200 that expired nothing is reported as it is rather than as success."""
+    status, body = post(url, json.dumps({'keys': keys}).encode(),
+                        {'Authorization': f'Bearer {secret}', 'Content-Type': 'application/json'})
+    if status is None:
+        return False, f'unreachable — {body}'
+    if status != 200:
+        return False, f'HTTP {status} — {body[:200]}'
+    try:
+        got = json.loads(body)
+    except ValueError:
+        return False, f'HTTP 200 but not JSON — {body[:200]}'
+    tags = got.get('revalidated') or []
+    if not tags:
+        return False, f"HTTP 200 but nothing expired (ignored: {', '.join(got.get('ignored') or []) or 'none'})"
+    return True, f"expired {', '.join(tags)}"
+
+
 def live_index(base_url):
     """The store's current index.json, {} if the store has none yet."""
     import urllib.request, urllib.error
@@ -194,6 +300,8 @@ def main():
     ap.add_argument('--prune', action='store_true',
                     help='also DELETE store objects the bundle does not contain')
     ap.add_argument('--no-invalidate', action='store_true')
+    ap.add_argument('--no-revalidate', action='store_true',
+                    help='skip telling the sites; they catch up within their revalidate window')
     a = ap.parse_args()
 
     if not os.path.isdir(a.bundle):
@@ -323,8 +431,42 @@ def main():
         },
     )
     print(f"invalidation {inv['Invalidation']['Id']} created for "
-          f"{len(paths)} path(s) — not waiting (see publishing/store.yaml)")
-    return 0
+          f"{len(paths)} path(s) — not waiting on it; confirming by re-fetch below")
+
+    targets = cfg.get('revalidate') or []
+    if a.no_revalidate or not targets:
+        return 0
+    deleted = stale if a.prune else []
+    keys = revalidate_keys([k for k, _ in upload] + deleted)
+    if not keys:
+        print("revalidate  nothing a site reads as data changed")
+        return 0
+    if not store.get('base_url'):
+        die(1, f'{a.config}: store.base_url is required to confirm the CDN before revalidating')
+    want = {k: (None if k in deleted else md5(local[k])) for k in keys}
+    print(f"revalidate  waiting for the CDN to serve {len(keys)} key(s) as published …")
+    t0 = time.monotonic()
+    late = wait_for_cdn(http_get, store['base_url'], want)
+    if late:
+        print(f"  NOT revalidated: after {int(time.monotonic() - t0)}s the CDN still serves the old "
+              f"{', '.join(late)}. Telling a site to refetch now would re-cache the old text; "
+              f"the sites catch up by themselves within their revalidate window.")
+        return 5
+    print(f"  the CDN serves every key as published ({time.monotonic() - t0:.0f}s)")
+    rc = 0
+    for t in targets:
+        name = t.get('site') or t.get('url')
+        secret = keychain_secret(t['secret_keychain']) if t.get('secret_keychain') else None
+        if not secret:
+            print(f"  {name}: NOT revalidated — no secret in Keychain service "
+                  f"{t.get('secret_keychain')!r}")
+            rc = 5
+            continue
+        ok, msg = ping(http_post, t['url'], secret, keys)
+        print(f"  {name}: {msg}")
+        if not ok:
+            rc = 5
+    return rc
 
 
 if __name__ == '__main__':

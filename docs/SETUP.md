@@ -18,6 +18,20 @@ against a **local** scriptorium checkout (before it's pushed anywhere), pass it:
 tools/new-desk ~/code/writing-desk --framework /Users/you/code/scriptorium
 ```
 
+Turn on the pre-push check before the first push, so that push is checked too:
+
+```bash
+cd ~/code/writing-desk
+python3 framework/tools/prepush.py install
+git add .githooks/pre-push && git commit -m "pre-push: run CI before every push"
+```
+
+From then on every `git push` runs `tools/ci_check.py` — the command CI runs — on an export of
+exactly the commit being pushed, in a venv holding only `framework/requirements-ci.txt`, and
+refuses the push if it is red. `install` writes the desk's `.githooks/pre-push` if it is missing
+and points `core.hooksPath` at it in the desk and in `framework/`. Run it once in every clone:
+git keeps hook settings per clone. Never `git push --no-verify`.
+
 Then create the private GitHub repo when you're ready:
 
 ```bash
@@ -142,4 +156,6 @@ git commit -am "Update scriptorium framework"
 git clone --recurse-submodules <your instance repo>
 # or, after a plain clone:
 git submodule update --init
+# then, in every clone (git keeps hook settings per clone, not in the repo):
+python3 framework/tools/prepush.py install
 ```

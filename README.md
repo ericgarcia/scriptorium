@@ -165,6 +165,21 @@ See [docs/SETUP.md](docs/SETUP.md), or just run the scaffolding tool:
 tools/new-desk ~/code/writing-desk
 ```
 
+Then, in the new desk, turn on the pre-push check. Do it once in **every clone** too: git keeps
+hook settings per clone, not in the repo.
+
+```bash
+python3 framework/tools/prepush.py install
+```
+
+`install` points `core.hooksPath` at `.githooks` in the desk and in `framework/`, writes the desk's
+`.githooks/pre-push` if it is missing (commit that file), and builds a venv from
+`requirements-ci.txt` (it needs the network once, for pip). From then on every `git push` first
+runs `tools/ci_check.py` — the same command CI runs — on an export of exactly the commit being
+pushed, and refuses the push if it is red. A desk push whose framework pointer is not yet on the
+framework's `origin/main` is refused too: push the framework first. Don't bypass it with
+`git push --no-verify`.
+
 ## What's inside
 
 - `skills/draft` — continue or start a piece in a chosen style.

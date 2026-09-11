@@ -45,6 +45,11 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   body under the in-text cross-link convention. Record both when a piece goes live: a piece that
   carried only the editor URL left a sibling essay with no correct link to reach for. Take the
   slug from the publication's archive rather than guessing it from the title.
+- **In auto mode, the pane's snippet path needs its standing rule in force:**
+  `python3 framework/tools/automode.py check` (exit 0). Exit 3 means missing or stale: run
+  `automode.py install` on the author's yes. It writes their user settings, the only scope the
+  classifier reads. A session started before the install may not see the rule. See *Getting a
+  snippet into the page* below.
 - **Which mode:** no `post_url` → **fresh compose** (the default flow below), browser open on a
   **fresh empty** composer (`https://<pub>.substack.com/publish/post?type=newsletter`).
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
@@ -783,10 +788,31 @@ fails loudly rather than sharing**, and prints the carry URL and the payload's *
    ceremony: *a port is not an identity; identify the bytes at the point of use.* It is what makes
    an unauthenticated localhost hop safe, and it is the step someone will be tempted to skip.
 4. Execute by appending an inline `<script>` whose `textContent` is the verified payload,
-   assigning the snippet's promise to a global you read next.
-   **A bare `eval` of an opaque variable is refused by the agent's own permission classifier, and
-   that refusal is correct.** The script-element form is the ordinary way to run a script and it
-   keeps the hash gate in front of execution. Do not go looking for a way around the refusal.
+   assigning the snippet's result to a global you read next. **Steps 3 and 4 are ONE
+   `javascript_tool` call:** check the page is the editor, re-hash, `throw` on a mismatch, and only
+   then inject. The hash gate is in front of execution because it is in the same call.
+
+**In auto mode the classifier decides, and it has decided both ways.** It refuses a bare `eval`
+of an opaque variable, and that refusal is correct. It **refused the script-element form too**, on
+a live post on 2026-09-10. On 2026-09-11 it **allowed** the same form on a no-op re-sync of *Son
+of Joseph*, with no standing rule loaded: the author had asked for the run in that session, and
+the one call checked the page, re-hashed, and threw before injecting. (Hash matched in the page,
+`stagedEdits: 0`, the button **Continue**/disabled before and after, `substack_verify --fresh`
+MATCH 80/80, 36/36, 138/138.) **That allow was the classifier's judgment, not a permission.**
+Do not count on it next time.
+
+**A standing `autoMode.allow` rule only works in USER scope.** The classifier ignores `autoMode`
+in `.claude/settings.json` **and** `.claude/settings.local.json`, by design: both live in the
+repo, and a repo must not grant itself allowances. A rule placed there is inert. It has to go in
+`~/.claude/settings.json`, and **`python3 framework/tools/automode.py install`** puts it there:
+it builds the rule from this desk's Substack outlets in `outlets.yaml`, and re-running it replaces
+only its own entry. It writes the author's user settings, so it runs on the author's yes, once per
+machine. **`automode.py check`** reads `claude auto-mode config`, the rules actually in force,
+not a settings file. (Measured 2026-09-11: a rule in `settings.local.json` did not appear in
+`auto-mode config`.) **If the
+classifier refuses, stop and tell the author.** Do not go looking for a way around the refusal:
+a standing rule is the author's authorization to give, and a workaround would be the agent
+granting itself one.
 
 Don't hand-write the carrier page: a transport that is reassembled from memory each time is a
 transport whose hash check eventually goes missing.

@@ -2367,6 +2367,79 @@ def unit_substack_account(tmp):
           "fetch('/api/v1/user/profile/self'" in sa.SNIPPET and 'substack.com/api' not in sa.SNIPPET)
 
 
+def unit_automode(tmp):
+    """automode.py: the pane re-sync's standing rule, built from the desk's Substack outlets and
+    merged into USER settings, the only scope the classifier reads (repo .claude/ settings are
+    ignored by design; measured 2026-09-11)."""
+    print("\n-- automode: the pane re-sync rule lives in user scope, and only its own entry moves ---")
+    import automode as am
+    root = os.path.join(tmp, 'am-desk')
+    os.makedirs(os.path.join(root, 'publishing'))
+    os.makedirs(os.path.join(root, '.claude'))
+    outlets = os.path.join(root, 'publishing', 'outlets.yaml')
+    with open(outlets, 'w', encoding='utf-8') as fh:
+        fh.write("outlets:\n"
+                 "  substack:\n    reader_base: https://pen.substack.com/p/\n"
+                 "  site:\n    reader_base: https://site.test/writings/\n"
+                 "  substack-pro:\n    reader_base: https://pro.substack.com/p/\n")
+    hosts = am.substack_hosts(outlets)
+    check("automode: every *.substack.com outlet and nothing else", hosts == ['pen.substack.com', 'pro.substack.com'], str(hosts))
+    text = am.rule(hosts)
+    check("automode: the rule names each publication's editor",
+          'https://pen.substack.com/publish/post/<id>' in text and 'https://pro.substack.com/publish/post/<id>' in text)
+    check("automode: every tool the rule names exists (a rename must not narrow it silently)",
+          all(os.path.isfile(os.path.join(HERE, t)) for t in am.TOOLS), str(am.TOOLS))
+    check("automode: the rule keeps the hash gate and excludes email and first Publish",
+          'sha256' in text and 'does NOT cover clicking Publish' in text and 'sends email' in text)
+    try:
+        am.rule([])
+        check("automode: a desk with no Substack outlet is refused", False)
+    except ValueError:
+        check("automode: a desk with no Substack outlet is refused", True)
+
+    new, act = am.merge({}, text)
+    check("automode: a new allow list starts with $defaults (omitting it discards the built-ins)",
+          act == 'added' and new['autoMode']['allow'] == ['$defaults', text], str(new))
+    check("automode: re-running is a no-op", am.merge(new, text)[1] == 'unchanged')
+    prior = {'model': 'x', 'autoMode': {'allow': ['$defaults', 'someone else', am.MARKER + ' old', am.MARKER + ' dup'],
+                                        'soft_deny': ['$defaults']}}
+    upd, act = am.merge(prior, text)
+    check("automode: an older entry is replaced, duplicates dropped, other entries and keys kept",
+          act == 'updated' and upd['autoMode']['allow'] == ['$defaults', 'someone else', text]
+          and upd['model'] == 'x' and upd['autoMode']['soft_deny'] == ['$defaults'], str(upd))
+    kept, _ = am.merge({'autoMode': {'allow': ['mine only']}}, text)
+    check("automode: a list the author wrote without $defaults stays that way",
+          kept['autoMode']['allow'] == ['mine only', text])
+
+    settings = os.path.join(tmp, 'am-user', 'settings.json')
+    os.makedirs(os.path.dirname(settings))
+    with open(settings, 'w', encoding='utf-8') as fh:
+        json.dump({'theme': 'dark'}, fh)
+    rc = am.main(['install', '--root', root, '--settings', settings])
+    with open(settings, encoding='utf-8') as fh:
+        wrote = json.load(fh)
+    check("automode: install merges into user settings and keeps what was there",
+          rc == 0 and wrote.get('theme') == 'dark' and wrote['autoMode']['allow'] == ['$defaults', text], str(wrote))
+    with open(settings, 'w', encoding='utf-8') as fh:
+        fh.write('{not json')
+    rc = am.main(['install', '--root', root, '--settings', settings])
+    with open(settings, encoding='utf-8') as fh:
+        check("automode: unreadable settings are refused and left untouched", rc == 2 and fh.read() == '{not json')
+    local = os.path.join(root, '.claude', 'settings.local.json')
+    rc = am.main(['install', '--root', root, '--settings', local])
+    check("automode: a repo .claude/ path is refused, since the classifier ignores it",
+          rc == 2 and not os.path.exists(local))
+
+    cfg = os.path.join(tmp, 'am-config.json')
+    for allow, want, label in ((['built-in', text], 0, 'in force'),
+                               (['built-in'], 3, 'missing'),
+                               (['built-in', am.MARKER + ' old'], 3, 'stale')):
+        with open(cfg, 'w', encoding='utf-8') as fh:
+            json.dump({'allow': allow, 'soft_deny': []}, fh)
+        rc = am.main(['check', '--root', root, '--config-json', cfg])
+        check(f"automode: check reads the config in force: {label} -> exit {want}", rc == want, str(rc))
+
+
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
     here is a refusal: every case is a way the copy could go up wrong or go up first."""
@@ -3424,6 +3497,7 @@ def main():
         unit_captions(tmp)
         unit_prose(tmp)
         unit_substack_account(tmp)
+        unit_automode(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

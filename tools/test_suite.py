@@ -2501,16 +2501,18 @@ def unit_substack_account(tmp):
 
 GUARD_RUNNER = r"""
 // Run one generated snippet with a TRIPWIRE for a document: the first read of document, window or
-// any DOM constructor throws, and every fetch is recorded. Signed in as argv[3] (none: HTTP argv[4]).
+// any DOM constructor throws, and every fetch is recorded. Signed in as argv[3] (none: HTTP argv[4]),
+// on the publication argv[5].
 const fs = require('fs');
-const [file, handle, status] = process.argv.slice(2);
+const [file, handle, status, host] = process.argv.slice(2);
 const src = fs.readFileSync(file, 'utf8');
 const touched = [], calls = [];
 const trip = what => new Proxy({}, { get: (_t, k) => {
   if (k === 'then') return undefined;
   touched.push(what + '.' + String(k)); throw new Error('tripwire: ' + what + '.' + String(k)); } });
-globalThis.location = { origin: 'https://bg.substack.com', href: 'https://bg.substack.com/publish/post/42',
-                        pathname: '/publish/post/42' };
+const H = host || 'bg.substack.com';
+globalThis.location = { origin: 'https://' + H, hostname: H, host: H,
+                        href: 'https://' + H + '/publish/post/42', pathname: '/publish/post/42' };
 for (const g of ['document', 'window', 'DataTransfer', 'ClipboardEvent', 'DOMParser']) globalThis[g] = trip(g);
 globalThis.fetch = async (path, o) => {
   calls.push(((o && o.method) || 'GET') + ' ' + path);
@@ -2586,9 +2588,17 @@ def unit_account_guard(tmp):
           ' | '.join(settles(x) for x in (offsub, torn, unsure)))
     check('guard: an outlet with only a notes_handle authorises nothing', settles(na).startswith('refused'),
           settles(na))
-    g, _name, want = sa.guard_for_piece(p)
+    g, _name, want, hosts = sa.guard_for_piece(p)
     check('guard: it insists on account_handle, normalised — never notes_handle',
           want == 'elmuffin' and sa.guard_handle(g) == 'elmuffin' and 'notes-only' not in g, g[:120])
+    check("guard: and on the outlet's own publication — one account can own several",
+          hosts == ['bg.substack.com'] and '"bg.substack.com"' in g and 'ml.substack.com' not in g, str(hosts))
+    check('guard: a custom-domain outlet checks the account alone until publish_host: names its editor',
+          sa.publish_hosts({'reader_base': 'https://custom.example/p/'}) == []
+          and sa.publish_hosts({'reader_base': 'https://custom.example/p/',
+                                'publish_host': 'custom.substack.com'}) == ['custom.substack.com']
+          and sa.publish_hosts({'reader_base': 'https://custom.example/p/'},
+                               {'post_url': 'https://cus.substack.com/publish/post/1'}) == ['cus.substack.com'])
     check("guard: the check snippet's own same-origin fetch (a cross-origin fetch fails in the pane)",
           "fetch('/api/v1/user/profile/self', { credentials: 'include' })" in g and 'substack.com/api' not in g)
 
@@ -2674,16 +2684,23 @@ def unit_account_guard(tmp):
     PROFILE = ['GET /api/v1/user/profile/self']
     for label, path in snippets.items():
         bad = {}
-        for who in (['someone-else'], ['', '401'], ['', '404']):
+        for who in (['someone-else', '', 'bg.substack.com'], ['', '401', 'bg.substack.com'],
+                    ['', '404', 'bg.substack.com']):
             res = run(path, *who)
             ref = json.loads(res['out']) if res.get('out') else {}
             if not (ref.get('accountGuard') is True and res['touched'] == [] and res['calls'] == PROFILE
                     and res['error'] is None):
                 bad[who[0] or 'HTTP ' + who[1]] = res
-        ok = run(path, 'ElMuffin')
+        # the same account's OTHER publication: refused locally, without so much as a fetch
+        res = run(path, 'ElMuffin', '', 'ml.substack.com')
+        ref = json.loads(res['out']) if res.get('out') else {}
+        if not (str(ref.get('refused')).startswith('publication:') and res['touched'] == []
+                and res['calls'] == []):
+            bad['another publication of the same account'] = res
+        ok = run(path, 'ElMuffin', '', 'bg.substack.com')
         passed = ok.get('calls', [])[:1] == PROFILE and (ok.get('touched') or ok.get('calls', [])[1:])
-        check(f'guard: {label} — another account or none stops before the page; the right one gets through',
-              not bad and bool(passed), json.dumps(bad or ok)[:300])
+        check(f'guard: {label} — another account, another publication, or none stops before the '
+              f'page; the right one gets through', not bad and bool(passed), json.dumps(bad or ok)[:300])
 
 
 def unit_automode(tmp):
@@ -3292,7 +3309,9 @@ def unit_substack_tags(tmp):
 const pubTags = [{id: 'T1', name: 'Idolatry'}, {id: 'T9', name: 'Other'}], calls = [];
 const onPost = { 42: ['T9'], 43: [] };
 process.on('exit', () => console.error('CALLS ' + JSON.stringify(calls)));
-globalThis.location = { pathname: process.env.PATHNAME || '/publish/home' };
+globalThis.location = { pathname: process.env.PATHNAME || '/publish/home',
+                        hostname: process.env.PUB_HOST || 'x.substack.com',
+                        origin: 'https://' + (process.env.PUB_HOST || 'x.substack.com') };
 globalThis.fetch = async (path, o) => {
   const m = (o && o.method) || 'GET'; calls.push(m + ' ' + path);
   if (path === '/api/v1/user/profile/self')
@@ -3363,6 +3382,10 @@ globalThis.fetch = async (path, o) => {
           "before any tag call",
           sa.guard_handle(st.snippet(both)) == 'tagger' and r.returncode != 0 and 'accountGuard' in r.stderr
           and calls == ['GET /api/v1/user/profile/self'], r.stderr[-300:])
+    r, _o, writes = run([st.snippet(both)], env={'PUB_HOST': 'other.substack.com'})
+    calls = json.loads((re.findall(r'CALLS (\[.*\])', r.stderr) or ['[]'])[-1])
+    check('stags: a run on another publication of the same account throws before any call at all',
+          r.returncode != 0 and 'publication:' in r.stderr and calls == [], r.stderr[-300:])
 
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():

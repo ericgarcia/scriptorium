@@ -188,7 +188,7 @@ def account(plans):
     found = {}
     for p in plans:
         try:
-            guard, name, want = sa.guard_for_piece(p['dir'])
+            guard, name, want, _hosts = sa.guard_for_piece(p['dir'])
         except sa.NoAccount as e:
             raise pb.Refused(str(e))
         found.setdefault(want, (guard, name, want))

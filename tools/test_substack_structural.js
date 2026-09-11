@@ -46,9 +46,11 @@ if (!snippetPath) { console.error('usage: node test_substack_structural.js <stru
 const src = fs.readFileSync(snippetPath, 'utf8');
 const TARGET = JSON.parse(src.match(/\/\*T\*\/([\s\S]*?)\/\*T\*\//)[1]);
 
-const { curl, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle } =
+const { curl, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle, guardHosts } =
   require('./test_editor_stub.js');
-const HANDLE = guardHandle(src);   // signed in as the account the snippet's guard insists on
+// on the publication, and signed in as the account, the snippet's guard insists on
+const HANDLE = guardHandle(src);
+const HOST = guardHosts(src)[0] || null;
 
 // ---------------------------------------------------------------- build a live doc from the target
 // anchors are placed where the draft's [[FN]] markers sit; text is curled the way Substack does
@@ -69,10 +71,10 @@ function liveFromTarget(t, opts = {}) {
   return tops;
 }
 
-async function run(tops, source, fields, handle = HANDLE) {
+async function run(tops, source, fields, handle = HANDLE, host = HOST) {
   const { editor, dispatches } = makeEditor(tops);
   install(editor, fields || { 'textarea[placeholder="Title"]': { value: TARGET.title },
-                              'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } }, { handle });
+                              'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } }, { handle, host });
   const report = JSON.parse(await eval(source || src));
   return { report, dispatches: dispatches(), tops };
 }
@@ -96,7 +98,13 @@ const plainIdx = (pred = () => true) => TARGET.body.findIndex((b, i) => !b.ancho
     check('S0 the wrong account, or none, is refused before any edit',
           HANDLE && r.report.accountGuard === true && r.report.got === 'someone-else' && r.dispatches === 0 && !('applied' in r.report)
           && out.report.accountGuard === true && out.report.status === 401 && out.dispatches === 0,
-          `guard=@${HANDLE} ` + JSON.stringify(r.report).slice(0, 160) + ' / ' + JSON.stringify(out.report).slice(0, 120)); }
+          `guard=@${HANDLE} ` + JSON.stringify(r.report).slice(0, 160) + ' / ' + JSON.stringify(out.report).slice(0, 120));
+    // the same account's OTHER publication: the handle matches and the post is still the wrong one
+    if (!HOST) skip('S0b another publication of the same account is refused', 'the outlet records no substack host');
+    else { const w = await run(liveFromTarget(TARGET, { body }), null, null, HANDLE, 'not-' + HOST);
+      check('S0b another publication of the same account is refused',
+            w.report.accountGuard === true && /^publication:/.test(w.report.refused) && w.dispatches === 0,
+            `host=${HOST} ` + JSON.stringify(w.report).slice(0, 160)); } }
 
   // --- S1 identical -> ok, nothing dispatched ---
   { const r = await run(liveFromTarget(TARGET));

@@ -18,7 +18,7 @@
  * computations over the same piece rather than one echoed back.
  */
 const fs = require('fs');
-const { curl, parseTops, parseInline, topFromRuns, makeEditor, install, guardHandle } = require('./test_editor_stub.js');
+const { curl, parseTops, parseInline, topFromRuns, makeEditor, install, guardHandle, guardHosts } = require('./test_editor_stub.js');
 
 const [scanPath, targetPath] = process.argv.slice(2);
 if (!scanPath || !targetPath) {
@@ -47,8 +47,7 @@ for (const f of TARGET.fns) {
   install(editor, {
     'textarea[placeholder="Title"]': { value: TARGET.title },
     'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle },
-  }, { handle: guardHandle(scanSrc) });
-  global.location = { origin: 'https://example.invalid', href: 'https://example.invalid/publish/post/0' };
+  }, { handle: guardHandle(scanSrc), host: guardHosts(scanSrc)[0] || null });
   // The shipped snippet is one promise-valued expression (substack_account.wrap: the account
   // guard, then the scan), so it is evaluated as-is and its promise awaited.
   console.log(await eval(scanSrc));

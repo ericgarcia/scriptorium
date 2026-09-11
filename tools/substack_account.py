@@ -59,12 +59,13 @@ USAGE
   that check and the write — and the write lands under the wrong byline, with no error. So every
   generated script that reads or writes a Substack editor or its API opens with `guard_js`: the
   same same-origin profile fetch as the snippet, run IN THE SAME EVAL as the work, which returns
-  `{"refused": "account: …", "accountGuard": true, …}` before the document is touched unless the
-  signed-in handle is the outlet's `account_handle`. `guard_for_piece` settles which Substack
-  outlet a piece writes to (its publish.yaml `outlets:`, via outlets.yaml); a generator that
-  cannot settle it writes nothing (exit 9). `wrap` makes a snippet one promise-valued
-  expression, so the javascript_tool REPL, a `<script>` that assigns it to a global, and a test
-  harness's `await eval(...)` all get its return value.
+  `{"refused": …, "accountGuard": true, …}` before the document is touched unless the page is the
+  outlet's own publication AND is signed in as its `account_handle`. The PUBLICATION half matters
+  because one account can own several publications: the handle would match and the post would be
+  the wrong one. `guard_for_piece` settles which Substack outlet a piece writes to (its publish.yaml
+  `outlets:`, via outlets.yaml); a generator that cannot settle it writes nothing (exit 9). `wrap`
+  makes a snippet one promise-valued expression, so the javascript_tool REPL, a `<script>` that
+  assigns it to a global, and a test harness's `await eval(...)` all get its return value.
 
     substack_account.py guard <piece-dir>        # the outlet and account a piece's snippets insist on
 
@@ -268,32 +269,56 @@ class NoAccount(Exception):
     """A piece's Substack account cannot be settled, so no snippet may be generated for it."""
 
 
-def guard_js(spec, outlet=None):
-    """A JS async function (an expression) resolving to null when this page is signed in as the
-    outlet's `account_handle`, else to an abort object. The fetch is SNIPPET's, relative on
-    purpose: a cross-origin fetch fails in the pane. Anything but a 200 carrying that handle —
-    signed out, someone else, a 404, a throw — aborts: a guard that is unsure does not let the
-    write through."""
+def publish_hosts(spec, man=None):
+    """The `*.substack.com` host(s) this outlet's editor and API live on: its `reader_base`, an
+    explicit `publish_host:`, and the piece's own `post_url`.
+
+    ONE ACCOUNT CAN OWN SEVERAL PUBLICATIONS, and the handle check cannot see the difference: the
+    same byline, the wrong publication. The host can, because a write is relative to the page it
+    runs on. A custom-domain publication whose editor host nobody has recorded yields NONE, and the
+    guard then checks the account alone — name `publish_host:` in outlets.yaml to get the check."""
+    out = []
+    for u in ((spec or {}).get('reader_base'), (spec or {}).get('publish_host'),
+              (man or {}).get('post_url')):
+        u = str(u or '')
+        h = _host(u if u.startswith('http') else 'https://' + u)
+        if h.endswith('.substack.com'):
+            out.append(h)
+    return sorted(set(out))
+
+
+def guard_js(spec, outlet=None, hosts=None):
+    """A JS async function (an expression) resolving to null when this page is the outlet's own
+    publication AND is signed in as its `account_handle`, else to an abort object. The fetch is
+    SNIPPET's, relative on purpose: a cross-origin fetch fails in the pane. Anything but a 200
+    carrying that handle — signed out, someone else, a 404, a throw — aborts: a guard that is
+    unsure does not let the write through. The host is checked FIRST, and locally: a snippet opened
+    on another publication stops without so much as a fetch."""
     want = expected(spec)
     if not want:
         raise NoAccount(f"{outlet or 'this outlet'} names no account_handle — refusing rather than "
                         f"assuming who may write there. Add one to outlets.yaml.")
     return (GUARD_MARK + " (async () => {\n"
-            f"  const WANT = {json.dumps(want)}, OUTLET = {json.dumps(outlet or '')};\n"
-            "  const origin = typeof location !== 'undefined' ? location.origin : '';\n"
-            "  const stop = (why, extra) => Object.assign({ refused: 'account: ' + why + ' - nothing "
-            "was read or written; do not switch this browser to another login', accountGuard: true, "
-            "outlet: OUTLET, want: WANT, origin }, extra || {});\n"
+            f"  const WANT = {json.dumps(want)}, OUTLET = {json.dumps(outlet or '')}, "
+            f"HOSTS = {json.dumps(sorted(set(hosts or [])))};\n"
+            "  const here = typeof location !== 'undefined' ? location : {};\n"
+            "  const origin = here.origin || '';\n"
+            "  const stop = (why, extra) => Object.assign({ refused: why + ' - nothing was read or "
+            "written', accountGuard: true, outlet: OUTLET, want: WANT, origin }, extra || {});\n"
+            "  if (HOSTS.length && HOSTS.indexOf(here.hostname) < 0)\n"
+            "    return stop('publication: this page is ' + (here.hostname || '?') + ', and ' + OUTLET"
+            " + ' publishes at ' + HOSTS.join(' / ') + ' - open the post there', "
+            "{ host: here.hostname || '' });\n"
             "  let r;\n"
             "  try { r = await fetch('/api/v1/user/profile/self', { credentials: 'include' }); }\n"
-            "  catch (e) { return stop('the profile check could not run (' + e + ')'); }\n"
-            "  if (r.status !== 200) return stop('this page is not signed in as @' + WANT + ' (HTTP ' "
-            "+ r.status + ')', { status: r.status });\n"
+            "  catch (e) { return stop('account: the profile check could not run (' + e + ')'); }\n"
+            "  if (r.status !== 200) return stop('account: this page is not signed in as @' + WANT + "
+            "' (HTTP ' + r.status + ')', { status: r.status });\n"
             "  let j = null;\n"
-            "  try { j = await r.json(); } catch (e) { return stop('the profile answer is not JSON'); }\n"
+            "  try { j = await r.json(); } catch (e) { return stop('account: the profile answer is not JSON'); }\n"
             "  const got = String((j && j.handle) || '').trim().replace(/^@/, '').toLowerCase();\n"
-            "  if (got !== WANT) return stop('signed in as @' + (got || '?') + ', and ' + OUTLET + "
-            "' publishes as @' + WANT, { got });\n"
+            "  if (got !== WANT) return stop('account: signed in as @' + (got || '?') + ', and ' + OUTLET + "
+            "' publishes as @' + WANT + ' - do not switch this browser to another login', { got });\n"
             "  return null;\n"
             "})")
 
@@ -353,6 +378,14 @@ def _host(url):
     return urlparse(str(url or '')).hostname or ''
 
 
+def _manifest(piece_dir):
+    path = os.path.join(piece_dir, 'publish.yaml')
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8') as fh:
+        return yaml.safe_load(fh) or {}
+
+
 def outlet_for_piece(piece_dir, outlets_path=None):
     """-> (outlet name, spec) of the ONE Substack outlet a piece writes to. Raises NoAccount.
 
@@ -366,11 +399,7 @@ def outlet_for_piece(piece_dir, outlets_path=None):
         raise NoAccount(f"{slug}: no publishing/outlets.yaml found (looked for {path or 'an instance root'}), "
                         f"so nothing says which Substack account may write this post")
     doc = load(path)
-    mpath = os.path.join(piece_dir, 'publish.yaml')
-    man = {}
-    if os.path.isfile(mpath):
-        with open(mpath, encoding='utf-8') as fh:
-            man = yaml.safe_load(fh) or {}
+    man = _manifest(piece_dir)
     subs = substack_outlets(doc)
     post_host = _host(man.get('post_url'))
     by_host = [n for n in subs if post_host and _host(doc['outlets'][n].get('reader_base')) == post_host]
@@ -403,19 +432,27 @@ def outlet_for_piece(piece_dir, outlets_path=None):
 
 
 def guard_for_piece(piece_dir, outlets_path=None):
-    """-> (guard JS, outlet name, handle) for a piece. Raises NoAccount."""
+    """-> (guard JS, outlet name, handle, hosts) for a piece. Raises NoAccount."""
     name, spec = outlet_for_piece(piece_dir, outlets_path)
-    return guard_js(spec, name), name, expected(spec)
+    hosts = publish_hosts(spec, _manifest(piece_dir))
+    return guard_js(spec, name, hosts), name, expected(spec), hosts
 
 
 def guarded(piece_dir, js, tool='snippet'):
     """For a generator: `js` wrapped behind the piece's guard, or exit 9 having written nothing."""
     try:
-        guard, name, want = guard_for_piece(piece_dir)
+        guard, name, want, hosts = guard_for_piece(piece_dir)
     except NoAccount as e:
         print(f"{tool}: refusing to write a snippet: {e}", file=sys.stderr)
         sys.exit(NO_ACCOUNT_EXIT)
-    print(f"account guard: the snippet stops unless the page is signed in as @{want} ({name})")
+    if os.environ.get('DESK_OUTLETS'):
+        # An ambient override of WHOSE account is expected is worth saying out loud every time.
+        print(f"account guard: outlets read from $DESK_OUTLETS ({os.environ['DESK_OUTLETS']}), "
+              f"not the desk's own publishing/outlets.yaml")
+    print(f"account guard: the snippet stops unless the page is signed in as @{want} ({name})"
+          + (f", on {' / '.join(hosts)}" if hosts else
+             f" — {name} records no *.substack.com host, so the PUBLICATION is not checked; "
+             f"name publish_host: in outlets.yaml to check it"))
     return wrap(js, guard)
 
 

@@ -165,11 +165,14 @@ function makeEditor(tops) {
 // snippet opens with an account guard (substack_account.py) that fetches the signed-in profile
 // before touching the document: `handle` is who this stub is signed in as (null: signed out),
 // and any other fetch is a test bug, so it throws.
-function install(editor, fields, { handle = null } = {}) {
+function install(editor, fields, { handle = null, host = null } = {}) {
   global.document = { querySelector: sel => (sel === '.ProseMirror' ? { editor } : (fields[sel] || null)) };
   global.DOMParser = class { parseFromString(html) { return { body: { children: parseTops(html).map(tp => ({ textContent: topText(tp) })) } }; } };
   if (!global.crypto || !global.crypto.subtle) global.crypto = require('crypto').webcrypto;
-  if (!global.location) global.location = { origin: 'https://example.invalid', href: 'https://example.invalid/publish/post/0', pathname: '/publish/post/0' };
+  // The guard checks the publication before the account, so the page has to BE the outlet's host.
+  const h = host || 'example.invalid';
+  global.location = { origin: 'https://' + h, hostname: h, host: h,
+                      href: 'https://' + h + '/publish/post/0', pathname: '/publish/post/0' };
   global.fetch = async path => {
     if (path !== '/api/v1/user/profile/self') throw new Error('stub: no network for ' + path);
     return handle ? { status: 200, json: async () => ({ handle, name: 'stub' }) }
@@ -181,6 +184,12 @@ function install(editor, fields, { handle = null } = {}) {
 function guardHandle(src) {
   const m = src.match(/desk-account-guard v1 \*\/ \(async \(\) => \{\s*const WANT = ("[^"\\]*")/);
   return m ? JSON.parse(m[1]) : null;
+}
+
+// The publication host(s) it insists on — empty when the outlet records none.
+function guardHosts(src) {
+  const m = src.match(/desk-account-guard v1 \*\/[\s\S]{0,300}?HOSTS = (\[[^\]]*\])/);
+  return m ? JSON.parse(m[1]) : [];
 }
 
 // The marked runs of a top node, the way the engines define one: coalesced across
@@ -213,4 +222,4 @@ function runsOf(top, { links = false } = {}) {
   return out;
 }
 
-module.exports = { curl, decode, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle };
+module.exports = { curl, decode, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle, guardHosts };

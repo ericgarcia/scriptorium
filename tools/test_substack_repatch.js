@@ -33,7 +33,7 @@
  * patcher reading `raw` off the wrong object, which would have thrown on every insertion.
  */
 const fs = require('fs');
-const { curl, parseInline, topFromRuns, runsOf, makeEditor, install, guardHandle } = require('./test_editor_stub.js');
+const { curl, parseInline, topFromRuns, runsOf, makeEditor, install, guardHandle, guardHosts } = require('./test_editor_stub.js');
 
 const snippetPath = process.argv[2];
 if (!snippetPath) {
@@ -59,16 +59,18 @@ const liveTop = (name, text, runs) => {
   return top;
 };
 
-// Signed in as the account the snippet's guard insists on, unless a case says otherwise.
+// On the publication, and signed in as the account, the snippet's guard insists on — unless a
+// case says otherwise.
 const HANDLE = guardHandle(src);
+const HOST = guardHosts(src)[0] || null;
 
-async function run(bodyTexts, fnTexts, title, subtitle, bodyMarks, fnMarks, handle = HANDLE) {
+async function run(bodyTexts, fnTexts, title, subtitle, bodyMarks, fnMarks, handle = HANDLE, host = HOST) {
   const tops = [];
   bodyTexts.forEach((t, i) => tops.push(liveTop('paragraph', t, (bodyMarks || BODYMARKS)[i])));
   fnTexts.forEach((t, i) => tops.push(liveTop('footnote', t, (fnMarks || FNMARKS)[i])));
   const { editor, dispatches, tops: live } = makeEditor(tops);
   install(editor, { 'textarea[placeholder="Title"]': { value: title },
-                    'textarea[placeholder="Add a subtitle…"]': { value: subtitle } }, { handle });
+                    'textarea[placeholder="Add a subtitle…"]': { value: subtitle } }, { handle, host });
   return { report: JSON.parse(await eval(src)), dispatches: dispatches(), tops: live };
 }
 
@@ -92,6 +94,14 @@ const norm = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(
     HANDLE && z.report.accountGuard === true && z.report.got === 'someone-else' && z.dispatches === 0
     && !('applied' in z.report),
     `guard=@${HANDLE} report=${JSON.stringify(z.report).slice(0, 160)} dispatches=${z.dispatches}`);
+  // the same account can own another publication: the handle matches, the post is the wrong one
+  if (!HOST) skip('0b another publication of the same account is refused', 'the outlet records no substack host');
+  else {
+    const w = await run(liveA, FNS.map(curl), TITLE, SUBTITLE, BODYMARKS, FNMARKS, HANDLE, 'not-' + HOST);
+    check('0b another publication of the same account is refused',
+      w.report.accountGuard === true && /^publication:/.test(w.report.refused) && w.dispatches === 0,
+      `host=${HOST} report=${JSON.stringify(w.report).slice(0, 160)}`);
+  }
 }
 
 // --- A: a single real edit is applied, and only there -----------------------
@@ -147,7 +157,7 @@ if (FNS.length < 2) {
   const tops = [{ name: 'paragraph', kids: parseInline('abc[[FN1]]def') }];
   const { editor, tops: live } = makeEditor(tops);
   install(editor, { 'textarea[placeholder="Title"]': { value: TITLE },
-                    'textarea[placeholder="Add a subtitle…"]': { value: SUBTITLE } }, { handle: HANDLE });
+                    'textarea[placeholder="Add a subtitle…"]': { value: SUBTITLE } }, { handle: HANDLE, host: HOST });
   // change the character immediately AFTER the anchor: reader offset 3, 'd' -> 'X'
   const patched = src
     .replace(/BODY = \[[\s\S]*?\], FNS = \[[\s\S]*?\];/, 'BODY = ["abcXef"], FNS = [];')

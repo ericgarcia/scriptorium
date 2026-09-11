@@ -92,10 +92,15 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   switch the pane's login right after it. So every generated Substack script (`md_to_substack`,
   `substack_repatch` and `--structural`, `substack_sync` scan/fetch/push/images, `substack_cover`,
   `substack_captions`, `substack_tags`, `md_to_clipboard --fn-out`) opens with the **account
-  guard**: in the same eval, before it reads or writes anything, it runs the same profile fetch and
-  returns `{"refused": "account: …", "accountGuard": true}` unless the page is signed in as the
-  piece's outlet's `account_handle` (`substack_tags` throws instead). **Treat that like exit 5:**
-  stop, and never switch the login. A generator that cannot settle the piece's outlet from its
+  guard**: in the same eval, before it reads or writes anything, it checks **the publication and
+  the account** — the page's host must be the outlet's own `*.substack.com` publication, and the
+  same profile fetch must answer with its `account_handle` — and otherwise returns
+  `{"refused": "publication: …" | "account: …", "accountGuard": true}` (`substack_tags` throws
+  instead). The publication half is there because **one account can own several publications**,
+  where the byline matches and the post is still the wrong one; that half is local, so a snippet
+  opened on the wrong publication stops without even a fetch. An outlet on a custom domain checks
+  the account alone until `publish_host:` in outlets.yaml names its editor host — the generator
+  says so when it emits one. **Treat either refusal like exit 5:** stop, and never switch the login. A generator that cannot settle the piece's outlet from its
   `outlets:` writes nothing (exit 9); `substack_account.py guard pieces/<slug>` names the account
   a piece's snippets insist on. `pane_carry.py` refuses a Substack snippet with no guard, so
   regenerate one; never hand-make it. Each snippet is **one promise-valued expression**:

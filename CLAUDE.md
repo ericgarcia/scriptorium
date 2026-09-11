@@ -127,6 +127,18 @@ landed on shared singletons**, so those are the things with rules.
   along.** (Eric, 2026-09-02: *"I'm fine with changes from other sessions in facts.md being
   committed in different sessions."*) The reason the disclosure still matters is that the commit
   message becomes the only record of what was reviewed and what merely travelled.
+- **Every push runs CI first — never `git push --no-verify`.** `.githooks/pre-push` exports the
+  exact commit being pushed (from the instance, the framework too, at its recorded pointer) and
+  runs `tools/ci_check.py` on it — the command GitHub runs — in a venv holding only
+  `requirements-ci.txt`. A red run refuses the push and names the failed checks: fix them, or wait
+  for the session whose piece is red; don't skip the gate. (Every push on 2026-09-11, both repos,
+  went red on GitHub for things a local suite run could not see: packages this Mac has and the
+  runner doesn't, a guard that lived only in the workflow, and other sessions' uncommitted files
+  making the committed tree look whole.) **Once per clone:** `python3 framework/tools/prepush.py
+  install` sets `core.hooksPath=.githooks` in the instance and the framework and builds the venv.
+  An instance push whose framework pointer is not on the framework's origin/main is refused — push
+  the framework first. A new third-party import goes into `framework/requirements-ci.txt` in the
+  same commit, or CI and the hook both go red.
 
 ## Principles
 

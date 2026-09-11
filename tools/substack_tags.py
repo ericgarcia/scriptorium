@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""substack_tags.py — put a piece's tags on its Substack post.
+"""substack_tags.py — put pieces' tags on their Substack posts.
 
 WHY THIS EXISTS (2026-09-11).  Tags live on the desk (tags.py) and reach the web outlets
 through the content bundle. Substack has no write API, so a post's tags were a composer-UI
@@ -22,37 +22,44 @@ Traditions"}` came back as tags with slugs `discernment` and `other-traditions` 
 The snippet still checks the name that comes back and stops if it ever differs.
 
 WHAT THIS EMITS
-    A self-contained JS snippet that reads the publication's tags and the post's, creates only
-    the names the publication lacks, attaches only the tags the post lacks, reads the post back,
-    and returns {wanted, created, attached, now, missing, extra, ok}. Run it twice and the
-    second run does nothing.
+    A self-contained JS snippet for ONE OR MANY pieces. It carries a PLAN — [{slug, post,
+    want}] — and the SHA-256 of that plan, and before writing anything it hashes the plan it
+    is holding and refuses on a mismatch. The plan is what gets carried into a page by hand or
+    by tool, and a label altered in transit would otherwise be CREATED as a new publication tag
+    — a typo made public — so the checksum is the gate, the way the publish skill hashes a
+    carried payload before executing it.
 
-    RUN IT ON THE PUBLICATION'S ORIGIN, BUT NOT IN THAT POST'S EDITOR — the dashboard
+    Then, per post: create only the names the publication lacks, attach only the tags the post
+    lacks; finally read every post back and return {ok, posts, created, results[]}, each result
+    {slug, post, created, attached, now, missing, extra, ok}. Run it twice and the second run
+    does nothing.
+
+    RUN IT ON THE PUBLICATION'S ORIGIN, BUT NOT IN ANY LISTED POST'S EDITOR — the dashboard
     (/publish/home) is right. The publish skill's guardrail is that nothing writes behind a
     composer that holds the post; the tag calls are not the draft document, but the rule is
-    kept rather than argued with. The snippet refuses to run on /publish/post/<this id>.
+    kept rather than argued with. The snippet refuses to run on /publish/post/<a listed id>.
 
-    ADDITIVE ONLY. A tag on the post that the desk does not list is REPORTED as `extra` and
-    left alone: how a tag is detached was not measured, and a tool that removes what it does
-    not understand is how a hand-made choice gets wiped.
+    ADDITIVE ONLY. A tag on a post that the desk does not list is REPORTED as `extra` and left
+    alone: how a tag is detached was not measured, and a tool that removes what it does not
+    understand is how a hand-made choice gets wiped.
 
 WHAT GOES
-    The piece's tags, named by their vocabulary LABELS (the name Substack shows), in vocabulary
+    Each piece's tags, named by their vocabulary LABELS (the name Substack shows), in vocabulary
     order. A vocabulary entry with `substack: false` stays on the desk and the sites and is
     never sent — a membership tag such as a founding canon, which says where a piece belongs
     rather than what it is about.
 
-A LIVE POST IS A PUBLIC EDIT. Tags show on the post. When publish.yaml records `published_at`
-the tool refuses without --live, which is the author's word, not a default.
+A LIVE POST IS A PUBLIC EDIT: the public post JSON carries `postTags`. When publish.yaml records
+`published_at` the tool refuses without --live, which is the author's word, not a default.
 
 USAGE
-    python3 framework/tools/substack_tags.py pieces/<slug> [--out tags.js] [--live]
-    python3 framework/tools/substack_tags.py pieces/<slug> --verify
-        (a LIVE post only: fetch the public post and compare its postTags to the desk)
+    python3 framework/tools/substack_tags.py pieces/<slug>... [--out tags.js] [--live]
+    python3 framework/tools/substack_tags.py pieces/<slug>... --verify
+        (LIVE posts only: fetch each public post and compare its postTags to the desk)
 
 EXIT  0 ok | 1 --verify found a difference | 3 refused
 """
-import os, re, sys, json, argparse, urllib.request
+import os, re, sys, json, hashlib, argparse, urllib.request
 
 import publications as pb
 import tags as tg
@@ -62,7 +69,7 @@ UA = 'Mozilla/5.0 (desk substack_tags)'
 
 
 def plan(pdir):
-    """-> dict(post, host, labels, skipped, live, public_url). Raises pb.Refused."""
+    """-> dict(slug, post, host, labels, skipped, live, public_url). Raises pb.Refused."""
     root = pb.instance_root(pdir)
     pubs, probs = pb.load(root)
     if probs:
@@ -97,12 +104,22 @@ def plan(pdir):
             'live': bool(man.get('published_at')), 'public_url': man.get('public_url')}
 
 
-SNIPPET = r'''// substack_tags.py — tags for post __POST__ (__SLUG__). Run on the publication's origin,
-// NOT in this post's editor. Additive: creates missing tags, attaches missing ones, removes nothing.
-const WANT = __WANT__;
-const POST = __POST__;
-if (location.pathname.startsWith('/publish/post/' + POST))
-  throw new Error('refusing: this is the editor holding post ' + POST + ' — run from /publish/home');
+def plan_json(plans):
+    """The plan as the snippet carries it — and the exact bytes its checksum is taken over.
+    JSON.stringify of the parsed literal reproduces this string, so the page can re-hash it."""
+    return json.dumps([{'slug': p['slug'], 'post': p['post'], 'want': p['labels']} for p in plans],
+                      ensure_ascii=False, separators=(',', ':'))
+
+
+SNIPPET = r'''// substack_tags.py — tags for __N__ post(s). Run on the publication's origin, NOT in a listed
+// post's editor. Additive: creates missing tags, attaches missing ones, removes nothing.
+const PLAN = __PLAN__;
+const PLAN_SHA256 = '__SHA__';
+const sha = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+  new TextEncoder().encode(JSON.stringify(PLAN))))).map((b) => b.toString(16).padStart(2, '0')).join('');
+if (sha !== PLAN_SHA256) throw new Error('refusing: the plan does not match its checksum (' + sha + ') — altered in transit; nothing written');
+if (PLAN.some((p) => location.pathname.startsWith('/publish/post/' + p.post)))
+  throw new Error('refusing: this is the editor holding a listed post — run from /publish/home');
 const api = async (method, path, body) => {
   const r = await fetch(path, { method, credentials: 'include',
     headers: body ? { 'content-type': 'application/json' } : {},
@@ -114,33 +131,44 @@ const api = async (method, path, body) => {
 };
 const norm = (s) => String(s).trim().toLowerCase();
 const byName = new Map((await api('GET', '/api/v1/publication/post-tag')).map((t) => [norm(t.name), t]));
-const created = [];
-for (const name of WANT) {
-  if (byName.has(norm(name))) continue;
-  const t = await api('POST', '/api/v1/publication/post-tag', { name });
-  if (!t || norm(t.name) !== norm(name)) throw new Error('created tag came back as ' + JSON.stringify(t) + ', not ' + name);
-  byName.set(norm(name), t); created.push(t.name);
-}
-const has = new Set((await api('GET', '/api/v1/post/' + POST + '/tag')).map((x) => x.post_tag_id));
-const attached = [];
-for (const name of WANT) {
-  const t = byName.get(norm(name));
-  if (has.has(t.id)) continue;
-  await api('POST', '/api/v1/post/' + POST + '/tag/' + t.id);
-  attached.push(t.name);
+const results = [];
+for (const { slug, post, want } of PLAN) {
+  const created = [], attached = [];
+  for (const name of want) {
+    if (byName.has(norm(name))) continue;
+    const t = await api('POST', '/api/v1/publication/post-tag', { name });
+    if (!t || norm(t.name) !== norm(name)) throw new Error('created tag came back as ' + JSON.stringify(t) + ', not ' + name);
+    byName.set(norm(name), t); created.push(t.name);
+  }
+  const has = new Set((await api('GET', '/api/v1/post/' + post + '/tag')).map((x) => x.post_tag_id));
+  for (const name of want) {
+    const t = byName.get(norm(name));
+    if (has.has(t.id)) continue;
+    await api('POST', '/api/v1/post/' + post + '/tag/' + t.id);
+    attached.push(t.name);
+  }
+  results.push({ slug, post, want, created, attached });
 }
 const idName = new Map((await api('GET', '/api/v1/publication/post-tag')).map((t) => [t.id, t.name]));
-const now = (await api('GET', '/api/v1/post/' + POST + '/tag')).map((x) => idName.get(x.post_tag_id) || x.post_tag_id);
-const missing = WANT.filter((n) => !now.map(norm).includes(norm(n)));
-const extra = now.filter((n) => !WANT.map(norm).includes(norm(n)));
-const result = { post: POST, wanted: WANT, created, attached, now, missing, extra, ok: missing.length === 0 };
+for (const r of results) {
+  r.now = (await api('GET', '/api/v1/post/' + r.post + '/tag')).map((x) => idName.get(x.post_tag_id) || x.post_tag_id);
+  r.missing = r.want.filter((n) => !r.now.map(norm).includes(norm(n)));
+  r.extra = r.now.filter((n) => !r.want.map(norm).includes(norm(n)));
+  r.ok = r.missing.length === 0;
+  delete r.want;
+}
+const result = { ok: results.every((r) => r.ok), posts: results.length,
+  created: results.flatMap((r) => r.created), results };
 JSON.stringify(result);
 '''
 
 
-def snippet(p):
-    return (SNIPPET.replace('__WANT__', json.dumps(p['labels'], ensure_ascii=False))
-                   .replace('__POST__', str(p['post'])).replace('__SLUG__', p['slug']))
+def snippet(plans):
+    if isinstance(plans, dict):
+        plans = [plans]
+    pj = plan_json(plans)
+    return (SNIPPET.replace('__PLAN__', pj).replace('__N__', str(len(plans)))
+                   .replace('__SHA__', hashlib.sha256(pj.encode('utf-8')).hexdigest()))
 
 
 def public_tags(host, public_url):
@@ -157,34 +185,41 @@ def public_tags(host, public_url):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='substack_tags.py', description=__doc__.split('\n')[0])
-    ap.add_argument('piece')
+    ap.add_argument('pieces', nargs='+')
     ap.add_argument('--out')
-    ap.add_argument('--live', action='store_true', help="the author's word: tag an already-live post")
+    ap.add_argument('--live', action='store_true', help="the author's word: tag already-live posts")
     ap.add_argument('--verify', action='store_true')
     a = ap.parse_args(argv)
     try:
-        p = plan(a.piece)
+        plans = [plan(d) for d in a.pieces]
         if a.verify:
-            if not p['live']:
-                raise pb.Refused('--verify reads the PUBLIC post; this one is not live. Read a draft '
-                                 'back in the page — the snippet returns the post\'s tags itself.')
-            now = public_tags(p['host'], p['public_url'])
-            missing = [n for n in p['labels'] if n.lower() not in {x.lower() for x in now}]
-            print(f"{p['slug']}: live post carries {now or '(none)'}")
-            if missing:
-                print(f"  MISSING on Substack: {', '.join(missing)}")
-            return 1 if missing else 0
-        if p['live'] and not a.live:
-            raise pb.Refused(f"{p['slug']} is LIVE: tags show on the post, so this is a public edit. "
-                             f"Pass --live on the author's word.")
-        js = snippet(p)
+            bad = 0
+            for p in plans:
+                if not p['live']:
+                    raise pb.Refused(f"{p['slug']}: --verify reads the PUBLIC post, and this one is not live. "
+                                     f"Read a draft back in the page — the snippet returns its tags itself.")
+                now = public_tags(p['host'], p['public_url'])
+                missing = [n for n in p['labels'] if n.lower() not in {x.lower() for x in now}]
+                extra = [n for n in now if n.lower() not in {x.lower() for x in p['labels']}]
+                bad += bool(missing)
+                print(f"{'ok  ' if not missing else 'FAIL'}  {p['slug']:36} {', '.join(now) or '(none)'}"
+                      + (f"   MISSING {', '.join(missing)}" if missing else '')
+                      + (f"   extra {', '.join(extra)}" if extra else ''))
+            return 1 if bad else 0
+        live = [p['slug'] for p in plans if p['live']]
+        if live and not a.live:
+            raise pb.Refused(f"LIVE: {', '.join(live)}. Tags on a live post are a public edit; pass --live "
+                             f"on the author's word.")
+        js = snippet(plans)
         if a.out:
             open(a.out, 'w').write(js)
         else:
             print(js)
-        print(f"{p['slug']}: post {p['post']} <- {', '.join(p['labels'])}"
-              + (f"   (not sent: {', '.join(p['skipped'])})" if p['skipped'] else '')
-              + ('   [LIVE]' if p['live'] else ''), file=sys.stderr)
+        for p in plans:
+            print(f"{p['slug']}: post {p['post']} <- {', '.join(p['labels'])}"
+                  + (f"   (not sent: {', '.join(p['skipped'])})" if p['skipped'] else '')
+                  + ('   [LIVE]' if p['live'] else ''), file=sys.stderr)
+        print(f"plan sha256 {hashlib.sha256(plan_json(plans).encode()).hexdigest()}", file=sys.stderr)
         return 0
     except pb.Refused as e:
         print(f'refused: {e}', file=sys.stderr)

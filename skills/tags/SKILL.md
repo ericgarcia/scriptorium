@@ -126,8 +126,11 @@ coincidence of spelling, not one tag: report the results per publication.
   not define. A site reads the store by outlet, and every outlet belongs to one publication, so a
   site only ever shows its own publication's tags. Tagging a published piece changes nothing a
   reader sees until the next bundle export and store publish.
-- **Substack.** `framework/tools/substack_tags.py pieces/<slug>` emits a script that puts the
-  piece's tags on its Substack post, by label, from the endpoints the editor itself uses (measured
+- **Substack.** `framework/tools/substack_tags.py pieces/<slug>...` emits one script that puts
+  the pieces' tags on their Substack posts, by label, and carries a SHA-256 of its plan that the
+  page checks before any write — a label altered in transit would otherwise be created as a
+  public tag. The tags reach readers as public archive pages (`/t/<tag>`), which is why a live
+  post is a public edit. It works from the endpoints the editor itself uses (measured
   2026-09-11 — the tool's docstring has them). **Run it on the publication's origin but never in
   that post's editor**: the dashboard (`/publish/home`) is right, and the script refuses the
   editor. It is additive — it creates only missing tags, attaches only missing ones, reports tags

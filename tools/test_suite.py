@@ -2285,6 +2285,7 @@ def unit_substack_tags(tmp):
     js = st.snippet(st.plan(d))
     stub = r"""
 const pubTags = [{id: 'T1', name: 'Idolatry', slug: 'idolatry'}], postTags = [], calls = [];
+process.on('exit', () => console.error('CALLS ' + JSON.stringify(calls)));
 globalThis.location = { pathname: process.env.PATHNAME || '/publish/home' };
 globalThis.fetch = async (path, o) => {
   const m = (o && o.method) || 'GET'; calls.push(m + ' ' + path);
@@ -2302,12 +2303,33 @@ globalThis.fetch = async (path, o) => {
         '{\n' + js.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n}' for _ in range(2)))
     r = subprocess.run(['node', f], capture_output=True, text=True)
     outs = [json.loads(l) for l in r.stdout.splitlines() if l.startswith('{')]
-    first, second = (outs + [{}, {}])[:2]
+    first, second = ([o['results'][0] for o in outs] + [{}, {}])[:2]
     check('stags: the first run creates only the missing tag and attaches both',
           first.get('created') == ['Discernment'] and first.get('attached') == ['Idolatry', 'Discernment']
           and first.get('ok') is True, r.stderr[-300:] or str(first))
     check('stags: the second run does nothing', second.get('created') == [] and second.get('attached') == []
           and second.get('now') == ['Idolatry', 'Discernment'], str(second))
+
+    # a plan altered in transit is refused before a single write — a typo would otherwise be
+    # CREATED as a public tag on the publication
+    bad = js.replace('"Discernment"', '"Discernmnet"', 1)
+    fb = os.path.join(tmp, 'stags-bad.mjs'); open(fb, 'w').write(stub + '\nlet result;\n' + bad.replace('const result =', 'result ='))
+    r = subprocess.run(['node', fb], capture_output=True, text=True)
+    posts = [c for c in json.loads((re.findall(r'CALLS (\[.*\])', r.stderr) or ['[]'])[-1]) if c.startswith('POST')]
+    check('stags: a plan that fails its checksum is refused, and nothing is written',
+          r.returncode != 0 and 'checksum' in r.stderr and posts == [], r.stderr[-300:])
+
+    # many posts in one run: one publication tag created once, shared by both
+    q = os.path.join(root, 'pieces', 'q'); os.makedirs(q, exist_ok=True)
+    open(os.path.join(q, 'publish.yaml'), 'w').write('title: Q\npost_url: https://x.substack.com/publish/post/42\n'
+                                                     'tags:\n  - discernment\n')
+    both = st.snippet([st.plan(d), st.plan(q)])
+    fm = os.path.join(tmp, 'stags-many.mjs'); open(fm, 'w').write(stub + '\nlet result;\n' + both.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n')
+    r = subprocess.run(['node', fm], capture_output=True, text=True)
+    out = json.loads(next((l for l in r.stdout.splitlines() if l.startswith('{')), '{}'))
+    check('stags: a batch creates a shared tag once and reports every post',
+          out.get('posts') == 2 and out.get('created') == ['Discernment'] and out.get('ok') is True,
+          r.stderr[-300:] or str(out))
     r = subprocess.run(['node', f], capture_output=True, text=True, env={**os.environ, 'PATHNAME': '/publish/post/42'})
     check("stags: the snippet refuses to run in the editor holding the post",
           r.returncode != 0 and 'refusing' in r.stderr, r.stderr[-200:])

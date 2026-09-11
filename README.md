@@ -167,6 +167,10 @@ tools/new-desk ~/code/writing-desk
   constitution.
 - `skills/whats-on-the-desk` — cross-piece triage: what's in flight, what's the
   next move.
+- `skills/tags` — tag pieces from a controlled vocabulary, suggest tags for a
+  piece, work the untagged backlog, and find pieces by tag. `tools/tags.py`
+  holds the vocabulary and edits `publish.yaml` as text, so the comments in a
+  manifest survive; an undefined tag is refused rather than invented.
 
 Book-scale skills (for a long-form `books/<name>/` manuscript — novel, memoir):
 

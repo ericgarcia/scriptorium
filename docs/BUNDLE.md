@@ -69,6 +69,28 @@ copy being a second-class mirror — the destination decides whether to emit
 
 Only `slug`, `title`, `published_at` and `digest` are required.
 
+### Tags
+
+```yaml
+tags:
+  - tag: practice                   # the id: lowercase words joined by hyphens
+    label: Practice                 # what a reader sees
+  - tag: fear-of-god
+    label: The fear of God
+```
+
+Optional (2026-09-11). A tag cuts across a publication's collections: it names what a
+piece is *about*, where a collection names where it sits in a reading order. `tag` is
+stable and URL-safe, so a destination can serve `/…/tags/<tag>`; `label` is what it
+shows. The label travels in the bundle so a tag page renders from the bundle alone.
+
+Tags come from a **controlled vocabulary** on the desk (`tools/tags.py`), and the
+exporter **refuses** a piece carrying a tag the vocabulary does not define — so every
+`tag` in a bundle means one thing, with one label, everywhere it appears. The store's
+`index.json` entry carries the same list, because a tag page is a listing and a listing
+should not have to fetch every piece to learn which ones belong on it. A destination
+that predates tags ignores the field.
+
 ## Images
 
 **Images are always referenced by relative path. Never an absolute URL.**

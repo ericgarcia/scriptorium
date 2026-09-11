@@ -36,6 +36,9 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
   unit    the pronoun sweep's sections E and F look INSIDE a scripture quotation — the four
           casing/bracket misses measured in *False Light* on 2026-09-07 are reproduced as a
           fixture and must all be listed; --strict warns on them and does not refuse
+  unit    tags: the textual `tags:` writer keeps every comment and refuses any write that
+          would change another key; an undefined tag stops at the exporter
+  corpus  every tag a piece carries is in the desk's vocabulary
 """
 import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib
 
@@ -1898,6 +1901,149 @@ def unit_linkedin(tmp):
     check('--check writes nothing', code == 0 and not os.path.exists(os.path.join(piece, 'linkedin')))
 
 
+
+# ---------------------------------------------------------------- unit: tags
+def unit_tags(tmp):
+    """Tags are a controlled vocabulary written into heavily commented manifests (2026-09-11).
+
+    The writer is the dangerous part: a YAML round-trip would strip every comment in every
+    publish.yaml on the desk, so tags.py edits the `tags:` block as text and refuses any
+    write that would change another key. These cases pin that down, then follow a tag out
+    through the exporter and the bundler, where an undefined tag must stop, not ship."""
+    print("\n-- tags: vocabulary, textual manifest writer, export ---------------")
+    import tags as tg
+    import yaml as _y
+    root = os.path.join(tmp, 'tagdesk'); pdir = os.path.join(root, 'pieces')
+    vocab = os.path.join(root, 'publishing', 'tags.yaml')
+    run = lambda *a: tg.main(['--root', root, *a])
+
+    def piece(slug, text):
+        d = os.path.join(pdir, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(text)
+        return d
+    read = lambda d: open(os.path.join(d, 'publish.yaml')).read()
+
+    # the vocabulary
+    v0 = piece('v0', 'title: V\n')
+    check('tags: add with no vocabulary yet is refused, and nothing is written',
+          run('add', 'v0', 'practice') == 3 and read(v0) == 'title: V\n' and not os.path.exists(vocab))
+    check('tags: define starts a vocabulary', run('define', 'practice', '--label', 'Practice',
+                                                  '--about', 'The daily doing of it.') == 0)
+    run('define', 'fear-of-god', '--label', 'The fear of God', '--about', 'What the fear was.')
+    v, probs = tg.load_vocab(vocab)
+    check('tags: define appends in order, label intact',
+          list(v) == ['practice', 'fear-of-god'] and v['fear-of-god']['label'] == 'The fear of God' and not probs,
+          str((v, probs)))
+    check('tags: a second define of the same tag is refused',
+          run('define', 'practice', '--label', 'P', '--about', 'a') == 3)
+    check('tags: a tag id must be lowercase-hyphenated',
+          run('define', 'Fear of God', '--label', 'F', '--about', 'a') == 3)
+    dv = os.path.join(tmp, 'dupe.yaml')
+    open(dv, 'w').write('tags:\n  - tag: a\n    label: A\n    about: x\n  - tag: a\n    label: A2\n    about: y\n'
+                        '  - tag: b\n    label: B\n')
+    _v, probs = tg.load_vocab(dv)
+    check('tags: a vocabulary defining a tag twice is caught (a keyed mapping would hide it)',
+          any('twice' in p for p in probs), str(probs))
+    check('tags: a vocabulary entry with no about is caught', any("'b' has no about" in p for p in probs), str(probs))
+    nl = os.path.join(tmp, 'notlast.yaml')
+    open(nl, 'w').write('tags:\n  - tag: a\n    label: A\n    about: x\nother: 1\n')
+    try:
+        tg.define(nl, 'b', 'B', 'y'); refused = False
+    except tg.Refused:
+        refused = True
+    check('tags: define refuses when `tags:` is not the last block', refused and 'other: 1\n' == open(nl).read()[-9:])
+
+    # the textual writer
+    orig = ('# Publish manifest\ntitle: T   # settled 2026-09-01 (Eric)\nsubtitle: S\n\n'
+            'verified:\n  date: 2026-09-01\n  covers: >-\n    Everything.\n\n'
+            '# --- outlets ---\noutlets:\n  - substack\nsite_url: https://example.org/x/\n')
+    a = piece('a', orig)
+    check('tags: add writes the block', run('add', 'a', 'fear-of-god', 'practice') == 0)
+    text = read(a)
+    check('tags: every comment survives the edit',
+          text.startswith(orig) and '# settled 2026-09-01 (Eric)' in text and '# --- outlets ---' in text)
+    check('tags: written in vocabulary order, whatever order they were given',
+          _y.safe_load(text)['tags'] == ['practice', 'fear-of-god'], text[-60:])
+    check('tags: removing every tag restores the file byte for byte',
+          run('remove', 'a', 'practice', 'fear-of-god') == 0 and read(a) == orig, repr(read(a)[-80:]))
+    check('tags: an unknown tag is refused and nothing is written',
+          run('add', 'a', 'nonsense') == 3 and read(a) == orig)
+
+    b = piece('b', 'title: B\ntags:   # chosen with Eric\n  - fear-of-god   # the whole piece\nsubtitle: S\n')
+    run('add', 'b', 'practice')
+    check('tags: a block mid-file keeps its key comment, item comments, and the key after it',
+          read(b) == 'title: B\ntags:   # chosen with Eric\n  - practice\n  - fear-of-god   # the whole piece\nsubtitle: S\n',
+          repr(read(b)))
+    c = piece('c', 'title: C\ntags: [fear-of-god, practice]   # flow\n')
+    run('remove', 'c', 'fear-of-god')
+    check('tags: a flow list is rewritten as a block, comment kept',
+          read(c) == 'title: C\ntags:   # flow\n  - practice\n', repr(read(c)))
+    d = piece('d', 'title: D\ntags:\n- practice\nsubtitle: S')
+    run('add', 'd', 'fear-of-god')
+    check('tags: a sequence at the key\'s own indent is read, and a file with no final newline is handled',
+          _y.safe_load(read(d)) == {'title': 'D', 'tags': ['practice', 'fear-of-god'], 'subtitle': 'S'}, repr(read(d)))
+    hand = 'title: E\ntags:\n  # these were argued over\n  - practice\n'
+    e = piece('e', hand)
+    check('tags: a hand-edited block (a standalone comment) is refused, not rewritten',
+          run('add', 'e', 'fear-of-god') == 3 and read(e) == hand)
+    check('tags: a piece with no manifest is refused',
+          (os.makedirs(os.path.join(pdir, 'bare'), exist_ok=True) or run('add', 'bare', 'practice')) == 3)
+
+    # the checker and find
+    piece('f', 'title: F\ntags:\n  - practise\n')
+    piece('g', 'title: G\ntags: practice\n')
+    problems, notes = tg.check(root, vocab)
+    check("tags: check flags a tag not in the vocabulary, naming the piece",
+          any("'practise' is not in the vocabulary — carried by f" in p for p in problems), str(problems))
+    check('tags: check flags a `tags:` that is not a list', any(p.startswith('g:') for p in problems), str(problems))
+    check('tags: check exits 1 on drift', run('check') == 1)
+    rows = {r['slug']: r for r in tg.corpus(root)}
+    check('tags: find --none sees the untagged and the manifest-less apart',
+          not rows['a']['tags'] and rows['a']['manifest'] and not rows['bare']['manifest'])
+
+    # out through the exporter and the bundler
+    x = os.path.join(pdir, 'x'); os.makedirs(x, exist_ok=True)
+    open(os.path.join(x, 'draft.md'), 'w').write('# X\n*Draft — header*\n\n---\n\nBody text.\n')
+    open(os.path.join(x, 'publish.yaml'), 'w').write(
+        'title: X\nsubtitle: S\npublished_at: 2026-09-01\noutlets:\n  - site\ntags:\n  - fear-of-god\n  - practice\n')
+    bundle = os.path.join(tmp, 'tagbundle')
+    site = os.path.join(HERE, 'md_to_site.py')
+    r = subprocess.run([sys.executable, site, bundle, x, '--outlet', 'site', '--tags', vocab, '--apply'],
+                       capture_output=True, text=True, cwd=root)
+    fm = open(os.path.join(bundle, 'content', 'x.md')).read().split('---')[1] if r.returncode == 0 else ''
+    check('tags: the exporter carries each tag with its label, in vocabulary order',
+          (_y.safe_load(fm) or {}).get('tags') == [{'tag': 'practice', 'label': 'Practice'},
+                                                   {'tag': 'fear-of-god', 'label': 'The fear of God'}],
+          r.stderr[-300:] or fm)
+    check("tags: the vocabulary's `about` stays on the desk", 'about' not in fm and 'daily doing' not in fm)
+    open(os.path.join(x, 'publish.yaml'), 'a').write('  - practise\n')
+    r = subprocess.run([sys.executable, site, os.path.join(tmp, 'tb2'), x, '--outlet', 'site', '--tags', vocab],
+                       capture_output=True, text=True, cwd=root)
+    check('tags: the exporter refuses a tag the vocabulary does not define (exit 8)',
+          r.returncode == 8 and 'practise' in r.stderr, r.stderr[-200:])
+    r = subprocess.run([sys.executable, site, os.path.join(tmp, 'tb3'), x, '--outlet', 'site'],
+                       capture_output=True, text=True, cwd=tmp)
+    check('tags: a tagged piece with no vocabulary to hand is refused (exit 8)', r.returncode == 8, r.stderr[-200:])
+
+    store = os.path.join(tmp, 'tagstore')
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'bundle_pieces.py'), os.path.join(bundle, 'content'),
+                        store, '--outlet', 'site'],
+                       capture_output=True, text=True)
+    ok = r.returncode == 0
+    pj = json.load(open(os.path.join(store, 'pieces', 'x.json'))) if ok else {}
+    ix = json.load(open(os.path.join(store, 'index.json'))) if ok else {}
+    check('tags: the bundler carries tags into the piece record and the index entry',
+          ok and [t['tag'] for t in pj.get('tags', [])] == ['practice', 'fear-of-god']
+          and ix['pieces'][0].get('tags') == pj.get('tags'), r.stderr[-300:])
+    bad = os.path.join(tmp, 'badtags'); os.makedirs(bad, exist_ok=True)
+    open(os.path.join(bad, 'y.md'), 'w').write('---\nslug: y\ntitle: Y\npublished_at: 2026-09-01\n'
+                                               'digest: sha256:00\ntags: [practice]\n---\n\nBody\n')
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'bundle_pieces.py'), bad, os.path.join(tmp, 'bs'),
+                        '--outlet', 'site'], capture_output=True, text=True)
+    check('tags: the bundler refuses tags that are not {tag, label}', r.returncode == 1 and 'tags' in r.stderr,
+          r.stderr[-200:])
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -1984,6 +2130,22 @@ def corpus_manifests():
     if unsettled:
         print(f"  note  live but the manifest still marks the header unsettled: {', '.join(unsettled)}"
               "  (clear the comment once the author has signed off)")
+
+
+
+def corpus_tags():
+    """Every tag on every piece is in the desk's vocabulary — the same check as `tags.py check`."""
+    print("\n-- corpus: tags are all in the vocabulary ---------------------------")
+    import tags as tg
+    root = os.path.dirname(PIECES)
+    vocab = tg.vocab_path(root)
+    rows = tg.corpus(root)
+    if not os.path.exists(vocab) and not any(r['tags'] for r in rows):
+        skip('corpus tags', f'no vocabulary at {vocab} and no piece carries a tag')
+        return
+    problems, _notes = tg.check(root, vocab)
+    check(f"corpus tags: {sum(1 for r in rows if r['tags'])} tagged piece(s), all in the vocabulary",
+          not problems, '; '.join(problems[:5]))
 
 
 def corpus_baselines():
@@ -2212,10 +2374,12 @@ def main():
         unit_talk(tmp)
         unit_deck(tmp)
         unit_store(tmp)
+        unit_tags(tmp)
         unit_linkedin(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()
+        corpus_tags()
         corpus_baselines()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")

@@ -13,6 +13,9 @@ send_email: true         # A FIRST PUBLICATION SENDS THE EMAIL. It is the one no
                          # cause an email, it records the intent the publish skill checks the
                          # composer's own delivery control against.
 # cover: assets/hero.jpg  # optional hero image (path relative to the piece)
+# tags:                   # optional. Only tags defined in the desk's vocabulary
+#   - practice            # (publishing/tags.yaml). Set them with tags.py or the
+#                         # `tags` skill, which will not invent a tag.
 
 # --- set these once the piece is live -----------------------------------------
 # TWO different URLs. Keeping them apart is not pedantry: the editor URL is what

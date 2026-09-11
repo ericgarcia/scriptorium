@@ -30,6 +30,8 @@ USAGE
     --quality N            WebP quality (default 82)
     --image-store NAME     repo (default) | s3 — recorded in bundle.json
     --outlet NAME          export only pieces whose publish.yaml `outlets:` names NAME
+    --tags FILE            the tag vocabulary (default: publishing/tags.yaml in the
+                           instance). A piece's `tags:` ship with their labels.
     --include-unpublished  export pieces with no `published_at` (held back by default)
     --force                export even pieces that opted into nothing
     --apply                write. Dry run by default.
@@ -37,6 +39,7 @@ USAGE
 EXIT
   0 ok    1 usage    3 nothing opted in    4 a draft is missing its `---`
   5 an image could not be resolved
+  8 a piece carries a tag the vocabulary does not define (or there is no vocabulary)
 """
 import sys, os, re, json, argparse, hashlib, datetime
 
@@ -45,6 +48,7 @@ sys.path.insert(0, HERE)
 
 import yaml                                                          # noqa: E402
 from md_to_substack import clean_footnote, render_reader             # noqa: E402
+import tags as tagvocab                                              # noqa: E402
 
 try:
     from PIL import Image
@@ -263,6 +267,25 @@ def renames_for(man, source_slug, slug):
     return out
 
 
+def bundle_tags(slug, man, vocab):
+    """`tags:` -> [{tag, label}], in vocabulary order.
+
+    The label travels with the tag so a destination can render a tag page from the bundle
+    alone. The vocabulary's `about` does not: it is written for whoever proposes tags, not
+    for a reader. A tag the vocabulary does not define is an ERROR here, not a warning —
+    `tags.py check` reports drift on the desk, and this is the point where drift would
+    stop being a desk matter and become a public page."""
+    names, problem = tagvocab.tags_of(man)
+    if problem:
+        die(8, f"{slug}: publish.yaml {problem}")
+    if vocab is None:
+        die(8, f"{slug} carries tags but no tag vocabulary was found. Pass --tags <file>.")
+    unknown = [t for t in names if t not in vocab]
+    if unknown:
+        die(8, f"{slug}: not in the tag vocabulary: {', '.join(unknown)}. Run tags.py check.")
+    return [{'tag': t, 'label': vocab[t]['label']} for t in tagvocab.ordered(names, vocab)]
+
+
 def export_piece(piece_dir, bundle, opts):
     source_slug = slug_of(piece_dir)
     man = load_manifest(piece_dir)
@@ -288,6 +311,8 @@ def export_piece(piece_dir, bundle, opts):
     for k in ('subtitle', 'published_at', 'footnotes'):
         if man.get(k):
             fm[k] = man[k]
+    if man.get('tags'):
+        fm['tags'] = bundle_tags(slug, man, opts.vocab)
     if opts.canonical_base:
         fm['canonical'] = f"{opts.canonical_base.rstrip('/')}/{slug}"
     if opts.syndicated and man.get('public_url'):
@@ -322,9 +347,18 @@ def main():
                     help='export pieces with no published_at (default: hold them back)')
     ap.add_argument('--outlet', default=None,
                     help='export only pieces whose publish.yaml `outlets:` names this outlet')
+    ap.add_argument('--tags', default=None,
+                    help='the tag vocabulary (default: publishing/tags.yaml in the instance)')
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--apply', action='store_true')
     o = ap.parse_args()
+
+    vfile = o.tags or tagvocab.vocab_path(tagvocab.instance_root())
+    if o.tags and not os.path.exists(vfile):
+        die(8, f"--tags {vfile}: no such file")
+    o.vocab, vproblems = tagvocab.load_vocab(vfile)
+    if vproblems:
+        die(8, "the tag vocabulary is malformed:\n  " + "\n  ".join(vproblems))
 
     def opted_in(piece):
         m = load_manifest(piece)

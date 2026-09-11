@@ -60,6 +60,19 @@ def split_front_matter(text, path):
     return yaml.safe_load(head) or {}, body.lstrip('\n')
 
 
+def check_tags(value, path):
+    """Front matter `tags:` -> the list, or die. [{tag, label}], as md_to_site writes it."""
+    ok = isinstance(value, list) and all(
+        isinstance(t, dict) and isinstance(t.get('tag'), str)
+        and re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', t['tag'])
+        and isinstance(t.get('label'), str) and t['label'].strip()
+        for t in value)
+    if not ok:
+        die(1, f'{path}: tags must be a list of {{tag, label}} with a lowercase-hyphenated tag, '
+               f'got {value!r}')
+    return [{'tag': t['tag'], 'label': t['label']} for t in value]
+
+
 def reader_text(md):
     """The words a human actually reads. Used for `plain`, never for the digest."""
     t = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', md)
@@ -140,6 +153,8 @@ def main():
                 piece[k] = meta[k]
         if meta.get('syndicated'):
             piece['syndicated'] = meta['syndicated']
+        if meta.get('tags'):
+            piece['tags'] = check_tags(meta['tags'], path)
         if meta.get('hero'):
             hero = dict(meta['hero'])
             hero['src'] = to_relative(hero.get('src'))
@@ -173,6 +188,10 @@ def main():
         }
         if meta.get('subtitle'):
             entry['subtitle'] = meta['subtitle']
+        if piece.get('tags'):
+            # In the index too: a tag page is a listing, and a listing must not have to
+            # fetch every piece to find out which ones belong on it.
+            entry['tags'] = piece['tags']
         by_key[(slug, a.kind)] = entry
 
     index['spec'] = '2'

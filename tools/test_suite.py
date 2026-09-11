@@ -3532,6 +3532,34 @@ def corpus_voice_privacy():
           ' | '.join(lines[:3]))
 
 
+def corpus_desk_scaffold():
+    """What tools/new-desk hands a new desk must be what this desk actually runs.
+
+    The desk's CI workflow and its pre-push hook ship as templates (templates/desk/); new-desk
+    copies them into every desk it makes. Nothing kept the template and this desk's own copies in
+    step, and drift is invisible from both sides: edit the desk's workflow and new desks keep
+    getting the old one; edit the template and nobody here runs what it ships, so it can be wrong
+    for months. They are small files and they are supposed to be the same file.
+    """
+    print("\n-- corpus: the desk runs what new-desk ships ----------------------")
+    desk = os.path.dirname(FRAMEWORK)
+    if not os.path.isdir(os.path.join(desk, 'pieces')):
+        skip('desk scaffold', 'a framework checkout with no desk around it'); return
+    tpl = os.path.join(FRAMEWORK, 'templates', 'desk')
+    drift, n = [], 0
+    for rel in ('.github/workflows/tests.yml', '.githooks/pre-push'):
+        shipped, mine = os.path.join(tpl, *rel.split('/')), os.path.join(desk, *rel.split('/'))
+        if not os.path.isfile(shipped):
+            drift.append(f'{rel}: templates/desk does not ship it'); continue
+        if not os.path.isfile(mine):
+            drift.append(f'{rel}: this desk has none (fix: prepush.py install, or copy it in)')
+            continue
+        n += 1
+        if open(shipped, encoding='utf-8').read() != open(mine, encoding='utf-8').read():
+            drift.append(f'{rel}: this desk and templates/desk differ')
+    check(f'all {n} scaffold file(s) match templates/desk', not drift, '; '.join(drift))
+
+
 def corpus_prose():
     """What the prose claims about a piece agrees with its manifest: check_status, check_refs,
     and — wherever an outlet registry exists — the rule that a published piece says where it goes."""
@@ -3795,10 +3823,17 @@ def engine_suite(tmp):
                                     f'signatures (first body row {bad})')
                 else:
                     scan_ok += 1
-    check(f'JS patcher suite passes for all {ran} pieces', ran > 0 and not failures,
-          ' | '.join(failures[:3]) or 'no piece ran')
     if off_substack:
         print(f"        ({off_substack} piece(s) on no Substack outlet: no post to patch)")
+    if not ran and off_substack and not failures:
+        # Two different zeros, and only one of them is a fault. A desk whose pieces are on no
+        # Substack outlet — a new one, before publishing/outlets.yaml exists — has no post to
+        # patch, and the engine is INAPPLICABLE. The zero this check is for is a corpus where
+        # the generator refused piece after piece: that still fails, with the refusal named.
+        skip('JS patcher suite', f'{off_substack} piece(s), none on a Substack outlet')
+    else:
+        check(f'JS patcher suite passes for all {ran} pieces', ran > 0 and not failures,
+              ' | '.join(failures[:3]) or 'no piece ran')
     check(f'the browser and Python agree on text AND mark digests for all {scan_ok} pieces',
           scan_ok == ran, f'{scan_ok}/{ran}')
     if skipped:
@@ -3890,6 +3925,7 @@ def main():
         corpus_tags()
         corpus_baselines()
         corpus_commonmark()
+        corpus_desk_scaffold()
         corpus_prose()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")

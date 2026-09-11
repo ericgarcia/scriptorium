@@ -141,8 +141,9 @@ Each browser step is one JS eval in the live post's editor.
    nothing else, and a correction is not live until every outlet in `publish.yaml`'s
    `outlets:` has it. **Measured 2026-09-11:** *For the Love of Dogs* had its storm sentence
    corrected, re-synced, `substack_verify --fresh` MATCH, and was logged *live and verified* —
-   while alignmentfellowship.org went on serving the old sentence for hours, because the
-   content store was never re-uploaded. Not a cache: the store object predated the correction.
+   while alignmentfellowship.org went on serving the old sentence until an audit happened to
+   look, because the content store was never re-uploaded. Not a cache: the store object was five
+   hours older than the correction.
    For each outlet other than `substack`:
    - **a store outlet** (the site reads the content store) — the one-piece export and upload in
      the instance's `publishing/outlets.md`: seed the index from the live store, export **only

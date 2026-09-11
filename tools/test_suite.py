@@ -179,6 +179,28 @@ def unit_outlet_content(tmp):
     check('outlet content: a syndicated copy must carry the originally-published line',
           r is not None and any(w.startswith('Originally published at') for w in r['missing']))
 
+    # --- the link preview: a store publish never touches the site repo, so a live page's
+    # og:image can 404 (one of 33, 2026-09-11). No network: the probe is stubbed.
+    page_url = 'https://site.test/writings/a-piece/'
+    head = ('<meta property="og:image:width" content="1200"/>'
+            '<meta content="/og/a-piece.jpg" property="og:image"/>')
+    check('preview: og:image is found whatever the attribute order, and made absolute',
+          oa.og_image_url(head, page_url) == 'https://site.test/og/a-piece.jpg',
+          str(oa.og_image_url(head, page_url)))
+    check('preview: og:image:width is not mistaken for the image',
+          oa.og_image_url('<meta property="og:image:width" content="1200"/>', page_url) is None)
+    stub = lambda answer: (lambda _url: answer)
+    check('preview: an image that answers 200 image/* is fine',
+          oa.preview_problem(head, page_url, stub((200, 'image/jpeg'))) is None)
+    check('preview: a 404 og:image is reported',
+          'HTTP 404' in (oa.preview_problem(head, page_url, stub((404, ''))) or ''))
+    check('preview: a 200 that is not an image is reported (an HTML error page)',
+          'not an image' in (oa.preview_problem(head, page_url, stub((200, 'text/html'))) or ''))
+    check('preview: a page that names no og:image is reported',
+          oa.preview_problem('<p>x</p>', page_url, stub((200, 'image/jpeg'))) is not None)
+    check('preview: an unreachable image is not a pass',
+          oa.preview_problem(head, page_url, stub((None, ''))) is not None)
+
 
 # ---------------------------------------------------------------- unit: substack pages
 def unit_pages(tmp):

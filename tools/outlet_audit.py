@@ -22,6 +22,10 @@ WHAT IT CHECKS
   reverse   every URL the outlet itself lists (sitemap or index) is a piece the desk
             knows about. This is the only direction that can see a page the desk never
             produced.
+  preview   on an outlet with `og_image: true`, every live page names an og:image and it
+            answers 200 with an image. A store publish is an upload that never touches the
+            site repo, so a piece can go live with its link preview 404 — on 2026-09-11 one
+            of 33 did, and a shared link showed no image. Nothing else looks.
 
 WHAT IT REFUSES TO CONCLUDE
 
@@ -55,7 +59,7 @@ EXIT
   0 every declared outlet has its piece      3 drift (something missing or undeclared)
   1 usage / config                           2 nothing could be reached
 """
-import sys, os, re, json, time, argparse, urllib.request, urllib.error
+import sys, os, re, json, time, argparse, urllib.request, urllib.error, urllib.parse
 import html as html_mod
 import concurrent.futures as cf
 
@@ -95,6 +99,46 @@ def fetch(url, timeout=20):
         return e.code, '', url
     except Exception:
         return None, '', url
+
+
+def fetch_type(url, timeout=20):
+    """(status, content-type) for an asset, reading one byte of it. Not cache-busted: an
+    image URL can be a signed or transform URL, and a query string is not ours to add."""
+    req = urllib.request.Request(url, headers={'User-Agent': UA})
+    try:
+        with _OPENER.open(req, timeout=timeout) as r:
+            r.read(1)
+            return r.status, (r.headers.get('Content-Type') or '').split(';')[0].strip()
+    except urllib.error.HTTPError as e:
+        return e.code, ''
+    except Exception:
+        return None, ''
+
+
+def og_image_url(page_html, page_url):
+    """The page's link-preview image as an absolute URL, or None if it names none.
+    `og:image:width` and friends are not the image."""
+    for tag in re.findall(r'<meta\b[^>]*>', page_html, flags=re.I):
+        if re.search(r'''(?:property|name)\s*=\s*["']og:image["']''', tag, flags=re.I):
+            m = re.search(r'''content\s*=\s*["']([^"']+)["']''', tag, flags=re.I)
+            if m:
+                return urllib.parse.urljoin(page_url, html_mod.unescape(m.group(1).strip()))
+    return None
+
+
+def preview_problem(page_html, page_url, probe=fetch_type):
+    """None if the page's link preview resolves to an image, else what is wrong with it."""
+    img = og_image_url(page_html, page_url)
+    if not img:
+        return 'the page names no og:image'
+    status, ctype = probe(img)
+    if status is None:
+        return f'og:image could not be reached: {img}'
+    if status != 200:
+        return f'og:image answers HTTP {status}: {img}'
+    if not ctype.startswith('image/'):
+        return f'og:image is {ctype or "untyped"}, not an image: {img}'
+    return None
 
 
 def landed_on_not_found(final_url, outlet_cfg):
@@ -351,7 +395,7 @@ def main():
             elif outlets[oname].get('derive') is False:
                 unrecorded.append((pc['name'], oname, outlets[oname].get('manifest_url_key')))
 
-    results, unreachable = [], 0
+    results, unreachable, previews = [], 0, []
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for (pc, oname, url), (status, body, final) in zip(
                 jobs, ex.map(lambda j: fetch(j[2]), jobs)):
@@ -369,6 +413,12 @@ def main():
             results.append(row)
             if status is None:
                 unreachable += 1
+            if ok and body and outlets[oname].get('og_image'):
+                previews.append((row, body))
+        # The preview images, fetched in parallel after the pages: one per checked page.
+        for (row, _b), problem in zip(previews, ex.map(
+                lambda rb: preview_problem(rb[1], rb[0]['final'] or rb[0]['url']), previews)):
+            row['preview'] = problem
 
     # ---- reverse: what each outlet lists that the desk does not claim --------
     known = {pc['name'] for pc in pieces}
@@ -396,6 +446,7 @@ def main():
     # ---- report --------------------------------------------------------------
     stale = [r for r in results
              if r.get('content') and r['content']['missing']]
+    no_preview = [r for r in results if r.get('preview')]
     missing = [r for r in results if not r['ok'] and r['status'] is not None]
     unreach = [r for r in results if r['status'] is None]
     pending = [pc for pc in pieces if pc['declared'] and not pc['published']]
@@ -458,6 +509,12 @@ def main():
         print(f"  UNRECORDED  {name} is published and declares {oname}, whose URLs cannot be "
               f"derived — record it under `{key}` or the copy is unaudited")
 
+    if previews:
+        print(f"  preview: {len(previews) - len(no_preview)}/{len(previews)} page(s) have a link "
+              f"preview that resolves to an image")
+        for r in no_preview:
+            print(f"  PREVIEW  {r['piece']} on {r['outlet']}: {r['preview']}")
+
     if a.content:
         checked = [r for r in results if r.get('content') is not None]
         print(f"  content: {len(checked) - len(stale)}/{len(checked)} page(s) carry every "
@@ -480,6 +537,10 @@ def main():
         sys.exit(3)
     if missing:
         print("\nFAILED: a piece declares an outlet it is not on.")
+        sys.exit(3)
+    if no_preview:
+        print("\nFAILED: a page is live but its link preview is broken — a shared link shows "
+              "no image. A store publish never touches the site repo, where previews are made.")
         sys.exit(3)
     if undeclared or lying:
         print("\nFAILED: an outlet carries something the manifests do not declare.")

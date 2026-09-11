@@ -966,6 +966,12 @@ post's dashboard row / the README; record `post_url` in the manifest the first t
    Report *confirmed public*, or *staged, awaiting Update* — never "done" on the strength of
    **Saved**.
 
+   **And that is Substack confirmed, not the piece.** A republish moves one outlet. If
+   `outlets:` names others, carry the change to each — `substack-sync` step 8, the same whether
+   you arrived through that skill or here — and report per outlet. On 2026-09-11 a correction
+   was logged *live and verified* on the strength of a Substack MATCH while alignmentfellowship.org
+   went on serving the old sentence — until an audit happened to look.
+
    **Read the report** the patch returns: `{stagedEdits, unchanged, applied[], footnoteChanges[],
    reviewMarks[], failed[], structural, reordered[], suspect[]}`. **`failed` must be empty** before
    any of the above.

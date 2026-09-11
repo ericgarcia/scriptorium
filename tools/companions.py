@@ -162,6 +162,17 @@ def stanzas(body):
             for chunk in re.split(r'\n[ \t]*\n', body.strip()) if chunk.strip()]
 
 
+STANZA_MARKERS = {'braille': '⠀', 'dot': '·', 'none': ''}
+
+
+def stanza_marker(comp):
+    """The line a poem Note puts between stanzas. A Note's server strips whitespace-only
+    paragraphs (measured 2026-09-11), so a gap has to be a character it does not call
+    whitespace: `braille` (U+2800, looks empty; default) or `dot` ("·"). `none` sends an
+    empty paragraph, which the server drops."""
+    return STANZA_MARKERS.get(comp.get('meta', {}).get('stanza_break', 'braille'), '⠀')
+
+
 def paragraphs(comp):
     """The text as the form reads it: a poem keeps its lines, prose is reflowed."""
     blocks = stanzas(comp['body'])
@@ -242,6 +253,9 @@ def problems_of(c, piece_dir):
             out.append(f"{c['role']}: empty")
         if not FORMS[c['form']]['markdown'] and MARKDOWN.search(c['body']):
             out.append(f"{c['role']}: markdown in a plain-text {c['form']}")
+        sb = c['meta'].get('stanza_break')
+        if sb is not None and sb not in STANZA_MARKERS:
+            out.append(f"{c['role']}: stanza_break must be {', '.join(STANZA_MARKERS)}, not {sb!r}")
         if c['role'] == 'note' and re.search(r'https?://', c['body']):
             out.append("note: carries a URL — the post's own link is added when the Note is posted")
     return out

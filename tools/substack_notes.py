@@ -38,11 +38,14 @@ A POEM IN A NOTE (measured 2026-09-11)
   The Notes editor's schema has no hard-break node (paragraph, text, lists, blockquote,
   codeBlock, mention — nothing else), so a line break inside a paragraph cannot be sent. A poem
   goes ONE PARAGRAPH PER LINE, which is how multi-line Notes already render in the feed: tight
-  lines, no gap (a posted five-line Note is five <p>, no <br>). Stanzas are separated by an EMPTY
-  paragraph, which the editor keeps and a POSTED Note drops: measured 2026-09-11 on the first poem
-  Note (c-334978586), sent as 64 paragraphs with 11 empty, read back from the public feed as 53
-  with 0 empty. The lines survive; the stanza breaks do not. The empties are still sent — harmless,
-  and a Substack change that starts keeping them needs no edit here.
+  lines, no gap (a posted five-line Note is five <p>, no <br>). An EMPTY paragraph between stanzas
+  is kept by the editor and DROPPED by the server: measured 2026-09-11 on the first poem Note
+  (c-334978586), 64 paragraphs sent with 11 empty, 53 live with 0 empty. The same day, a private
+  Notes draft (POST /api/v1/comment/draft) showed the rule: any whitespace-only paragraph is
+  stripped (empty, U+00A0, U+200B, U+3000) and a non-whitespace one is kept (U+2800, "·").
+  So a stanza gap is a MARKER line — `stanza_break:` in note.md's header: `braille` (U+2800,
+  reads as an empty line; the default), `dot` ("·", visible), or `none`. Screen readers may
+  announce U+2800; `dot` is the accessible choice.
 
 CADENCE
 
@@ -128,17 +131,18 @@ def backlog_done_today(corpus, today):
 
 # ------------------------------------------------------------------------ the text
 def note_paragraphs(comp):
-    """The companion as composer paragraphs. A poem: one per line, '' between stanzas.
-    Prose: one per paragraph. See A POEM IN A NOTE above for why."""
+    """The companion as composer paragraphs. A poem: one per line, a MARKER line between
+    stanzas. Prose: one per paragraph. See A POEM IN A NOTE above for why."""
     blocks = companions.paragraphs(comp)
     if companions.FORMS[comp['form']]['lines'] != 'keep':
         return [b[0] for b in blocks]
+    gap = companions.stanza_marker(comp)
     out = []
     for i, stanza in enumerate(blocks):
         if i:
-            out.append('')
+            out.append(gap)
         out += stanza
-    return out + ['']                        # the last stanza's gap, before the card
+    return out + [gap]                       # the last stanza's gap, before the card
 
 
 def read_note(piece_dir, public_url):

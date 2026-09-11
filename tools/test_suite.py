@@ -302,10 +302,21 @@ def unit_notes(tmp):
           paras[-1] == 'https://example.substack.com/p/b-mid', str(paras))
     poem = piece('g-poem', '2026-08-05', note='one\ntwo\n\nthree\n', form='poem', style='plain-poem')
     pp, pprobs = sn.read_note(poem, 'https://example.substack.com/p/g-poem')
-    check('notes: a poem goes one paragraph per line, an empty one between stanzas (2026-09-11)',
-          pp == ['one', 'two', '', 'three', '', 'https://example.substack.com/p/g-poem'], str(pp or pprobs))
-    check('notes: an empty paragraph is sent as an empty ProseMirror paragraph, not a hard break',
-          '{"type": "paragraph"}' in sn.composer_js(pp, 'T') and 'hardBreak' not in sn.composer_js(pp, 'T'))
+    check('notes: a poem goes one paragraph per line, a Braille-blank line between stanzas (2026-09-11)',
+          pp == ['one', 'two', '⠀', 'three', '⠀', 'https://example.substack.com/p/g-poem'], str(pp or pprobs))
+    check('notes: never a hard break — the Notes schema has none',
+          'hardBreak' not in sn.composer_js(pp, 'T'))
+    dotted = piece('g-dot', '2026-08-05', note='one\n\ntwo\n', form='poem', style='plain-poem')
+    with open(os.path.join(dotted, 'note.md')) as fh:
+        body = fh.read().replace('style: plain-poem\n', 'style: plain-poem\nstanza_break: dot\n')
+    with open(os.path.join(dotted, 'note.md'), 'w') as fh:
+        fh.write(body)
+    dp, _ = sn.read_note(dotted, 'https://example.substack.com/p/g-dot')
+    check('notes: stanza_break: dot puts a middle dot in the gap', dp[:3] == ['one', '·', 'two'], str(dp))
+    with open(os.path.join(dotted, 'note.md'), 'w') as fh:
+        fh.write(body.replace('stanza_break: dot', 'stanza_break: stars'))
+    _, bad_sb = sn.read_note(dotted, 'https://example.substack.com/p/g-dot')
+    check('notes: an unknown stanza_break is refused', any('stanza_break' in p for p in bad_sb), str(bad_sb))
     wrong = piece('h-wrong', '2026-08-06', note='one\n', form='poem', style='plain-note')
     _, wp = sn.read_note(wrong, 'https://example.substack.com/p/h-wrong')
     check('notes: a voice pointed at a form it does not write is refused', any('writes' in p for p in wp), str(wp))
@@ -2286,6 +2297,20 @@ def unit_prose(tmp):
     check("check_refs: `slug` as link text is a path, not a title claim",
           'draft-one' not in by, str(by.get('draft-one')))
 
+    import publications as pb
+    pubs = {'bg': {'outlets': ['sub', 'site'], 'required_outlets': ['sub', 'site']}}
+    live = {'publication': 'bg', 'public_url': 'https://pub.test/p/a'}
+    check("publications: a published piece missing a required outlet is reported (Eric, 2026-09-11)",
+          pb.missing_required(dict(live, outlets=['sub']), pubs) == [('site', 'not declared')])
+    check("publications: an exemption with a reason is honoured",
+          pb.missing_required(dict(live, outlets=['sub'],
+                                   outlets_exempt={'site': 'Eric: not for the Fellowship'}), pubs) == [])
+    check("publications: an exemption with no reason is not an exemption",
+          pb.missing_required(dict(live, outlets=['sub'], outlets_exempt={'site': ' '}), pubs)
+          == [('site', 'exempted without a reason')])
+    check("publications: a draft is not held to it",
+          pb.missing_required({'publication': 'bg', 'outlets': []}, pubs) == [])
+
 
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
@@ -3047,6 +3072,21 @@ def corpus_prose():
         if m.get('public_url') and not m.get('outlets') and m.get('site') is not True:
             missing.append(d)
     check("every published piece declares its outlets", not missing, ', '.join(missing))
+    # Eric, 2026-09-11: "all the pieces on being good should get a place on alignmentfellowship
+    # unless i say otherwise." A publication's `required_outlets` is that rule, and a piece opts
+    # out only by writing the reason down (`outlets_exempt:`).
+    import publications as pb
+    pubs, _probs = pb.load(root)
+    short = []
+    for d in sorted(os.listdir(PIECES)):
+        mp = os.path.join(PIECES, d, 'publish.yaml')
+        if not os.path.exists(mp):
+            continue
+        with open(mp, encoding='utf-8') as fh:
+            m = yaml.safe_load(fh) or {}
+        short += [f'{d} ({o}: {why})' for o, why in pb.missing_required(m, pubs)]
+    check("every published piece is on every outlet its publication requires, or says why not",
+          not short, ', '.join(short[:6]))
 
 
 def corpus_tags():

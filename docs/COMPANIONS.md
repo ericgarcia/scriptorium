@@ -99,10 +99,23 @@ exactly how multi-line Notes already render in the feed — tight lines, no gap 
 Note read back as five `<p>` and no `<br>`). **Stanza breaks do not survive posting — measured 2026-09-11.**
 The composer keeps an empty paragraph, but a posted Note does not: *Earmuffs* (Note c-334978586)
 was sent as 64 paragraphs with 11 empty ones and the public feed returns **53 paragraphs, 0 empty**
-— every stanza gap stripped, the lines kept. So a poem posts as one unbroken run of lines. Until a
-stanza marker that survives has been measured, a poem whose stanzas carry meaning should be read
-that way before it is posted; the tool still sends the empty paragraphs, which are harmless and cost
-nothing, so a Substack change that starts keeping them is picked up without an edit.
+— every stanza gap stripped, the lines kept. So empty lines cannot carry a stanza.
+
+**The rule, from a private Notes draft the same day** (`POST /api/v1/comment/draft`, read back
+from `/api/v1/feed/drafts`): the server strips any **whitespace-only** paragraph — empty, U+00A0
+no-break space, U+200B zero-width space, U+3000 ideographic space — and keeps a paragraph holding a
+character it does not call whitespace: **U+2800 Braille pattern blank** (reads as an empty line) and
+**"·"** both survived. So a stanza gap is a **marker line**, chosen in `note.md`'s header:
+
+```
+stanza_break: braille   # U+2800, looks like an empty line — the default
+stanza_break: dot       # "·", visible, and cleaner for a screen reader
+stanza_break: none      # an empty paragraph, which the server drops
+```
+
+**`braille` is not proven on a posted Note yet** — the draft sanitizer and the post path may differ;
+the first poem posted with it (Earmuffs, reposted) measures it. And weigh the reader who listens:
+some screen readers announce U+2800 at every gap; `dot` is the accessible choice.
 
 ## Voices: what ships, and what stays private
 

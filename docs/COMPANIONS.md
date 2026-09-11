@@ -124,7 +124,10 @@ Keep **one standing Notes draft** for probes like this one, and reuse it: load i
 being tested, save, read back from `GET /api/v1/feed/drafts`. It is private, costs no Note, and is
 never posted or deleted — it is tooling, not content (Eric, 2026-09-11: *"we are keeping a test
 draft around now … we will reuse the same test draft"*). The instance records its id beside the
-Notes profile (`notes_probe_draft_id` in `publishing/outlets.yaml`). Its limit is the one measured
+Notes profile (`notes_probe_draft_id` in `publishing/outlets.yaml`). Its **first line is always
+`PROBE_LABEL`** (`tools/substack_notes.py`) — *"PROBE — private Notes test draft. Never post, never
+delete."* — so anyone scrolling the drafts knows what it is; `substack_notes.py probe` prints the
+id and the label. Load a probe *below* that line, and put the label back if a probe replaced it. Its limit is the one measured
 here: a draft shows what the server **strips**; only a posted Note proves what **survives**, so a
 probe result is a strong hint and the first real post is the proof.
 

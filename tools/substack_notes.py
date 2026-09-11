@@ -78,6 +78,11 @@ from md_to_substack import read_manifest                                  # noqa
 import companions                                                         # noqa: E402
 
 BLOCK = 'substack_note'
+
+# The standing probe draft's first line — what the tooling calls it, and how a person scrolling
+# their drafts knows to leave it alone. The instance records the draft's id as
+# `notes_probe_draft_id` (outlets.yaml); `probe` prints both. Never posted, never deleted.
+PROBE_LABEL = 'PROBE — private Notes test draft. Never post, never delete.'
 FEED = 'https://substack.com/api/v1/reader/feed/profile/{id}?types%5B%5D=note'
 UA = 'Mozilla/5.0 (writing-desk substack_notes)'
 
@@ -275,7 +280,7 @@ def config(args):
 # ------------------------------------------------------------------------ main
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('cmd', choices=['status', 'next', 'text', 'record', 'verify'])
+    ap.add_argument('cmd', choices=['status', 'next', 'text', 'record', 'verify', 'probe'])
     ap.add_argument('slugs', nargs='*')
     ap.add_argument('--pieces', default=default_pieces())
     ap.add_argument('--url', help='record: the Note URL (or c-<id>)')
@@ -294,6 +299,17 @@ def main(argv=None):
         if slug not in by:
             raise SystemExit(f'{slug}: not a live post (needs public_url + published_at, not a page)')
         return by[slug]
+
+    if args.cmd == 'probe':
+        pid = ''
+        if args.outlets and os.path.exists(args.outlets):
+            import yaml
+            sub = (yaml.safe_load(open(args.outlets)) or {}).get('outlets', {}).get('substack', {})
+            pid = str(sub.get('notes_probe_draft_id') or '')
+        print(json.dumps({'draft_id': pid or None, 'first_line': PROBE_LABEL,
+                          'rule': 'private; reuse for probes; never post, never delete'},
+                         indent=2, ensure_ascii=False))
+        return 0 if pid else 1
 
     if args.cmd == 'status':
         for p in corpus:

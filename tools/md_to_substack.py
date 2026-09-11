@@ -138,6 +138,67 @@ def data_uri(piece_dir, rel):
 
 _IMGMAP = {}          # local image path -> already-uploaded Substack URL, per piece
 
+# --- captions -----------------------------------------------------------------
+# A caption says what an image MEANS in the piece; the alt says what it shows (ALT-TEXT.md,
+# Captions). Captions live in publish.yaml, never in draft.md: `captions:` maps an image's local
+# path, as draft.md writes it, to its caption, and the hero may use `cover_caption:` instead.
+# Every outlet reads them through caption_for() -- this converter (<figcaption>, which Substack's
+# paste turns into the captionedImage's caption node), md_to_site (the bundle's image title and
+# hero.caption) and md_to_linkedin (the figure payload) -- so one line in the manifest reaches all
+# three. Before this no converter carried a caption at all: a hero's cover_caption never reached a
+# recomposed post, and a caption set by hand on a live post was destroyed by the next rebuild
+# (found 2026-09-10 on none-but-he-and-i; 2026-09-11 on love-is-not-a-metric-space).
+_CAPTIONS, _COVER, _COVER_CAPTION = {}, '', ''
+HERO_FILE = re.compile(r'(?:^|/)hero\.[A-Za-z0-9]+$')
+
+
+def _manifest_line(v):
+    """A scalar manifest value, trimmed, without a trailing ` # comment`; '' for a YAML block
+    marker (a folded `>-` read as one line is the two characters `>-`, not a caption)."""
+    if not isinstance(v, str):
+        return ''
+    v = re.sub(r'\s+#\s.*$', '', v).strip()
+    return '' if v in ('>', '>-', '|', '|-') else v
+
+
+def _yaml_manifest(piece_dir, fallback):
+    """publish.yaml through a real YAML parser when one is installed, else `fallback`.
+    read_manifest() keeps a quoted value's quotes, and a caption is exactly the kind of value
+    that gets quoted: `'The chart, "quoted".'` arrived with its outer quotes on (2026-09-11)."""
+    try:
+        import yaml
+        with open(os.path.join(piece_dir, 'publish.yaml'), encoding='utf-8') as fh:
+            data = yaml.safe_load(fh)
+        return data if isinstance(data, dict) else fallback
+    except Exception:                                              # noqa: BLE001
+        return fallback
+
+
+def load_captions(man):
+    """(captions-by-local-path, cover path, cover_caption) from a publish.yaml mapping."""
+    raw = man.get('captions') if isinstance(man.get('captions'), dict) else {}
+    caps = {str(k): _manifest_line(v) for k, v in raw.items() if _manifest_line(v)}
+    return caps, _manifest_line(man.get('cover', '')), _manifest_line(man.get('cover_caption', ''))
+
+
+def caption_for(path, caps=None, cover=None, cover_caption=None, imgmap=None):
+    """The caption for one image, by the path draft.md gives it; '' if it has none.
+
+    `captions:` wins. Otherwise the hero -- the image at `cover:`, or any `hero.*` -- takes
+    `cover_caption:`. A remote URL is mapped back to its local path through `images:` first,
+    so a live piece whose draft points at the CDN is captioned by the same key."""
+    caps = _CAPTIONS if caps is None else caps
+    cover = _COVER if cover is None else cover
+    cover_caption = _COVER_CAPTION if cover_caption is None else cover_caption
+    local = path
+    if re.match(r'https?://', path):
+        local = {v: k for k, v in ((_IMGMAP if imgmap is None else imgmap) or {}).items()}.get(path, path)
+    if caps.get(local):
+        return caps[local]
+    is_hero = bool(cover) and local == cover or bool(HERO_FILE.search(local))
+    return cover_caption if (is_hero and cover_caption) else ''
+
+
 def img_src(piece_dir, rel):
     # An absolute URL passes straight through. That covers an image hosted anywhere —
     # including one you uploaded in the composer by hand and never stored locally — so a
@@ -177,7 +238,11 @@ def inline(text, piece_dir):
     # Body text keeps its bare quotes, which is what the reader digests are built on.
     def img(m):
         alt = m.group(1).replace('"', '&quot;')
-        return f'<figure><img src="{img_src(piece_dir, m.group(2))}" alt="{alt}"></figure>'
+        cap = caption_for(m.group(2))
+        fig = f'<img src="{img_src(piece_dir, m.group(2))}" alt="{alt}">'
+        if cap:
+            fig += f'<figcaption>{esc(cap)}</figcaption>'
+        return f'<figure>{fig}</figure>'
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', img, text)
     # link text may not contain brackets, so a nearby footnote marker ([[FNx]]) can't be
     # swallowed into the link when a link and a marker share a paragraph
@@ -289,6 +354,8 @@ def parse_blocks(piece_dir):
     global _IMGMAP
     _man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
     _IMGMAP = _man.get('images') if isinstance(_man.get('images'), dict) else {}
+    global _CAPTIONS, _COVER, _COVER_CAPTION
+    _CAPTIONS, _COVER, _COVER_CAPTION = load_captions(_yaml_manifest(piece_dir, _man))
     src = open(os.path.join(piece_dir, 'draft.md')).read()
     src = re.sub(r'<!--.*?-->', '', src, flags=re.S)                 # strip HTML comments
     lines = src.split('\n')
@@ -432,6 +499,19 @@ def parse_blocks(piece_dir):
     sources = {'body': out_src, 'fns': [fn_src[n] for n, _c in ordered]}
     return out, ordered, stripped, residual, unverified, fn_issues, sources
 
+def render_captions(piece_dir):
+    """Every body image's caption, in document order, '' for an uncaptioned one. The
+    position is the key: it is how substack_verify lines them up with the live figures
+    and how substack_captions writes them into an existing post."""
+    out = []
+    for b in parse_blocks(piece_dir)[0]:
+        for fig in re.finditer(r'<figure>(.*?)</figure>', b, re.S):
+            c = re.search(r'<figcaption>(.*?)</figcaption>', fig.group(1), re.S)
+            out.append(c.group(1).replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+                       if c else '')
+    return out
+
+
 def convert(piece_dir):
     blocks, ordered, stripped, residual, unverified, fn_issues, _src = parse_blocks(piece_dir)
     return '\n'.join(blocks), ordered, stripped, residual, unverified, fn_issues
@@ -475,6 +555,10 @@ def strip_to_reader(html_fragment):
     footnotes), drop tags, unescape the three entities esc() introduces, collapse
     whitespace. This is the domain the surgical diff and the live doc share."""
     s = re.sub(r'\[\[FN\w+\]\]', '', html_fragment)
+    # A caption is MEDIA text: the live post keeps it inside the captionedImage, which
+    # substack_verify and substack_repatch skip as a block. Keeping it out here holds the
+    # reader digest where it was before captions existed; captions are compared separately.
+    s = re.sub(r'<figcaption[^>]*>.*?</figcaption>', '', s, flags=re.S)
     s = re.sub(r'<[^>]+>', '', s)
     s = s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
     return re.sub(r'\s+', ' ', s).strip()

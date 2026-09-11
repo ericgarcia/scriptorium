@@ -1974,6 +1974,100 @@ def unit_store(tmp):
 
 
 # ---------------------------------------------------------------- unit: linkedin outlet
+def unit_captions(tmp):
+    """Captions live in publish.yaml and reach every outlet from there (2026-09-11)."""
+    print("\n-- captions: publish.yaml -> every outlet ----------------------------")
+    import md_to_substack as m2s
+    import substack_verify as sv
+    import md_to_linkedin as ml
+    d = os.path.join(tmp, 'cap-piece')
+    os.makedirs(os.path.join(d, 'assets'), exist_ok=True)
+    for n in ('hero.png', 'fig.png'):
+        with open(os.path.join(d, 'assets', n), 'wb') as f:
+            f.write(_tiny_png())
+    with open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('*scaffold*\n\n---\n\n![A hero scene](assets/hero.png)\n\nOpening paragraph.\n\n'
+                '![A chart](assets/fig.png)\n\nClosing paragraph.\n')
+    man = os.path.join(d, 'publish.yaml')
+    base = 'title: T\nsubtitle: S\n'
+    def write(extra):
+        with open(man, 'w', encoding='utf-8') as f:
+            f.write(base + extra)
+    write('')
+    plain_body = m2s.render_reader(d)[0]
+    check('captions: none declared, none emitted', m2s.render_captions(d) == ['', ''], str(m2s.render_captions(d)))
+    write('cover: assets/hero.png\ncover_caption: What the hero means.\n'
+          "captions:\n  assets/fig.png: 'The chart, \"quoted\" & plain.'\n")
+    joined = '\n'.join(m2s.parse_blocks(d)[0])
+    check('captions: the hero takes cover_caption as its figcaption',
+          '<figcaption>What the hero means.</figcaption>' in joined, joined[:200])
+    check('captions: a body image takes its captions: entry, HTML-escaped',
+          '<figcaption>The chart, "quoted" &amp; plain.</figcaption>' in joined, joined[-240:])
+    check('captions: the reader digest does not move when captions are added',
+          m2s.render_reader(d)[0] == plain_body, str(m2s.render_reader(d)[0]))
+    check('captions: render_captions lists them in document order',
+          m2s.render_captions(d) == ['What the hero means.', 'The chart, "quoted" & plain.'],
+          str(m2s.render_captions(d)))
+    write('cover_caption: By filename.\n')
+    check('captions: a hero.* image takes cover_caption with no cover: key',
+          m2s.render_captions(d) == ['By filename.', ''], str(m2s.render_captions(d)))
+    write('cover: assets/hero.png\ncover_caption: Old.\ncaptions:\n  assets/hero.png: New.\n')
+    check('captions: an explicit captions: entry wins over cover_caption', m2s.render_captions(d)[0] == 'New.')
+    check('captions: a folded-block marker read as one line is not a caption', m2s._manifest_line('>-') == '')
+    check('captions: a trailing YAML comment is not part of the caption',
+          m2s._manifest_line('Means this.   # kept by Eric') == 'Means this.')
+
+    live = ('<div class="captioned-image-container"><figure><a class="image-link"><img src="x"></a>'
+            '<figcaption class="image-caption">What the hero means.</figcaption></figure></div>'
+            '<p>t</p><div class="captioned-image-container"><figure><img src="y"></figure></div>')
+    check('captions: live captions are read per figure, in order',
+          sv.live_captions(live) == ['What the hero means.', ''], str(sv.live_captions(live)))
+    check("captions: Substack's curly quotes are not drift",
+          sv.caption_drift(['The chart, \u201cquoted\u201d & plain.'], ['The chart, "quoted" & plain.']) == [])
+    check('captions: a live caption the desk does not hold is reported, not invisible',
+          bool(sv.caption_drift(['Set by hand.', ''], ['', ''])))
+    check('captions: a wrong live caption is reported by position',
+          'caption #2' in ' '.join(sv.caption_drift(['a', 'b'], ['a', 'c'])))
+    check('captions: no captions on either side is silent', sv.caption_drift(['', ''], ['', '']) == [])
+
+    write('cover: assets/hero.png\ncover_caption: What the hero means.\ncaptions:\n  assets/fig.png: The chart.\n')
+    _b, _n, images, _m = ml.build(d)
+    check('captions: the LinkedIn figure payloads carry each caption',
+          [i.get('caption') for i in images] == ['What the hero means.', 'The chart.'], str(images))
+
+    tool = os.path.join(HERE, 'substack_captions.py')
+    out = os.path.join(tmp, 'caps.js')
+    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True)
+    js = open(out).read() if r.returncode == 0 and os.path.exists(out) else ''
+    check('captions: substack_captions writes a snippet carrying the desk captions in order',
+          r.returncode == 0 and json.dumps(['What the hero means.', 'The chart.']) in js,
+          (r.stdout + r.stderr)[-300:])
+    check('captions: the snippet refuses on an image-count mismatch rather than guessing',
+          'matched by position' in js)
+    write('')
+    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True)
+    check('captions: substack_captions refuses a piece with no captions (exit 2)', r.returncode == 2,
+          (r.stdout + r.stderr)[-200:])
+
+    # The bundle: the hero's caption rides in hero.caption, a body image's as its markdown title.
+    write('outlets:\n  - site\npublished_at: 2026-09-11\ncover: assets/hero.png\n'
+          'cover_caption: What the hero means.\ncaptions:\n  assets/fig.png: The "chart".\n')
+    bundle = os.path.join(tmp, 'cap-bundle')
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'md_to_site.py'), bundle, d, '--outlet', 'site', '--apply'],
+                       capture_output=True, text=True, cwd=tmp)
+    md = ''
+    if r.returncode == 0:
+        found = [f for f in os.listdir(os.path.join(bundle, 'content'))] if os.path.isdir(os.path.join(bundle, 'content')) else []
+        md = open(os.path.join(bundle, 'content', found[0])).read() if found else ''
+    fm = md.split('---')[1] if md.count('---') >= 2 else ''
+    import yaml as _y
+    hero = (_y.safe_load(fm) or {}).get('hero', {}) if fm else {}
+    check('captions: the bundle carries the hero caption in hero.caption',
+          hero.get('caption') == 'What the hero means.', (r.stderr[-300:] or str(hero)))
+    check('captions: the bundle carries a body caption as the image title, quotes escaped',
+          '.webp "The \\"chart\\".")' in md, (r.stderr[-200:] or md[-300:]))
+
+
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
     here is a refusal: every case is a way the copy could go up wrong or go up first."""
@@ -2828,6 +2922,7 @@ def main():
         unit_publications(tmp)
         unit_substack_tags(tmp)
         unit_linkedin(tmp)
+        unit_captions(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

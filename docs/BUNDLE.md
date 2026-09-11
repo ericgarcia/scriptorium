@@ -126,6 +126,18 @@ Two stores ship:
 Originals never go in a bundle. They stay with the piece under `assets/`, full
 resolution and byte-exact, because that is the archive. A bundle carries derivatives.
 
+### Captions
+
+A caption says what an image means in the piece; the alt says what it shows
+(`ALT-TEXT.md`). The desk keeps captions in `publish.yaml` — `captions:`, keyed by the image's
+local path, with `cover_caption:` for the hero — and the bundle carries them in two places:
+
+- **The hero:** `hero.caption`. The site lays the hero out itself, so it gets a field.
+- **A body image:** its markdown **title**, `![alt](../images/<slug>/x.webp "What it means.")`.
+  No new syntax, and a renderer that knows nothing about captions shows a tooltip rather than
+  breaking. quire (v0.11.0+) renders a paragraph holding only a titled image as
+  `<figure><img><figcaption>`, with the title taken off the `<img>`.
+
 ## Talks
 
 A talk is a piece whose reader is a room. It is **not a second content type** — it is a

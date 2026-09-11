@@ -200,6 +200,17 @@ first.
    substack but not in the piece itself at the top where it should."* `substack_cover.py` now does
    both from one upload; `--cover-only` opts out of the body half.
 
+   **The hero's caption comes from the converter now, not from this tool** (2026-09-11).
+   `md_to_substack` emits every image that has a caption — `captions:` by local path, or
+   `cover_caption:` for the hero (the `cover:` path, or any `hero.*`) — as
+   `<figure><img><figcaption>`, and Substack's paste turns the `<figcaption>` into the
+   captionedImage's caption node (measured on a TEST draft; Substack's own
+   `captioned-image-container` wrapper, pasted, LOSES the caption). So a recompose keeps the
+   caption instead of destroying it. A post composed before this gets its captions with
+   `substack_captions.py` (in the editor, by position; it refuses on an image-count mismatch),
+   and `substack_verify` compares live captions with the desk's and reports **DRIFT-CAPTION** —
+   a live caption the desk does not hold included, where before it was invisible.
+
    **And the body half is not durable on its own.** A recompose rebuilds the body from `draft.md`,
    so an image inserted only into the live post is dropped the next time, silently. The durable form
    is `0b-images`: reference it in `draft.md` as `![alt](assets/hero.png)` **and** record the
@@ -604,6 +615,9 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    `what-was-already-there`, which sat one stale copy from being unpublishable). So run it **after
    publishing**, on the share-center page Substack redirects to, with the composer closed. **Assert
    `document.querySelector('.ProseMirror')` is null before writing.**
+   `substack_cover.py --cover-only` now says so when it prints its instruction: a non-editor page
+   of the publication (`/publish/posts`, `/publish/home`), no composer open on the post. It
+   used to say *run it in the post's editor* whatever the mode.
 
    `--cover-only` whenever `draft.md` already references the hero, or the tool inserts a second
    copy in the body. **It reuses an asset already recorded in `publish.yaml`'s `images:` block

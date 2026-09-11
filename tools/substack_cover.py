@@ -26,7 +26,8 @@ TWO DIFFERENT IMAGES, AND SETTING ONE IS NOT SETTING THE OTHER (2026-09-10, Eric
 WHAT THIS EMITS
     A self-contained JS snippet that uploads the image once, sets `cover_image`, inserts a
     `captionedImage` at the top of the body unless it already has one — WITH ITS CAPTION, taken
-    from `cover_caption:` — reads the draft back, and returns the result.  It does NOT publish and does not send email.  Run it in the
+    from `cover_caption:` — reads the draft back, and returns the result.  It does NOT publish and does not send email.  With --cover-only it
+    touches only the drafts API, so run it on a non-editor page with no composer open; otherwise run it in the
     post's editor.
 
     THE BODY HALF IS NOT ENOUGH ON ITS OWN.  A recompose rebuilds the body from `draft.md`,
@@ -229,7 +230,11 @@ def main():
               f"this prints, or a recompose re-inlines the bytes and orphans the uploaded copy.")
     did = "uploads, sets cover_image, and reads back" if cover_only else \
           "uploads once, sets cover_image, inserts the hero at the top of the body, and reads back"
-    print(f"\nRun it in the post's editor. In the built-in pane, carry it with pane_carry.py; "
+    where = ("Run it on a NON-EDITOR page of this publication, with no composer open on this post "
+             "(e.g. /publish/posts): --cover-only writes only the drafts API, and a composer holding "
+             "the post writes its own copy back over it (\"Draft not saved - Post out of date\", "
+             "2026-09-10). " if cover_only else "Run it in the post's editor. ")
+    print(f"\n{where}In the built-in pane, carry it with pane_carry.py; "
           f"never retype it.\nIt {did} — it does not publish and does not send email.")
 
 if __name__ == '__main__':

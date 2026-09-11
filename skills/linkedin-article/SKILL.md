@@ -94,6 +94,11 @@ author's sessions, so they sign in there themselves.
    - **The paste drops the alt text** (740 characters in, 0 kept). Restore it from the payload:
      `tr.setNodeMarkup(pos, undefined, {...attrs, alt})` on the `inlineImage`. Measured: 740/740,
      exact, still there after a reload.
+   - **Then its caption.** Every `figureImage` LinkedIn creates holds an empty `figcaption`
+     (schema: `inlineImage figcaption`). The payload's `caption` — from `publish.yaml`'s
+     `captions:` or `cover_caption:`, via `md_to_linkedin` — goes in with
+     `tr.insertText(caption, captionPos + 1)`; an empty one is left empty. Read it back after a
+     reload, as with the alt.
 6. **The onboarding modal** ("Say hello to a smoother editing and publishing experience") opens
    on first use and closes on its own. Nothing needs clicking.
 7. **Stop.** The draft autosaves ("Draft - saved"). Say what was composed and where; the author

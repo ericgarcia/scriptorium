@@ -47,7 +47,7 @@ from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from md_to_substack import (read_manifest, render_reader, render_marks,   # noqa: E402
+from md_to_substack import (render_captions, read_manifest, render_reader, render_marks,   # noqa: E402
                             MarkRuns, mark_keys)
 from substack_sync import H                                      # noqa: E402
 
@@ -166,6 +166,49 @@ def live_blocks(body_html):
         else:
             out.append((tag, text)); marks.append(runs)
     return [t for _, t in out], p.fns, marks, p.fn_marks
+
+
+class _Captions(HTMLParser):
+    """Each <figure>'s <figcaption> text, in order; '' for a figure with none."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.caps, self.fig, self.incap = [], 0, 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'figure':
+            self.fig += 1
+            self.caps.append('')
+        elif tag == 'figcaption' and self.fig:
+            self.incap += 1
+
+    def handle_endtag(self, tag):
+        if tag == 'figcaption' and self.incap:
+            self.incap -= 1
+        elif tag == 'figure' and self.fig:
+            self.fig -= 1
+
+    def handle_data(self, d):
+        if self.incap and self.caps:
+            self.caps[-1] += d
+
+
+def live_captions(body_html):
+    """The live post's image captions, in order. Figures are SKIP_TAG to the body parse, so
+    before this a caption on the live post -- right, wrong, or hand-set -- was invisible to
+    every check on this desk (2026-09-11)."""
+    p = _Captions(); p.feed(body_html); p.close()
+    return [re.sub(r'\s+', ' ', c).strip() for c in p.caps]
+
+
+def caption_drift(live, want):
+    """Differences between the live captions and the desk's, by position. A live caption the
+    desk does not hold is reported too: invisible is exactly what it used to be."""
+    if not any(want) and not any(live):
+        return []
+    if len(live) != len(want):
+        return [f'figures {len(live)} live vs {len(want)} draft; captions not aligned']
+    return [f'caption #{i + 1}: live {a[:60]!r} vs desk {b[:60]!r}'
+            for i, (a, b) in enumerate(zip(live, want)) if H(a) != H(b)]
 
 
 def fetch_public(url, fresh=False, attempts=ATTEMPTS):
@@ -440,6 +483,11 @@ def verify(name, piece_dir, url, fresh):
              'blocks': f'{len(lb)}/{len(body)}', 'fns': f'{len(lf)}/{len(fns)}',
              'marks': f'{n_marks}/{n_want}'}
     header = header_drift(post, read_manifest(os.path.join(piece_dir, 'publish.yaml')))
+    want_caps = render_captions(piece_dir)
+    live_caps = live_captions(post.get('body_html') or '')
+    caps = caption_drift(live_caps, want_caps)
+    if any(want_caps) or any(live_caps):
+        facts['captions'] = f'{sum(1 for c in live_caps if c)}/{sum(1 for c in want_caps if c)}'
     text_ok = ([H(x) for x in lb] == [H(x) for x in body]
                and [H(x) for x in lf] == [H(x) for x in fns])
     # Marks are compared only when the two sides are structurally alignable at all. If the
@@ -449,7 +497,7 @@ def verify(name, piece_dir, url, fresh):
     if len(lb) == len(body) and len(lf) == len(fns):
         marks = (mark_drift(lbm, dbm, lb, body, 'block')
                  + mark_drift(lfm, dfm, lf, fns, 'footnote', base=1))
-    if not header and text_ok and not marks:
+    if not header and text_ok and not marks and not caps:
         return ('MATCH', '', facts)
 
     detail = list(header)
@@ -463,14 +511,16 @@ def verify(name, piece_dir, url, fresh):
         if a != b:
             detail.append(f'first differing footnote #{i + 1}: live {lf[i][:70]!r}')
             break
-    detail += marks[:3]
+    detail += marks[:3] + caps[:3]
     if len(marks) > 3:
         detail.append(f'(+{len(marks) - 3} more formatting difference(s))')
     # A formatting-only drift gets its OWN status. It is invisible to every text digest on
     # this desk, so a run that reported it as plain DRIFT would send the reader looking for
     # a word that changed and find none -- and the surgical patcher, asked to fix it, would
     # report `unchanged` and apply nothing. Naming the kind is what makes it actionable.
-    status = 'DRIFT-MARKS' if (marks and text_ok and not header) else 'DRIFT'
+    # Captions likewise: media text no reader digest covers, so they get their own name.
+    status = ('DRIFT-MARKS' if (marks and text_ok and not header and not caps) else
+              'DRIFT-CAPTION' if (caps and text_ok and not header and not marks) else 'DRIFT')
     return (status, '; '.join(detail), facts)
 
 
@@ -587,7 +637,8 @@ def main():
             ok += 1
             if facts.get('emailed'): emailed.append(f"{name} ({facts['emailed']})")
         elif status.startswith('DRIFT'):
-            drift.append(name + ('  (formatting only)' if status == 'DRIFT-MARKS' else ''))
+            drift.append(name + ('  (formatting only)' if status == 'DRIFT-MARKS' else
+                                 '  (captions only)' if status == 'DRIFT-CAPTION' else ''))
         else:
             unreachable.append(f'{name}: {detail}')
         time.sleep(0.3)                                # be a polite client

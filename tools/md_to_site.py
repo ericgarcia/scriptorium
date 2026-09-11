@@ -50,7 +50,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import yaml                                                          # noqa: E402
-from md_to_substack import clean_footnote, render_reader             # noqa: E402
+from md_to_substack import clean_footnote, render_reader, load_captions, caption_for  # noqa: E402
 import tags as tagvocab                                              # noqa: E402
 import publications as pb                                            # noqa: E402
 
@@ -190,6 +190,7 @@ def resolve_images(piece_dir, slug, body, bundle, opts):
     man = load_manifest(piece_dir)
     imgs = man.get('images') if isinstance(man.get('images'), dict) else {}
     by_url = {v: k for k, v in imgs.items()}
+    caps, cover, cover_caption = load_captions(man)
     found, hero = [], None
 
     def repl(m):
@@ -207,11 +208,16 @@ def resolve_images(piece_dir, slug, body, bundle, opts):
         w, h = derive_image(src, dest, opts.max_width, opts.quality, opts.apply)
         rel = f"../images/{slug}/{name}"
         rec = {'src': rel, 'alt': alt, 'width': w, 'height': h}
+        cap = caption_for(local, caps, cover, cover_caption, imgs)
+        if cap:
+            rec['caption'] = cap            # the hero's caption rides here (BUNDLE.md, Images)
         found.append(rec)
         if hero is None:
             hero = rec
             return ''                       # hero is front matter; the site lays it out
-        return f"![{alt}]({rel})"
+        # A body image carries its caption as the markdown TITLE (BUNDLE.md, Images).
+        title = ' "' + cap.replace('\\', '\\\\').replace('"', '\\"') + '"' if cap else ''
+        return f"![{alt}]({rel}{title})"
 
     body = IMAGE_MD.sub(repl, body).strip()
 
@@ -227,6 +233,9 @@ def resolve_images(piece_dir, slug, body, bundle, opts):
             w, h = derive_image(src, dest, opts.max_width, opts.quality, opts.apply)
             alt = (man.get('image_alt') or {}).get(local, '')
             hero = {'src': f"../images/{slug}/{name}", 'alt': alt, 'width': w, 'height': h}
+            cap = caption_for(local, caps, cover, cover_caption, imgs)
+            if cap:
+                hero['caption'] = cap
             found.append(hero)
 
     return body, found, hero

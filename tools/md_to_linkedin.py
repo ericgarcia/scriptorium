@@ -11,7 +11,7 @@ what gets composed and refuses when the piece is not ready to go there.
 
   OUT   <out>/article.html    the body, LinkedIn-safe, ready to paste
         <out>/article.json    title, canonical, and the images in upload order
-        <out>/fig<N>.json     one per figure: {n, alt, name, dataUri}, for pane_carry.py
+        <out>/fig<N>.json     one per figure: {n, alt, caption, name, dataUri}, for pane_carry.py
 
 WHAT LINKEDIN CANNOT CARRY, AND WHAT THIS DOES INSTEAD
 
@@ -59,7 +59,7 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from md_to_substack import parse_blocks                        # noqa: E402
+from md_to_substack import parse_blocks, load_captions, caption_for  # noqa: E402
 
 
 def die(code, msg):
@@ -116,12 +116,16 @@ def build(piece_dir):
     blocks, ordered, _stripped, residual, unverified, fn_issues, sources = parse_blocks(piece_dir)
     number = {n: i + 1 for i, (n, _c) in enumerate(ordered)}
 
+    import yaml as _yaml
+    _mp = os.path.join(piece_dir, 'publish.yaml')
+    caps, cover, cover_caption = load_captions((_yaml.safe_load(open(_mp)) or {}) if os.path.exists(_mp) else {})
     images, body = [], []
     for b, src in zip(blocks, sources['body']):
         whole = re.fullmatch(r'!\[(.*?)\]\(([^)\s]+)\)', src.strip(), re.S)
         if whole:
             alt, path = whole.group(1), whole.group(2)
-            images.append({'n': len(images) + 1, 'path': path, 'alt': alt})
+            images.append({'n': len(images) + 1, 'path': path, 'alt': alt,
+                           'caption': caption_for(path, caps, cover, cover_caption, {})})
             body.append(f'<p><strong>[Figure {len(images)} — upload here]</strong> '
                         f'<em>{html.escape(alt)}</em></p>')
             continue
@@ -244,7 +248,8 @@ def main():
         with open(img['file'], 'rb') as fh:
             data = base64.b64encode(fh.read()).decode()
         with open(os.path.join(out, f"fig{img['n']}.json"), 'w', encoding='utf-8') as fh:
-            json.dump({'n': img['n'], 'alt': img['alt'], 'name': os.path.basename(img['file']),
+            json.dump({'n': img['n'], 'alt': img['alt'], 'caption': img.get('caption', ''),
+                       'name': os.path.basename(img['file']),
                        'dataUri': f'data:{mime};base64,{data}'}, fh, ensure_ascii=False)
     print(f"\nwrote      {out}/article.html, article.json, fig1..{len(images)}.json")
     print("next       compose in LinkedIn's Article editor; a human clicks Publish")

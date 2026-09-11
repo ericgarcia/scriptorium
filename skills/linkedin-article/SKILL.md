@@ -94,11 +94,18 @@ author's sessions, so they sign in there themselves.
    - **The paste drops the alt text** (740 characters in, 0 kept). Restore it from the payload:
      `tr.setNodeMarkup(pos, undefined, {...attrs, alt})` on the `inlineImage`. Measured: 740/740,
      exact, still there after a reload.
-   - **Then its caption.** Every `figureImage` LinkedIn creates holds an empty `figcaption`
-     (schema: `inlineImage figcaption`). The payload's `caption` — from `publish.yaml`'s
-     `captions:` or `cover_caption:`, via `md_to_linkedin` — goes in with
-     `tr.insertText(caption, captionPos + 1)`; an empty one is left empty. Read it back after a
-     reload, as with the alt.
+   - **Then its caption — as an ATTRIBUTE, not just text.** Every `figureImage` LinkedIn creates
+     holds an empty `figcaption` (schema: `inlineImage figcaption`), and **LinkedIn saves the
+     `figcaption`'s `text` attribute, not its content.** Measured 2026-09-11 on
+     love-is-not-a-metric-space: six captions written as content alone showed in the editor, said
+     *Draft - saved*, and were all empty after a reload. Set both, in one transaction, last figure
+     first: `tr.setNodeMarkup(pos, undefined, {...attrs, text: caption})` for the attribute and
+     `tr.replaceWith(pos + 1, pos + 1 + node.content.size, schema.text(caption))` for what the
+     reader sees. The payload's `caption` comes from `publish.yaml`'s `captions:` or
+     `cover_caption:`, via `md_to_linkedin`; an empty one is left empty.
+     **Wait for a real save before navigating**: a *Draft - saved* already on screen is the old
+     save, so watch for *Saving* then *saved*, and keep the wait short — the pane kills a script
+     after 45 s. Then reload and read back both the attribute and the visible text.
 6. **The onboarding modal** ("Say hello to a smoother editing and publishing experience") opens
    on first use and closes on its own. Nothing needs clicking.
 7. **Stop.** The draft autosaves ("Draft - saved"). Say what was composed and where; the author

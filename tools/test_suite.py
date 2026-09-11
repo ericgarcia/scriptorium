@@ -2251,6 +2251,68 @@ def unit_publications(tmp):
               str(sp.publication_conflicts(live, bundle)))
 
 
+
+# ---------------------------------------------------------------- unit: substack tags
+def unit_substack_tags(tmp):
+    """A piece's tags onto its Substack post (2026-09-11). The snippet runs against a STUBBED
+    Substack here — no network — so what is asserted is the logic: create only the missing
+    publication tags, attach only the missing ones, remove nothing, and do nothing the second time."""
+    print("\n-- substack tags: the snippet, against a stubbed Substack -------------")
+    import substack_tags as st
+    root = os.path.join(tmp, 'stdesk'); d = os.path.join(root, 'pieces', 'p')
+    os.makedirs(d, exist_ok=True); os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    open(os.path.join(root, 'publishing', 'tags.yaml'), 'w').write(
+        'tags:\n  - tag: idolatry\n    label: Idolatry\n    about: a\n'
+        '  - tag: discernment\n    label: Discernment\n    about: b\n'
+        '  - tag: canon\n    label: The Canon\n    about: c\n    substack: false\n')
+    man = os.path.join(d, 'publish.yaml')
+    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\n'
+                         'tags:\n  - canon\n  - discernment\n  - idolatry\n')
+    p = st.plan(d)
+    check('stags: labels in vocabulary order, and a `substack: false` tag is not sent',
+          p['labels'] == ['Idolatry', 'Discernment'] and p['skipped'] == ['canon'] and p['post'] == 42, str(p))
+    open(man, 'a').write('published_at: 2026-09-01\n')
+    check('stags: a LIVE post is refused without --live', st.main([d]) == 3)
+    open(man, 'w').write('title: P\ntags:\n  - idolatry\n')
+    check('stags: no post_url is refused', st.main([d]) == 3)
+    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\ntags:\n  - nope\n')
+    check('stags: a tag not in the vocabulary is refused', st.main([d]) == 3)
+
+    if not shutil.which('node'):
+        skip('stags: the snippet against a stubbed Substack', 'node not installed'); return
+    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\n'
+                         'tags:\n  - idolatry\n  - discernment\n')
+    js = st.snippet(st.plan(d))
+    stub = r"""
+const pubTags = [{id: 'T1', name: 'Idolatry', slug: 'idolatry'}], postTags = [], calls = [];
+globalThis.location = { pathname: process.env.PATHNAME || '/publish/home' };
+globalThis.fetch = async (path, o) => {
+  const m = (o && o.method) || 'GET'; calls.push(m + ' ' + path);
+  const ok = (b) => ({ ok: true, status: 200, text: async () => JSON.stringify(b) });
+  if (m === 'GET' && path === '/api/v1/publication/post-tag') return ok(pubTags);
+  if (m === 'POST' && path === '/api/v1/publication/post-tag') {
+    const t = { id: 'T' + (pubTags.length + 1), name: JSON.parse(o.body).name }; pubTags.push(t); return ok(t); }
+  if (m === 'GET' && path === '/api/v1/post/42/tag') return ok(postTags);
+  const a = path.match(/^\/api\/v1\/post\/42\/tag\/(.+)$/);
+  if (m === 'POST' && a) { const j = { post_tag_id: a[1] }; postTags.push(j); return ok(j); }
+  return { ok: false, status: 404, text: async () => 'no route ' + m + ' ' + path };
+};
+"""
+    f = os.path.join(tmp, 'stags.mjs'); open(f, 'w').write(stub + '\nlet result;\n' + '\n'.join(
+        '{\n' + js.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n}' for _ in range(2)))
+    r = subprocess.run(['node', f], capture_output=True, text=True)
+    outs = [json.loads(l) for l in r.stdout.splitlines() if l.startswith('{')]
+    first, second = (outs + [{}, {}])[:2]
+    check('stags: the first run creates only the missing tag and attaches both',
+          first.get('created') == ['Discernment'] and first.get('attached') == ['Idolatry', 'Discernment']
+          and first.get('ok') is True, r.stderr[-300:] or str(first))
+    check('stags: the second run does nothing', second.get('created') == [] and second.get('attached') == []
+          and second.get('now') == ['Idolatry', 'Discernment'], str(second))
+    r = subprocess.run(['node', f], capture_output=True, text=True, env={**os.environ, 'PATHNAME': '/publish/post/42'})
+    check("stags: the snippet refuses to run in the editor holding the post",
+          r.returncode != 0 and 'refusing' in r.stderr, r.stderr[-200:])
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -2599,6 +2661,7 @@ def main():
         unit_store(tmp)
         unit_tags(tmp)
         unit_publications(tmp)
+        unit_substack_tags(tmp)
         unit_linkedin(tmp)
         corpus_integrity()
         corpus_headers()

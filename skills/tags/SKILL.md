@@ -126,5 +126,12 @@ coincidence of spelling, not one tag: report the results per publication.
   not define. A site reads the store by outlet, and every outlet belongs to one publication, so a
   site only ever shows its own publication's tags. Tagging a published piece changes nothing a
   reader sees until the next bundle export and store publish.
-- **Substack.** Not automated. Substack has no write API, so post tags are set in the editor, and
-  a live post is a public edit — see the `publish` skill before touching one.
+- **Substack.** `framework/tools/substack_tags.py pieces/<slug>` emits a script that puts the
+  piece's tags on its Substack post, by label, from the endpoints the editor itself uses (measured
+  2026-09-11 — the tool's docstring has them). **Run it on the publication's origin but never in
+  that post's editor**: the dashboard (`/publish/home`) is right, and the script refuses the
+  editor. It is additive — it creates only missing tags, attaches only missing ones, reports tags
+  the desk does not list as `extra` and removes nothing — and it returns the post's tags read back.
+  A vocabulary entry with `substack: false` (a membership tag) is never sent. **A live post is a
+  public edit:** the tool refuses without `--live`, which is the author's word; afterwards
+  `substack_tags.py pieces/<slug> --verify` reads the public post's tags and compares.

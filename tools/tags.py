@@ -23,7 +23,7 @@ WHERE THINGS LIVE (an instance, not the framework — no personal writing lives 
 
     tags:
       - tag: practice             # the id: lowercase, hyphenated, the URL segment
-        label: Practice           # what a reader sees
+        label: Practice           # what a reader sees (and the tag's name on Substack)
         about: >-                 # what the tag is FOR — read by whoever proposes tags
           The daily doing of it: prayer, return, attention.
 
@@ -133,7 +133,11 @@ def load_vocab(path):
         for field in ('label', 'about'):
             if not isinstance(e.get(field), str) or not e[field].strip():
                 problems.append(f'vocabulary: {tag!r} has no {field}')
-        entries[tag] = {'label': str(e.get('label') or '').strip(), 'about': str(e.get('about') or '').strip()}
+        if 'substack' in e and not isinstance(e['substack'], bool):
+            problems.append(f'vocabulary: {tag!r} substack must be true or false')
+        # `substack: false` keeps a tag on the desk and the sites but off Substack (substack_tags.py).
+        entries[tag] = {'label': str(e.get('label') or '').strip(), 'about': str(e.get('about') or '').strip(),
+                        'substack': e.get('substack') is not False}
     return entries, problems
 
 

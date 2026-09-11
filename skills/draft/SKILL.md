@@ -36,6 +36,11 @@ the loop — write freely, revise later, let git remember old versions.
    no `outlets:` rather than defaulting, so the question cannot be skipped; this step
    is where it gets answered while it is still cheap. (Eric, 2026-09-09: *"the skill for
    creating a piece should define which outlets it will go to and confirm with the user.
+   **A publication's `required_outlets` are the proposal, not an option** (`publications.yaml`).
+   Propose every one of them; if the user drops one, write the reason into the manifest as
+   `outlets_exempt: {<outlet>: "<their reason>"}`. The suite refuses a published piece that is
+   missing a required outlet without a written reason — the rule is "every piece, unless the
+   author says otherwise", and the saying has to be recorded where the next session will see it.
    we should not silently select one."*)
 1c. **When the piece is NEW, settle its publication and its tags with the outlets, in the same
    exchange.** On a desk with a publication registry (`publishing/publications.yaml`), every

@@ -155,7 +155,8 @@ def registry_path(root, explicit=None):
 
 def load(root, explicit=None):
     """-> (publications, problems). publications is None when the desk has no registry — a
-    one-publication desk — and otherwise id -> {name, byline, outlets, books, styles, tags}."""
+    one-publication desk — and otherwise id -> {name, byline, outlets, required_outlets, books,
+    styles, tags}."""
     path = registry_path(root, explicit)
     if not os.path.exists(path):
         if explicit:
@@ -186,11 +187,43 @@ def load(root, explicit=None):
                 problems.append(f'outlet {o!r} belongs to both {owner[o]} and {pid} — a site reads '
                                 f'by outlet, so it would show both publications')
             owner.setdefault(o, pid)
+        # Outlets EVERY published piece of this publication must be on, unless the piece records
+        # why not. Optional; a publication without it asks nothing.
+        req = e.get('required_outlets') or []
+        if not isinstance(req, list) or not all(isinstance(x, str) for x in req):
+            problems.append(f'{pid}: required_outlets must be a list of names'); req = []
+        stray = [o for o in req if o not in entry['outlets']]
+        if stray:
+            problems.append(f'{pid}: required_outlets {stray} are not among its own outlets')
+        entry['required_outlets'] = [o for o in req if o in entry['outlets']]
         t = e.get('tags')
         entry['tags'] = os.path.join(root, t) if isinstance(t, str) and t.strip() else \
             os.path.join(root, 'publishing', 'tags', f'{pid}.yaml')
         pubs[pid] = entry
     return pubs, problems
+
+
+def missing_required(man, pubs):
+    """-> [(outlet, why)] for a PUBLISHED piece: each outlet its publication requires that the
+    piece neither declares nor exempts. An exemption is `outlets_exempt: {outlet: "reason"}` —
+    with a reason, because the rule this serves is "every piece, unless Eric says otherwise",
+    and the saying has to be written down. A draft is not held to it."""
+    if not pubs or not man or not man.get('public_url'):
+        return []
+    e = pubs.get(man.get('publication') or '')
+    if not e:
+        return []
+    declared = set(man.get('outlets') or [])
+    exempt = man.get('outlets_exempt') if isinstance(man.get('outlets_exempt'), dict) else {}
+    out = []
+    for o in e.get('required_outlets') or []:
+        if o in declared:
+            continue
+        why = exempt.get(o)
+        if isinstance(why, str) and why.strip():
+            continue
+        out.append((o, 'exempted without a reason' if o in exempt else 'not declared'))
+    return out
 
 
 def outlet_owner(pubs, outlet):

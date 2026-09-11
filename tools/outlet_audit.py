@@ -43,6 +43,10 @@ CONFIG (instance-side; the framework holds no URLs)
         manifest_url_key: site_url
         sitemap: https://alignmentfellowship.org/sitemap.xml
 
+  An outlet without native footnotes names how it prints a reference inline —
+  `footnote_marker: bracket` for "word.[1]" — so --content does not read the marker as
+  changed text (FOOTNOTE_MARKERS).
+
 USAGE
   python3 outlet_audit.py [--config publishing/outlets.yaml] [--pieces pieces]
                           [--outlet NAME] [--no-reverse] [--quiet]
@@ -202,6 +206,18 @@ def _strip_page_furniture(page):
     return page
 
 
+# How an outlet with NO native footnotes prints a reference in the body, so --content can
+# drop it. LinkedIn has none: md_to_linkedin writes "\u2026Sam.[1] Thirty-four\u2026" and appends a
+# Notes section, and the check read every footnoted paragraph as missing from a correct
+# copy (love-is-not-a-metric-space, 3 of 39, 2026-09-11). Per outlet, from outlets.yaml's
+# `footnote_marker`, never global: a bracketed number in prose on any other outlet is
+# words. Only a marker glued to the text before it counts \u2014 "see [2] below" survives, and
+# so does each "[1] \u2026" that opens a line of the Notes.
+FOOTNOTE_MARKERS = {
+    'bracket': re.compile(r'(?<=\S)\[\d+\]'),
+}
+
+
 def _norm_text(t):
     t = t.replace('\u2019', "'").replace('\u2018', "'")
     t = t.replace('\u201c', '"').replace('\u201d', '"')
@@ -237,7 +253,7 @@ def publishable_body(piece_dir):
     return body
 
 
-def content_drift(piece_dir, page_html, canonical_outlet=False):
+def content_drift(piece_dir, page_html, canonical_outlet=False, footnote_marker=None):
     """Does the live page carry the desk's paragraphs?
 
     Deliberately a PRESENCE check, not an equality one, and the report says so. The
@@ -268,6 +284,12 @@ def content_drift(piece_dir, page_html, canonical_outlet=False):
     if not want:
         return None
     have = _norm_text(_strip_page_furniture(page_html))
+    # Dropped on BOTH sides, so the desk writing "x[1]" in prose cannot read as stale here.
+    # Before whitespace removal, which would glue every marker to the text before it.
+    if footnote_marker:
+        rx = FOOTNOTE_MARKERS[footnote_marker]
+        have = rx.sub('', have)
+        want = [rx.sub('', w) for w in want]
     # Compare with ALL whitespace removed. Every remaining false lead on 2026-09-11 was a
     # whitespace artifact of one kind or another — a line break inside a block joined with
     # no space ("sent Me.I came"), an italic word before a suffix split by tag-stripping
@@ -305,6 +327,11 @@ def main():
         if a.outlet not in outlets:
             die(1, f"unknown outlet {a.outlet!r}; config has {', '.join(outlets)}")
         outlets = {a.outlet: outlets[a.outlet]}
+    for oname, oc in outlets.items():
+        fm = oc.get('footnote_marker')
+        if fm is not None and fm not in FOOTNOTE_MARKERS:
+            die(1, f"outlet {oname!r}: unknown footnote_marker {fm!r}; "
+                   f"known: {', '.join(FOOTNOTE_MARKERS)}")
 
     pieces = load_pieces(a.pieces, legacy_outlet)
     if not pieces:
@@ -337,7 +364,8 @@ def main():
                 canon = str(pc['manifest'].get('canonical') or '')
                 base = str(outlets[oname].get('reader_base') or '').rstrip('/')
                 row['content'] = content_drift(os.path.join(a.pieces, pc['name']), body,
-                                               canonical_outlet=bool(canon and base and canon.startswith(base)))
+                                               canonical_outlet=bool(canon and base and canon.startswith(base)),
+                                               footnote_marker=outlets[oname].get('footnote_marker'))
             results.append(row)
             if status is None:
                 unreachable += 1

@@ -137,6 +137,25 @@ Each browser step is one JS eval in the live post's editor.
    `python3 framework/tools/substack_sync.py seal pieces/<name> live-after.json`
    It refuses unless draft and live now agree, and records the new baseline. **Do not skip
    this** — an unsealed sync leaves the next one unable to tell which side moved.
+8. **Carry it to every other outlet the piece declares.** This loop moves Substack and
+   nothing else, and a correction is not live until every outlet in `publish.yaml`'s
+   `outlets:` has it. **Measured 2026-09-11:** *For the Love of Dogs* had its storm sentence
+   corrected, re-synced, `substack_verify --fresh` MATCH, and was logged *live and verified* —
+   while alignmentfellowship.org went on serving the old sentence for hours, because the
+   content store was never re-uploaded. Not a cache: the store object predated the correction.
+   For each outlet other than `substack`:
+   - **a store outlet** (the site reads the content store) — the one-piece export and upload in
+     the instance's `publishing/outlets.md`: seed the index from the live store, export **only
+     this piece** from a committed, clean draft, `store_publish.py --dry-run`, read the counts,
+     upload.
+   - **an outlet a person publishes** (LinkedIn) — regenerate the copy with its skill and hand it
+     over. It is **pending** until they update it; say so rather than reporting it done.
+
+   Then, after about a minute, from the instance root:
+   `python3 framework/tools/outlet_audit.py --content --outlet <outlet>` for each one, and read
+   this piece's row. **Report the correction as live only when `substack_verify` matched and
+   this piece is clean on every outlet it declares**; otherwise report per outlet — *Substack
+   confirmed; alignmentfellowship pending* — never one word for all of them.
 
 ## First run (a piece published before sync existed)
 

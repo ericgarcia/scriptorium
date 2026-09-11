@@ -126,15 +126,15 @@ coincidence of spelling, not one tag: report the results per publication.
   not define. A site reads the store by outlet, and every outlet belongs to one publication, so a
   site only ever shows its own publication's tags. Tagging a published piece changes nothing a
   reader sees until the next bundle export and store publish.
-- **Substack.** `framework/tools/substack_tags.py pieces/<slug>...` emits one script that puts
-  the pieces' tags on their Substack posts, by label, and carries a SHA-256 of its plan that the
-  page checks before any write — a label altered in transit would otherwise be created as a
-  public tag. The tags reach readers as public archive pages (`/t/<tag>`), which is why a live
-  post is a public edit. It works from the endpoints the editor itself uses (measured
-  2026-09-11 — the tool's docstring has them). **Run it on the publication's origin but never in
-  that post's editor**: the dashboard (`/publish/home`) is right, and the script refuses the
-  editor. It is additive — it creates only missing tags, attaches only missing ones, reports tags
-  the desk does not list as `extra` and removes nothing — and it returns the post's tags read back.
-  A vocabulary entry with `substack: false` (a membership tag) is never sent. **A live post is a
-  public edit:** the tool refuses without `--live`, which is the author's word; afterwards
-  `substack_tags.py pieces/<slug> --verify` reads the public post's tags and compares.
+- **Substack.** `framework/tools/substack_tags.py pieces/<slug>...` emits one script that sets
+  each post to **exactly** its piece's tags, by label: missing tags are attached (created on the
+  publication first if new), tags the desk does not list are **detached**, and a second run does
+  nothing — so the desk is where a Substack tag is changed, and a tag added by hand in the editor
+  is undone by the next run. It **never deletes a publication tag** (that would take down its
+  public `/t/<tag>` page). The script carries a SHA-256 of its plan, re-checked in the page before
+  any write. Run it on the publication's origin but **never in a listed post's editor** — the
+  dashboard (`/publish/home`) is right, and the script refuses the editor. **A live post is a
+  public edit:** take `--dry-run` first (it writes nothing, and needs no `--live`), then run with
+  `--live` on the author's word, then `--verify`, which reads the public posts and fails on a tag
+  missing or extra. A piece with no tags is refused unless `--clear` says to strip its post.
+  A `substack: false` vocabulary entry is never sent. Measured endpoints: the tool's docstring.

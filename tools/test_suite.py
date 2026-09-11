@@ -2372,9 +2372,10 @@ def unit_publications(tmp):
 
 # ---------------------------------------------------------------- unit: substack tags
 def unit_substack_tags(tmp):
-    """A piece's tags onto its Substack post (2026-09-11). The snippet runs against a STUBBED
-    Substack here — no network — so what is asserted is the logic: create only the missing
-    publication tags, attach only the missing ones, remove nothing, and do nothing the second time."""
+    """Each Substack post set to exactly its piece's tags (2026-09-11). The snippet runs against a
+    STUBBED Substack — no network — so what is asserted is the logic: create a missing publication
+    tag once, attach what is missing, detach what the desk does not list, never delete a publication
+    tag, do nothing the second time, write nothing on a dry run, and refuse a tampered plan."""
     print("\n-- substack tags: the snippet, against a stubbed Substack -------------")
     import substack_tags as st
     root = os.path.join(tmp, 'stdesk'); d = os.path.join(root, 'pieces', 'p')
@@ -2391,18 +2392,20 @@ def unit_substack_tags(tmp):
           p['labels'] == ['Idolatry', 'Discernment'] and p['skipped'] == ['canon'] and p['post'] == 42, str(p))
     open(man, 'a').write('published_at: 2026-09-01\n')
     check('stags: a LIVE post is refused without --live', st.main([d]) == 3)
+    check('stags: ...but a dry run of a live post needs no --live', st.main([d, '--dry-run', '--out', os.path.join(tmp, 'x.js')]) == 0)
     open(man, 'w').write('title: P\ntags:\n  - idolatry\n')
     check('stags: no post_url is refused', st.main([d]) == 3)
     open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\ntags:\n  - nope\n')
     check('stags: a tag not in the vocabulary is refused', st.main([d]) == 3)
+    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\n')
+    check('stags: an untagged piece is refused — "not tagged yet" is not "strip the post"', st.main([d]) == 3)
+    check('stags: --clear sets it to none on purpose', st.plan(d, clear=True)['labels'] == [])
 
     if not shutil.which('node'):
         skip('stags: the snippet against a stubbed Substack', 'node not installed'); return
-    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\n'
-                         'tags:\n  - idolatry\n  - discernment\n')
-    js = st.snippet(st.plan(d))
     stub = r"""
-const pubTags = [{id: 'T1', name: 'Idolatry', slug: 'idolatry'}], postTags = [], calls = [];
+const pubTags = [{id: 'T1', name: 'Idolatry'}, {id: 'T9', name: 'Other'}], calls = [];
+const onPost = { 42: ['T9'], 43: [] };
 process.on('exit', () => console.error('CALLS ' + JSON.stringify(calls)));
 globalThis.location = { pathname: process.env.PATHNAME || '/publish/home' };
 globalThis.fetch = async (path, o) => {
@@ -2411,47 +2414,61 @@ globalThis.fetch = async (path, o) => {
   if (m === 'GET' && path === '/api/v1/publication/post-tag') return ok(pubTags);
   if (m === 'POST' && path === '/api/v1/publication/post-tag') {
     const t = { id: 'T' + (pubTags.length + 1), name: JSON.parse(o.body).name }; pubTags.push(t); return ok(t); }
-  if (m === 'GET' && path === '/api/v1/post/42/tag') return ok(postTags);
-  const a = path.match(/^\/api\/v1\/post\/42\/tag\/(.+)$/);
-  if (m === 'POST' && a) { const j = { post_tag_id: a[1] }; postTags.push(j); return ok(j); }
+  const g = path.match(/^\/api\/v1\/post\/(\d+)\/tag$/);
+  if (m === 'GET' && g) return ok((onPost[g[1]] || []).map((id) => ({ post_tag_id: id })));
+  const a = path.match(/^\/api\/v1\/post\/(\d+)\/tag\/(.+)$/);
+  if (m === 'POST' && a) { onPost[a[1]].push(a[2]); return ok({ post_tag_id: a[2] }); }
+  if (m === 'DELETE' && a) { onPost[a[1]] = onPost[a[1]].filter((x) => x !== a[2]); return ok({}); }
   return { ok: false, status: 404, text: async () => 'no route ' + m + ' ' + path };
 };
 """
-    f = os.path.join(tmp, 'stags.mjs'); open(f, 'w').write(stub + '\nlet result;\n' + '\n'.join(
-        '{\n' + js.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n}' for _ in range(2)))
-    r = subprocess.run(['node', f], capture_output=True, text=True)
-    outs = [json.loads(l) for l in r.stdout.splitlines() if l.startswith('{')]
-    first, second = ([o['results'][0] for o in outs] + [{}, {}])[:2]
-    check('stags: the first run creates only the missing tag and attaches both',
-          first.get('created') == ['Discernment'] and first.get('attached') == ['Idolatry', 'Discernment']
-          and first.get('ok') is True, r.stderr[-300:] or str(first))
-    check('stags: the second run does nothing', second.get('created') == [] and second.get('attached') == []
-          and second.get('now') == ['Idolatry', 'Discernment'], str(second))
-
-    # a plan altered in transit is refused before a single write — a typo would otherwise be
-    # CREATED as a public tag on the publication
-    bad = js.replace('"Discernment"', '"Discernmnet"', 1)
-    fb = os.path.join(tmp, 'stags-bad.mjs'); open(fb, 'w').write(stub + '\nlet result;\n' + bad.replace('const result =', 'result ='))
-    r = subprocess.run(['node', fb], capture_output=True, text=True)
-    posts = [c for c in json.loads((re.findall(r'CALLS (\[.*\])', r.stderr) or ['[]'])[-1]) if c.startswith('POST')]
-    check('stags: a plan that fails its checksum is refused, and nothing is written',
-          r.returncode != 0 and 'checksum' in r.stderr and posts == [], r.stderr[-300:])
-
-    # many posts in one run: one publication tag created once, shared by both
+    open(man, 'w').write('title: P\npost_url: https://x.substack.com/publish/post/42\n'
+                         'tags:\n  - idolatry\n  - discernment\n')
     q = os.path.join(root, 'pieces', 'q'); os.makedirs(q, exist_ok=True)
-    open(os.path.join(q, 'publish.yaml'), 'w').write('title: Q\npost_url: https://x.substack.com/publish/post/42\n'
+    open(os.path.join(q, 'publish.yaml'), 'w').write('title: Q\npost_url: https://x.substack.com/publish/post/43\n'
                                                      'tags:\n  - discernment\n')
-    both = st.snippet([st.plan(d), st.plan(q)])
-    fm = os.path.join(tmp, 'stags-many.mjs'); open(fm, 'w').write(stub + '\nlet result;\n' + both.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n')
-    r = subprocess.run(['node', fm], capture_output=True, text=True)
-    out = json.loads(next((l for l in r.stdout.splitlines() if l.startswith('{')), '{}'))
-    check('stags: a batch creates a shared tag once and reports every post',
-          out.get('posts') == 2 and out.get('created') == ['Discernment'] and out.get('ok') is True,
-          r.stderr[-300:] or str(out))
-    r = subprocess.run(['node', f], capture_output=True, text=True, env={**os.environ, 'PATHNAME': '/publish/post/42'})
-    check("stags: the snippet refuses to run in the editor holding the post",
-          r.returncode != 0 and 'refusing' in r.stderr, r.stderr[-200:])
 
+    def run(scripts, env=None):
+        f = os.path.join(tmp, 'stags-run.mjs')
+        open(f, 'w').write(stub + '\nlet result;\n' + '\n'.join(
+            '{\n' + s.replace('const result =', 'result =') + '\nconsole.log(JSON.stringify(result));\n}' for s in scripts))
+        r = subprocess.run(['node', f], capture_output=True, text=True, env={**os.environ, **(env or {})})
+        outs = [json.loads(l) for l in r.stdout.splitlines() if l.startswith('{')]
+        writes = [c for c in json.loads((re.findall(r'CALLS (\[.*\])', r.stderr) or ['[]'])[-1])
+                  if c.split()[0] in ('POST', 'DELETE')]
+        return r, outs, writes
+
+    both = [st.plan(d), st.plan(q)]
+    r, outs, writes = run([st.snippet(both, dry=True)])
+    dry = (outs or [{}])[0]
+    check('stags: a dry run reports the diff and writes nothing',
+          writes == [] and dry.get('dry') is True and dry.get('created') == ['Discernment']
+          and dry.get('removed') == ['p: Other'], r.stderr[-300:] or str(dry))
+    r, outs, writes = run([st.snippet(both), st.snippet(both)])
+    first, second = (outs + [{}, {}])[:2]
+    res = {x['slug']: x for x in first.get('results', [])}
+    check('stags: the first run creates a shared tag once, attaches what is missing, detaches the extra',
+          first.get('ok') is True and first.get('created') == ['Discernment']
+          and res.get('p', {}).get('removed') == ['Other'] and res.get('p', {}).get('now') == ['Idolatry', 'Discernment']
+          and res.get('q', {}).get('now') == ['Discernment'], r.stderr[-300:] or str(first))
+    check('stags: a publication tag is detached, never deleted',
+          not any(w.startswith('DELETE /api/v1/publication') for w in writes)
+          and any(w == 'DELETE /api/v1/post/42/tag/T9' for w in writes), str(writes))
+    check('stags: the second run does nothing',
+          second.get('created') == [] and second.get('removed') == []
+          and all(x['attached'] == [] for x in second.get('results', [])), str(second))
+
+    bad = st.snippet(both).replace('"Discernment"', '"Discernmnet"', 1)
+    r, _o, writes = run([bad])
+    check('stags: a plan that fails its checksum is refused, and nothing is written',
+          r.returncode != 0 and 'checksum' in r.stderr and writes == [], r.stderr[-300:])
+    flipped = st.snippet(both, dry=True).replace('"dry":true', '"dry":false', 1)
+    r, _o, writes = run([flipped])
+    check('stags: a dry run cannot be turned into a real one in transit — the checksum covers it',
+          r.returncode != 0 and writes == [], r.stderr[-300:])
+    r, _o, writes = run([st.snippet(both)], env={'PATHNAME': '/publish/post/42'})
+    check('stags: the snippet refuses to run in the editor holding a listed post',
+          r.returncode != 0 and 'refusing' in r.stderr and writes == [], r.stderr[-200:])
 
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():

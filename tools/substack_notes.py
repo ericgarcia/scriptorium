@@ -45,7 +45,9 @@ A POEM IN A NOTE (measured 2026-09-11)
   stripped (empty, U+00A0, U+200B, U+3000) and a non-whitespace one is kept (U+2800, "·").
   So a stanza gap is a MARKER line — `stanza_break:` in note.md's header: `braille` (U+2800,
   reads as an empty line; the default), `dot` ("·", visible), or `none`. Screen readers may
-  announce U+2800; `dot` is the accessible choice.
+  announce U+2800; `dot` is the accessible choice. PROVEN on a posted Note the same day:
+  Earmuffs reposted as c-335012885 reads back 64 paragraphs, all 11 U+2800 gaps kept. Private
+  probes go in the standing Notes draft (`notes_probe_draft_id`, outlets.yaml), never a live Note.
 
 CADENCE
 

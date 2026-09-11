@@ -113,9 +113,20 @@ stanza_break: dot       # "·", visible, and cleaner for a screen reader
 stanza_break: none      # an empty paragraph, which the server drops
 ```
 
-**`braille` is not proven on a posted Note yet** — the draft sanitizer and the post path may differ;
-the first poem posted with it (Earmuffs, reposted) measures it. And weigh the reader who listens:
-some screen readers announce U+2800 at every gap; `dot` is the accessible choice.
+**`braille` is proven on a posted Note** (2026-09-11): *Earmuffs*, reposted with it as Note
+c-335012885, reads back from the public feed as **64 paragraphs with all 11 U+2800 gaps**. Weigh the
+reader who listens, though: some screen readers announce U+2800 at every gap; `dot` is the
+accessible choice.
+
+### The probe draft — test privately, never on a live Note
+
+Keep **one standing Notes draft** for probes like this one, and reuse it: load it with whatever is
+being tested, save, read back from `GET /api/v1/feed/drafts`. It is private, costs no Note, and is
+never posted or deleted — it is tooling, not content (Eric, 2026-09-11: *"we are keeping a test
+draft around now … we will reuse the same test draft"*). The instance records its id beside the
+Notes profile (`notes_probe_draft_id` in `publishing/outlets.yaml`). Its limit is the one measured
+here: a draft shows what the server **strips**; only a posted Note proves what **survives**, so a
+probe result is a strong hint and the first real post is the proof.
 
 ## Voices: what ships, and what stays private
 

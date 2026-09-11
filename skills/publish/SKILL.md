@@ -73,7 +73,10 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   ```
 
   **Exit 5 is a refusal: stop.** Do not compose, re-sync or click anything on a surface signed in
-  as the wrong account — go to the outlet's surface. Exit 3 is signed out: the author signs in.
+  as the wrong account. **The pane is always tried first** (Eric, 2026-09-11: *"we should use the
+  inapp browser by default if possible"*); an outlet whose account the pane does not hold names a
+  `fallback_surface` — `check --surface pane` points you at it. Go there; never switch the pane.
+  Exit 3 is signed out: the author signs in.
 - **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
   *Requirements* in the framework README for install and troubleshooting. In short: extension
   **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or

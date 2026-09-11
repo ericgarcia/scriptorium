@@ -2346,6 +2346,17 @@ def unit_substack_account(tmp):
     check("substack_account: route names the surface and the Chrome browser; the pane is the default",
           r['surface'] == 'chrome' and r['chrome_browser'] == 'MuffinLabs'
           and sa.route(outs, 'site')['surface'] == 'pane', str(r))
+    outs2 = {'m': {'account_handle': 'ericgarciaphd', 'surface': 'pane', 'fallback_surface': 'chrome',
+                   'chrome_browser': 'eric@muffinlabs.ai'}}
+    r2 = sa.route(outs2, 'm')
+    check("substack_account: the pane first, a Chrome profile only as the fallback (in-app by default)",
+          r2['surface'] == 'pane' and r2['fallback'] == 'chrome'
+          and r2['chrome_browser'] == 'eric@muffinlabs.ai', str(r2))
+    code2, msg2 = sa.verdict(outs2, 'm', 'elmuffin', surface='pane')
+    check("substack_account: a refusal in the pane names the fallback — and is still a refusal",
+          code2 == 5 and 'falls back to chrome' in msg2 and 'eric@muffinlabs.ai' in msg2, msg2)
+    check("substack_account: the fallback, signed in as the outlet's account, passes",
+          sa.verdict(outs2, 'm', 'ericgarciaphd', surface='chrome')[0] == 0)
     check("substack_account: the snippet is same-origin (a cross-origin fetch fails in the pane)",
           "fetch('/api/v1/user/profile/self'" in sa.SNIPPET and 'substack.com/api' not in sa.SNIPPET)
 

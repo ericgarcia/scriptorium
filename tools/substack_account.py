@@ -25,8 +25,14 @@ CONFIG (instance-side, publishing/outlets.yaml; the framework holds no handles)
       surface: pane                # pane (default) | chrome
     substack-muffinlabs:
       account_handle: ericgarciaphd
-      surface: chrome
-      chrome_browser: MuffinLabs   # the Claude in Chrome browser holding that login
+      surface: pane                # THE PANE FIRST, always — the author's default surface
+      fallback_surface: chrome     # used only when the pane is signed in as someone else
+      chrome_browser: eric@muffinlabs.ai   # the Claude in Chrome browser holding that login
+
+  The pane is tried first for every outlet (Eric, 2026-09-11: "we should use the inapp browser
+  by default if possible"). It can only be possible for ONE account at a time, so an outlet whose
+  account the pane does not hold names a fallback — and the check sends you there rather than
+  letting anyone switch the pane.
 
   `account_handle` falls back to `notes_handle` — the same person — so an older registry works.
 
@@ -91,13 +97,15 @@ def route(outlets, name):
         'outlet': name,
         'account': expected(spec),
         'surface': (spec or {}).get('surface') or 'pane',
+        'fallback': (spec or {}).get('fallback_surface'),
         'chrome_browser': (spec or {}).get('chrome_browser'),
         'snippet': SNIPPET,
     }
 
 
-def verdict(outlets, name, observed):
-    """-> (exit code, message). `observed` is the handle the snippet returned, or None."""
+def verdict(outlets, name, observed, surface=None):
+    """-> (exit code, message). `observed` is the handle the snippet returned, or None;
+    `surface` is where it was read, so a refusal can point at the fallback."""
     r = route(outlets, name)
     if r is None:
         return 1, f"no outlet {name!r} in the registry"
@@ -110,8 +118,15 @@ def verdict(outlets, name, observed):
         return 3, (f"signed out on this surface. {name} needs @{want}; the author signs in — "
                    f"automation never enters credentials.")
     if got != want:
-        where = (f"its surface is {r['surface']}"
-                 + (f" (Claude in Chrome browser {r['chrome_browser']!r})" if r['chrome_browser'] else ''))
+        on = surface or r['surface']
+        if r['fallback'] and on == r['surface']:
+            where = (f"This outlet falls back to {r['fallback']}"
+                     + (f" (Claude in Chrome browser {r['chrome_browser']!r})" if r['chrome_browser'] else '')
+                     + " when the pane holds another account — run the snippet there")
+        else:
+            where = (f"its surface is {r['surface']}"
+                     + (f", then {r['fallback']}" if r['fallback'] else '')
+                     + (f" (Claude in Chrome browser {r['chrome_browser']!r})" if r['chrome_browser'] else ''))
         return 5, (f"STOP: this surface is signed in as @{got}, and {name} needs @{want}. "
                    f"Do not write here, and do not sign this surface into the other account — "
                    f"its login is shared by every session using it. {where}.")
@@ -125,6 +140,8 @@ def main(argv=None):
     p = sub.add_parser('route'); p.add_argument('outlet')
     sub.add_parser('snippet')
     p = sub.add_parser('check'); p.add_argument('outlet'); p.add_argument('--handle', default='')
+    p.add_argument('--surface', choices=('pane', 'chrome'), default=None,
+                   help='where the snippet ran; a refusal in the pane then names the fallback')
     p.add_argument('--json', action='store_true', help='print the verdict as JSON')
     o = ap.parse_args(argv)
 
@@ -139,10 +156,11 @@ def main(argv=None):
             return 1
         print(f"outlet   {r['outlet']}\naccount  @{r['account'] or '?  (none declared — check will refuse)'}\n"
               f"surface  {r['surface']}"
+              + (f", falling back to {r['fallback']} when the pane holds another account" if r['fallback'] else '')
               + (f"  (Claude in Chrome browser {r['chrome_browser']!r})" if r['chrome_browser'] else '')
               + f"\nsnippet  {r['snippet']}")
         return 0
-    code, msg = verdict(outlets, o.outlet, o.handle)
+    code, msg = verdict(outlets, o.outlet, o.handle, o.surface)
     print(json.dumps({'code': code, 'message': msg}) if o.json else msg,
           file=sys.stdout if code == 0 else sys.stderr)
     return code

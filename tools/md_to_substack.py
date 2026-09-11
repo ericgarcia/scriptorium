@@ -158,6 +158,11 @@ def manifest_gate(piece_dir):
             if UNSETTLED.search(note) and not (SETTLED.search(note)
                                                 and not re.search(r'not (?:yet )?settled|unsettled', note, re.I)):
                 warnings.append(f'{key} is marked unsettled: {note[:70]}')
+    for line in caption_prose(piece_dir):
+        errors.append(f'a caption is written into draft.md under an image ("{line[:60]}"), where it '
+                      'publishes as a paragraph -- move it to publish.yaml `captions:` (keyed by the '
+                      "image's local path) or `cover_caption:`, and delete the line "
+                      '(framework/docs/ALT-TEXT.md, Captions)')
     # The caption: a WARNING, never a refusal -- the wording is the author's, and a warning is
     # how this gate already treats a header line the author has not signed off.
     cap = _strip_comment(man.get('cover_caption', ''))
@@ -223,6 +228,25 @@ def load_captions(man):
     raw = man.get('captions') if isinstance(man.get('captions'), dict) else {}
     caps = {str(k): _manifest_line(v) for k, v in raw.items() if _manifest_line(v)}
     return caps, _manifest_line(man.get('cover', '')), _manifest_line(man.get('cover_caption', ''))
+
+
+IMAGE_LINE = re.compile(r'!\[[^\]]*\]\([^)\s]+\)')
+ITALIC_LINE = re.compile(r'(\*|_)(?!\1)\S.*\S?\1', re.S)
+
+
+def caption_prose(piece_dir):
+    """Every italic-only line sitting directly under an image in draft.md -- a caption written
+    into the body. The spec puts captions in publish.yaml; a line under the image publishes as
+    an ordinary PARAGRAPH, not a caption, and nothing downstream can tell. For the Love of Dogs
+    carried two, live as paragraphs, from 2026-08-05 until 2026-09-11. -> [line, ...]"""
+    path = os.path.join(piece_dir, 'draft.md')
+    if not os.path.exists(path):
+        return []
+    raw = open(path, encoding='utf-8').read()
+    body = raw.split('\n---\n', 1)[1] if '\n---\n' in raw else raw
+    blocks = [' '.join(b.split()) for b in re.split(r'\n\s*\n', body) if b.strip()]
+    return [nxt for b, nxt in zip(blocks, blocks[1:])
+            if IMAGE_LINE.fullmatch(b) and ITALIC_LINE.fullmatch(nxt)]
 
 
 def caption_for(path, caps=None, cover=None, cover_caption=None, imgmap=None):
@@ -844,8 +868,8 @@ def main():
     if gate_errors:
         for e in gate_errors:
             print(f"WARNING: {e}")
-        print("Refusing to write output. A post needs a title and a subtitle before it is "
-              "composed; add them to publish.yaml. There is no override.")
+        print("Refusing to write output: fix what is named above (a post needs a title and a "
+              "subtitle; a caption belongs in publish.yaml, not draft.md). There is no override.")
         sys.exit(6)
     html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
     js = (JS_TEMPLATE

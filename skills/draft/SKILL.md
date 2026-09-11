@@ -120,6 +120,11 @@ app's session list then reads as a shelf of pieces instead of a row of identical
   to `corrections.md` (that's `critique`/`tune-style` territory), never a live
   edit of the constitution.
 - Don't publish or send anything. Producing a draft is the whole job here.
+- **Captions live in `publish.yaml`, never in `draft.md`.** An image's caption goes under
+  `captions:` (keyed by the path the draft gives the image) or `cover_caption:` for the hero —
+  not as an italic line under the image, which publishes as an ordinary paragraph. The
+  converter refuses that line and the suite checks the corpus for it
+  ([`ALT-TEXT.md`](../../docs/ALT-TEXT.md), Captions).
 - **Render only the witness that's in the ledger.** Every concrete detail about a
   real person or animal — a behavior, a feeling, an event, a timespan — must trace
   to a fact in the book's `facts.md`. If a vivid specific would help but isn't in

@@ -380,12 +380,13 @@ def unit_companions(tmp):
     open(os.path.join(legacy, 'old-piece', 'substack-note.md'), 'w').write('old\n')
     check('companions: a legacy substack-note.md is refused', any('legacy' in p for _s, p in cp.check(legacy)))
 
-    h = mk('c-headingless', draft='*s*\n---\n\n![A dog on a quilt](assets/none.png)\n\n*A caption.*\n\nThe body.\n')
+    h = mk('c-headingless', 'captions:\n  assets/none.png: A caption.\n',
+           draft='*s*\n---\n\n![A dog on a quilt](assets/none.png)\n\nThe body.\n')
     hp = ra.build(h, {})
     check('review page: a headingless piece lifts its first-block image into the masthead as the hero',
           '<figure class="hero">' in hp and 'Hero image slot' not in hp)
-    check('review page: the italic line under the hero is its caption, not a body paragraph',
-          '<span><em>A caption.</em></span>' in hp and '<p><em>A caption.</em></p>' not in hp)
+    check('review page: the hero shows its caption from publish.yaml',
+          '<span>A caption.</span>' in hp)
     page = ra.build(a, {})
     check('review page: the Note renders beside the piece with its lines kept',
           'id="c-note"' in page and 'line one<br>line two' in page)
@@ -2136,6 +2137,19 @@ def unit_captions(tmp):
     write('')
     plain_body = m2s.render_reader(d)[0]
     check('captions: none declared, none emitted', m2s.render_captions(d) == ['', ''], str(m2s.render_captions(d)))
+    check('captions: a clean draft carries no caption prose', m2s.caption_prose(d) == [])
+    pd = os.path.join(tmp, 'cap-prose')
+    os.makedirs(pd, exist_ok=True)
+    with open(os.path.join(pd, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('*s*\n\n---\n\n![A dog](assets/x.png)\n\n*A caption in the body.*\n\nProse.\n\n'
+                '*An italic line that follows prose, not an image.*\n')
+    with open(os.path.join(pd, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write('title: T\nsubtitle: S\n')
+    check('captions: an italic line directly under an image is caught as caption prose',
+          m2s.caption_prose(pd) == ['*A caption in the body.*'], str(m2s.caption_prose(pd)))
+    check('captions: the header gate REFUSES caption prose (captions live in publish.yaml)',
+          any('caption is written into draft.md' in e for e in m2s.manifest_gate(pd)[0]),
+          str(m2s.manifest_gate(pd)[0]))
     write('cover: assets/hero.png\ncover_caption: What the hero means.\n'
           "captions:\n  assets/fig.png: 'The chart, \"quoted\" & plain.'\n")
     joined = '\n'.join(m2s.parse_blocks(d)[0])
@@ -3144,6 +3158,16 @@ def corpus_publications():
           + ' — every manifest names one, and owns its outlets', not problems, '; '.join(problems[:5]))
 
 
+def corpus_caption_spec():
+    """No draft writes a caption into its body — captions live in publish.yaml (2026-09-11)."""
+    print("\n-- corpus: captions live in publish.yaml, not draft.md -----------------")
+    import md_to_substack as m2s
+    bad = [(os.path.basename(d), m2s.caption_prose(d)) for d in (os.path.join(PIECES, n) for n in sorted(os.listdir(PIECES)))
+           if os.path.isdir(d) and m2s.caption_prose(d)]
+    check(f'corpus captions: no draft writes a caption under an image', not bad,
+          '; '.join(f'{s}: {ls[0][:50]}' for s, ls in bad[:4]))
+
+
 def corpus_companions():
     """Every companion the corpus declares resolves — `companions.py check` (2026-09-11)."""
     print("\n-- corpus: companions resolve -----------------------------------------")
@@ -3503,6 +3527,7 @@ def main():
         corpus_manifests()
         corpus_publications()
         corpus_companions()
+        corpus_caption_spec()
         corpus_voice_privacy()
         corpus_tags()
         corpus_baselines()

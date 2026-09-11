@@ -98,6 +98,20 @@ def image_map(piece_dir):
     return out
 
 
+def manifest_captions(piece_dir):
+    """src -> caption, read exactly the way every outlet reads it: md_to_substack's
+    load_captions + caption_for (`captions:` by local path, else `cover_caption:` for the hero,
+    a CDN url mapped back through `images:`). Captions live in publish.yaml, never in draft.md."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import md_to_substack as m2s
+        caps, cover, cover_caption = m2s.load_captions(m2s._yaml_manifest(piece_dir, {}))
+    except Exception:                               # no converter, no yaml: no captions shown
+        return lambda src: ''
+    local_to_url = {v: k for k, v in image_map(piece_dir).items()}
+    return lambda src: m2s.caption_for(src, caps, cover, cover_caption, local_to_url)
+
+
 def readme_h1(piece_dir):
     """The piece's own name, for a piece with no publish.yaml (a talk, an early draft).
 
@@ -451,6 +465,7 @@ h1{font-weight:600;font-size:clamp(32px,5.2vw,54px);line-height:1.08;margin:18px
 .alt-none span{font-family:var(--mono);font-size:12px;letter-spacing:.04em}
 .fig{margin:26px 0;padding:0}
 .fig img{width:100%;height:auto;display:block;border:1px solid var(--rule)}
+.fig .cap{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink);margin:8px 0 0}
 .slot{border:1px dashed var(--flag);background:var(--flag-soft);color:var(--flag);
   font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
   padding:34px 18px;text-align:center;margin:30px 0 0}
@@ -669,6 +684,7 @@ def build(piece_dir, facts):
         return out
 
     imgmap = image_map(piece_dir)
+    capof = manifest_captions(piece_dir)
 
     def embed(rel):
         local = imgmap.get(rel, rel)          # a CDN url maps back to the file it came from
@@ -693,7 +709,9 @@ def build(piece_dir, facts):
         out = []
         for h in hs:
             if h['kind'] == 'img':
-                out.append(f'<figure class="fig">{embed(h["src"])}{alt_block(h)}</figure>')
+                c = capof(h['src'])
+                cap = f'<figcaption class="cap">{html.escape(c)}</figcaption>' if c else ''
+                out.append(f'<figure class="fig">{embed(h["src"])}{cap}{alt_block(h)}</figure>')
             else:
                 body = demark(inline(h['text'], num, notes=(h['kind'] != 'note')))
                 out.append(f'<blockquote><p>{body}</p></blockquote>' if h['q']
@@ -742,21 +760,9 @@ def build(piece_dir, facts):
     # A piece with no `##` heading has no lead, so its hero is the FIRST BLOCK OF THE BODY. It
     # used to render there, under an empty "Hero image slot" in the masthead — For the Love of
     # Dogs, 2026-09-11 (Eric: "does not have the hero in the right place"). Lift it up like any
-    # lead hero. And the italic line directly under a hero is its caption (the draft.md
-    # convention), so it becomes the figcaption, not a stray first paragraph.
-    hero_list = lead_h
+    # lead hero. Its caption, like every caption, comes from publish.yaml (ALT-TEXT.md).
     if hero_h is None and mv_h and mv_h[0] and mv_h[0][0]['kind'] == 'img':
-        hero_h, hero_list = mv_h[0][0], mv_h[0]
-    hero_cap = None
-    if hero_h is not None:
-        i = next(k for k, h in enumerate(hero_list) if h is hero_h)
-        nxt = hero_list[i + 1] if i + 1 < len(hero_list) else None
-        if (nxt and nxt['kind'] != 'img' and not nxt['q']
-                and re.fullmatch(r'\*[^*].*\*', nxt['text'].strip(), re.S)):
-            hero_cap = nxt
-            hero_list.remove(nxt)
-        if hero_list is not lead_h:
-            hero_list.remove(hero_h)
+        hero_h = mv_h[0].pop(0)
 
     def card(i):
         f = findings[i - 1]
@@ -831,14 +837,12 @@ def build(piece_dir, facts):
 
     cover = facts.get('cover') or {}
     if hero_h:
-        caption = cover.get('caption') or (demark(inline(hero_cap['text'], num, notes=False))
-                                           if hero_cap else '')
+        caption = cover.get('caption') or html.escape(capof(hero_h['src']))
         figure = (f'<figure class="hero">{embed(hero_h["src"])}<figcaption>'
                   f'<span>{caption}</span>'
                   f'<em>{cover.get("provenance","provenance not recorded")}</em>'
                   f'</figcaption>{alt_block(hero_h)}</figure>'
-                  + ''.join(card(i) for i in hero_h['cards'])
-                  + ''.join(card(i) for i in (hero_cap['cards'] if hero_cap else [])))
+                  + ''.join(card(i) for i in hero_h['cards']))
     else:
         figure = ('<div class="slot">Hero image slot &mdash; the draft references no image</div>')
 

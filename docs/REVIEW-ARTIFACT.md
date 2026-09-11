@@ -56,9 +56,11 @@ at all. (Eric, 2026-09-10: *"our artifact preview render should show us the alt 
 lead — the prose before the first `##`. A piece with no `##` has no lead, so its hero is the
 **first block of the body**, and the page lifts it into the masthead the same way. It did not,
 and *For the Love of Dogs* showed an empty "Hero image slot" above its own hero (Eric,
-2026-09-11). **The italic line directly under the hero is its caption** — the `draft.md`
-convention — so it renders as the figcaption, not as a stray first paragraph; a `cover.caption`
-in the facts file still wins, and a finding anchored in that line moves with it.
+2026-09-11). **Captions come from `publish.yaml`**, read by the converter's own `caption_for`
+(`captions:` by local path, `cover_caption:` for the hero), under the hero and under every
+body image — never from a line in `draft.md`, which the converter refuses
+([`ALT-TEXT.md`](ALT-TEXT.md), Captions). A `cover.caption` in the facts file still wins for
+the hero.
 
 **Every image renders, hero and body alike.** Image blocks used to be skipped outright, so a
 piece's body images were simply absent from its review page — three pieces in this corpus carry

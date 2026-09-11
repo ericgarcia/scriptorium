@@ -118,6 +118,37 @@ def unit_normalization():
     check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
 
 
+# ---------------------------------------------------------------- unit: commonmark parity
+def unit_commonmark(tmp):
+    """The desk's Substack converter is lenient; every other outlet renders CommonMark.
+
+    Two live faults came through that gap on 2026-09-11 (not-yet, son-of-joseph). These
+    cases pin what the check must flag and — as important — what it must leave alone,
+    because a parity check that flags the house censoring convention would be ignored.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'cc', os.path.join(os.path.dirname(__file__), 'check_commonmark.py'))
+    cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+    md = cc._md()
+    if md is None:
+        print("  skip  commonmark: markdown-it-py is not installed — this is NOT a pass")
+        return
+    kinds = lambda body: [k for k, _ in cc.check_text('x\n---\n' + body, md)]
+    check('commonmark: a star after a letter before a comma is flagged',
+          kinds("*as those who have read it,* Confessions*, know — one of us.* Go on.") == ['stray-asterisk'])
+    check('commonmark: the same sentence, fixed, is clean',
+          kinds("*as those who have read it,* Confessions, *know — one of us.* Go on.") == [])
+    check('commonmark: a backtick used as ayin is flagged',
+          kinds("The Hebrew is *`almah*; it means young woman.") == ['backtick-letter-mark'])
+    check('commonmark: the real ayin is clean',
+          kinds("The Hebrew is *ʿalmah*; it means young woman.") == [])
+    check('commonmark: escaped censoring (f\\*\\*k) is not a leak',
+          kinds("He tells the camera to f\\*\\*k off.") == [])
+    check('commonmark: an asterisk inside code is not a leak',
+          kinds("The glob `*.md` matches every *draft* here.") == [])
+
+
 # ---------------------------------------------------------------- unit: outlet content
 def unit_outlet_content(tmp):
     """outlet_audit --content: what counts as drift, and what must not.
@@ -2690,6 +2721,31 @@ def corpus_tags():
           not problems, '; '.join(problems[:5]))
 
 
+def corpus_commonmark():
+    """Every draft survives a CommonMark parser — `check_commonmark.py`.
+
+    The desk's Substack converter is lenient; every other outlet renders CommonMark. Two
+    reader-visible faults came through that gap on 2026-09-11 (not-yet, son-of-joseph),
+    and every other check compared the draft against the outlet that tolerated them."""
+    print("\n-- corpus: every draft survives CommonMark --------------------------")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'cc', os.path.join(os.path.dirname(__file__), 'check_commonmark.py'))
+    cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+    md = cc._md()
+    if md is None:
+        skip('corpus commonmark', 'markdown-it-py is not installed — NOT a pass')
+        return
+    found = []
+    for name in sorted(os.listdir(PIECES)):
+        p = os.path.join(PIECES, name, 'draft.md')
+        if os.path.exists(p):
+            for kind, ctx in cc.check_text(open(p, encoding='utf-8').read(), md):
+                found.append(f'{name}: {kind} …{ctx[:60]}…')
+    check('corpus commonmark: no draft leaks emphasis or a letter-mark backtick',
+          not found, '; '.join(found[:4]))
+
+
 def corpus_baselines():
     print("\n-- corpus: published pieces match their baselines -----------------")
     pieces_dir = PIECES
@@ -2901,6 +2957,7 @@ def main():
         unit_scripture(tmp)
         unit_pages(tmp)
         unit_outlet_content(tmp)
+        unit_commonmark(tmp)
         unit_notes(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
@@ -2929,6 +2986,7 @@ def main():
         corpus_publications()
         corpus_tags()
         corpus_baselines()
+        corpus_commonmark()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")
     for name, detail in FAIL:

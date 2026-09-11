@@ -361,6 +361,40 @@ def export_piece(piece_dir, bundle, opts):
     return slug, len(images), len(doc), len(stripped), source_slug, renames_for(man, source_slug, slug)
 
 
+def _commonmark_report(rows):
+    """Warn — loudly, and without refusing — about markup a CommonMark outlet will print.
+
+    The desk composes Substack with its own converter, which is lenient; every outlet a
+    bundle feeds renders CommonMark, which is not. Two reader-visible faults came through
+    that gap on 2026-09-11 (check_commonmark.py). A warning rather than a refusal on
+    purpose: the bundle is the WHOLE site, and one piece's markup must not block every
+    other piece's deploy. The piece's own preflight (publish 0b-commonmark) is the gate.
+    """
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        spec = importlib.util.spec_from_file_location('cc', os.path.join(here, 'check_commonmark.py'))
+        cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+        md = cc._md()
+    except Exception:                                          # noqa: BLE001
+        md = None
+    if md is None:
+        print("  WARNING: CommonMark parity NOT checked (markdown-it-py missing) — not a pass")
+        return
+    exported = {src for _s, _n, _z, _k, src, _rn in rows}
+    dirs = [a for a in sys.argv[1:]
+            if os.path.isdir(a) and os.path.exists(os.path.join(a, 'draft.md'))
+            and os.path.basename(os.path.normpath(a)) in exported]
+    found = 0
+    for d in dirs:
+        text = open(os.path.join(d, 'draft.md'), encoding='utf-8').read()
+        for kind, ctx in cc.check_text(text, md):
+            print(f"  WARNING commonmark {os.path.basename(os.path.normpath(d))}: {kind} …{ctx[:70]}…")
+            found += 1
+    print(f"  CommonMark parity: {len(dirs)} exported piece(s), {found} finding(s)"
+          + (" — these render with literal markup on this outlet" if found else ""))
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument('bundle')
@@ -456,6 +490,7 @@ def main():
               + (f"  (was {src})" if src != s else ''))
     print(f"{len(rows)} piece(s), {notes} internal note(s) stripped -> {o.bundle}"
           + (f"  ({len(skipped)} not opted in)" if skipped else ''))
+    _commonmark_report(rows)
     if not o.apply:
         print("  (dry run — re-run with --apply to write)")
 

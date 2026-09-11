@@ -25,6 +25,7 @@ import sys, os, re, argparse, textwrap
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from md_to_substack import read_manifest                          # noqa: E402
+import check_status as cs                                         # noqa: E402
 
 BANNER_RE = re.compile(r'^\*Published \d{4}-\d{2}-\d{2}', re.M)
 # "(working title)" on a piece that shipped under that exact title is the same staleness
@@ -43,14 +44,20 @@ def split_front_matter(src):
     return None, src                                              # no separator: leave alone
 
 
-def banner(man):
+def banner(man, outlets=None):
     """Line breaks are placed by hand, not by textwrap.
 
     Wrapping this text mechanically split a [markdown link](across two lines) and broke a
     `code span` in half. Markdown tolerates both, but the entire point of this header is
     that a human reads it, so the breaks go where a sentence ends.
+
+    The URL is the piece's own home, by its OWN outlet's `manifest_url_key` — this read
+    `public_url`, which is one outlet's key (`substack`, Being Good). The whole header is a
+    link to where a reader actually finds the piece, so on a second publication it linked
+    nowhere: `*Published 2026-09-11 · [Title]() —*`. Its `canonical:` wins when it records
+    one, because that is the piece saying which of its addresses is home.
     """
-    url, title = man.get('public_url', ''), man.get('title', '')
+    url, title = cs.live_url(man, outlets or {}), man.get('title', '')
     date = man.get('published_at', '')
     return '\n'.join([
         f"*Published {date} · [{title}]({url}) —",
@@ -60,7 +67,7 @@ def banner(man):
     ])
 
 
-def rewrite(src, man):
+def rewrite(src, man, outlets=None):
     """-> (new_src, note) ; new_src is None when nothing needs doing."""
     fm, rest = split_front_matter(src)
     if fm is None:
@@ -86,7 +93,7 @@ def rewrite(src, man):
     # Normalize the seam. Without this the blank lines between the last front-matter
     # paragraph and `---` drift by one on every run, so the tool never converges and
     # --check can never report a clean tree.
-    new_fm = '\n\n'.join([h1, banner(man)] + body + head[1:])
+    new_fm = '\n\n'.join([h1, banner(man, outlets)] + body + head[1:])
     new_src = new_fm.rstrip() + '\n\n' + rest.lstrip('\n')
     if new_src == src:
         return None, 'already current'
@@ -96,6 +103,7 @@ def rewrite(src, man):
 def live_pieces(repo, only):
     out = []
     pdir = os.path.join(repo, 'pieces')
+    outlets, _legacy = cs.outlets_for(repo)
     for name in sorted(os.listdir(pdir)):
         if only and name not in only:
             continue
@@ -103,7 +111,7 @@ def live_pieces(repo, only):
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
         man = read_manifest(os.path.join(d, 'publish.yaml'))
-        if not man.get('public_url'):
+        if not cs.live_url(man, outlets):
             continue                                              # not live: still a draft
         if not man.get('published_at'):
             print(f"  {name}: live but no published_at in publish.yaml — skipped")
@@ -123,10 +131,11 @@ def main():
         ap.error('pass --check or --apply')
 
     stale = 0
+    outlets, _legacy = cs.outlets_for(a.repo)
     for name, d, man in live_pieces(a.repo, set(a.slugs)):
         p = os.path.join(d, 'draft.md')
         src = open(p).read()
-        new, note = rewrite(src, man)
+        new, note = rewrite(src, man, outlets)
         if new is None:
             if note != 'already current':
                 print(f"  {name:<30} {note}")

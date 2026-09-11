@@ -76,6 +76,40 @@ def _resolve_corpus():
 
 PIECES, CORPUS_KIND = _resolve_corpus()
 
+_CORPUS_OUTLETS = None
+
+
+def corpus_outlets():
+    """(outlets, legacy) from the corpus's OWN registry — cached; ({}, None) with no registry."""
+    global _CORPUS_OUTLETS
+    if _CORPUS_OUTLETS is None:
+        import check_status as cs
+        _CORPUS_OUTLETS = cs.outlets_for(os.path.dirname(PIECES))
+    return _CORPUS_OUTLETS
+
+
+def live_url(man):
+    """-> where a reader finds this piece, by ITS OWN outlet's manifest key, or ''.
+
+    THE CORPUS CHECKS' LIVENESS TEST, and until 2026-09-11 every one of them was
+    `man.get('public_url')` — which is ONE outlet's key (`substack`, Being Good), not a
+    universal one. outlets.yaml has said EACH OUTLET GETS ITS OWN MANIFEST KEY since the
+    professional line was added, and substack_verify and substack_notes learned it the day
+    before (scriptorium c1e192f). These did not, so a SECOND PUBLICATION was outside the
+    gates CI runs: corpus_headers never asked whether its drafts said they were published,
+    corpus_manifests never asked for its title and subtitle, `every published piece declares
+    its outlets` never asked, and corpus_baselines never asked for a sealed baseline — which
+    is why `love-is-not-a-metric-space` went live on 2026-09-11 with none and nothing said so.
+    A whole publication reading as *unpublished* is not a gap in one check; it is every check
+    at once, and each of them still printed ok.
+
+    A desk with no registry keeps `public_url`, which is what a one-outlet desk has always
+    written and what the shipped fixtures are.
+    """
+    import check_status as cs
+    return cs.live_url(man, corpus_outlets()[0])
+
+
 from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
                             read_manifest, parse_blocks, manifest_gate,
@@ -435,6 +469,142 @@ def unit_outlet_urls(tmp):
         else:
             os.environ['DESK_OUTLETS'] = old
         importlib.invalidate_caches()
+
+
+# ------------------------------- unit: a second publication is INSIDE the gates
+def unit_live_urls(tmp):
+    """A piece is LIVE at its own outlet's address — for every tool that asks, not just two.
+
+    `substack_verify` and `substack_notes` learned this on 2026-09-11 (scriptorium c1e192f).
+    Five more readers of `public_url` did not, and `public_url` is ONE outlet's key
+    (`substack`, Being Good). The corpus gates are the expensive ones: `is it live` was the
+    entry condition to the header check, the manifest check, the declares-its-outlets check
+    and the baseline check, so a whole second publication was not failing them — it was never
+    being asked. Measured the same day: the gates counted 36 live pieces and the desk had 37,
+    and the one they could not see was live with a `*Draft —*` header and no sealed baseline.
+
+    A desk with no registry keeps `public_url`. That is what a one-outlet desk has always
+    written, and what the fixtures that ship with this framework are.
+    """
+    print("\n-- a second publication is inside the gates ------------------------")
+    import check_status as cs
+    import publications as pb
+    import piece_header as ph
+
+    reg = {'substack': {'reader_base': 'https://one.substack.com/p/',
+                        'manifest_url_key': 'public_url', 'account_handle': 'one'},
+           'blog': {'reader_base': 'https://example.com/blog/', 'manifest_url_key': 'blog_url'},
+           'substack-two': {'reader_base': 'https://two.substack.com/p/',
+                            'manifest_url_key': 'substack_url', 'account_handle': 'two'}}
+    one = {'title': 'One', 'public_url': 'https://one.substack.com/p/one', 'published_at': '2026-09-01'}
+    two = {'title': 'Two', 'blog_url': 'https://example.com/blog/two',
+           'substack_url': 'https://two.substack.com/p/two',
+           'canonical': 'https://example.com/blog/two', 'published_at': '2026-09-02'}
+
+    check('live_url: the first outlet still reads public_url',
+          cs.live_url(one, reg) == 'https://one.substack.com/p/one')
+    check('live_url: a piece on NO Substack is live all the same',
+          cs.live_url({'blog_url': 'https://example.com/blog/x'}, reg) == 'https://example.com/blog/x')
+    check("live_url: the piece's own canonical picks which address is home",
+          cs.live_url(two, reg) == 'https://example.com/blog/two', cs.live_url(two, reg))
+    check('live_url: a draft is not live at any outlet', cs.live_url({'title': 'D'}, reg) == '')
+    check('live_url: `site: true` records an opt-in, not an address, so it is not live',
+          cs.live_url({'site': True}, reg, legacy='blog') == '')
+    check('live_url: with no registry, the one-outlet desk\'s key stands',
+          cs.live_url(one, {}) == 'https://one.substack.com/p/one'
+          and cs.live_url(two, {}) == '')
+
+    # publications: `required_outlets` is a GATE, and a gate that cannot see a piece asks it
+    # nothing. Latent on 2026-09-11 only because the second publication required no outlets.
+    pubs = {'two-pub': {'name': 'Two', 'byline': '', 'outlets': ['blog', 'substack-two'],
+                        'books': [], 'styles': [], 'required_outlets': ['substack-two'], 'tags': ''}}
+    man = {'publication': 'two-pub', 'outlets': ['blog'], 'blog_url': 'https://example.com/blog/two'}
+    check('required_outlets: without the registry a non-Substack publication is never asked',
+          pb.missing_required(man, pubs) == [])
+    check('required_outlets: with it, the same piece is held to its publication',
+          pb.missing_required(man, pubs, reg) == [('substack-two', 'not declared')],
+          str(pb.missing_required(man, pubs, reg)))
+    check('required_outlets: a written-down reason still exempts it',
+          pb.missing_required(dict(man, outlets_exempt={'substack-two': 'Eric: blog only'}),
+                              pubs, reg) == [])
+
+    # piece_header: the banner IS a link to where a reader finds the piece, so a wrong key
+    # does not degrade, it emits `[Title]()` — a published header pointing nowhere.
+    check('header: the banner links the piece at its own home',
+          '](https://example.com/blog/two)' in ph.banner(two, reg), ph.banner(two, reg))
+    check('header: with no registry the banner is unchanged for a one-outlet desk',
+          '](https://one.substack.com/p/one)' in ph.banner(one, {}))
+
+    # substack_tags --verify reads the PUBLIC post; `plan` already derived the editor host
+    # per publication, so only this leg was wrong, and it refused rather than mis-fetched.
+    import substack_tags as st
+    try:
+        st.public_tags('https://two.substack.com', two.get('public_url'), 'substack_url')
+        ok = False
+    except pb.Refused as e:
+        ok = 'substack_url' in str(e)
+    check('tags: the public-verify refusal names the key THIS outlet writes', ok)
+
+    # sync_post_images: not a near miss. With no public_url the slug fell through to the
+    # first /p/ anywhere in the file and the origin to a hard-coded elmuffin.substack.com,
+    # so the fetch crossed publications — the wrong post's images, into this piece.
+    import sync_post_images as sp
+    d = os.path.join(tmp, 'two-piece')
+    os.makedirs(d, exist_ok=True)
+    outlets_yaml = ('substack_primary: substack\noutlets:\n'
+                    '  substack:\n    reader_base: https://one.substack.com/p/\n'
+                    '    manifest_url_key: public_url\n    account_handle: one\n'
+                    '  substack-two:\n    reader_base: https://two.substack.com/p/\n'
+                    '    manifest_url_key: substack_url\n    account_handle: two\n')
+    os.makedirs(os.path.join(tmp, 'publishing'), exist_ok=True)
+    open(os.path.join(tmp, 'publishing', 'outlets.yaml'), 'w').write(outlets_yaml)
+    body = ('title: Two\noutlets:\n  - substack-two\n'
+            'substack_url: https://two.substack.com/p/two\n'
+            'post_url: https://two.substack.com/publish/post/9\npublished_at: 2026-09-02\n')
+    open(os.path.join(d, 'publish.yaml'), 'w').write(body)
+    old = os.environ.get('DESK_OUTLETS')
+    os.environ['DESK_OUTLETS'] = os.path.join(tmp, 'publishing', 'outlets.yaml')
+    try:
+        check('images: the post is fetched from ITS OWN publication, at its own slug',
+              sp.post_address(d, body) == ('https://two.substack.com', 'two'),
+              str(sp.post_address(d, body)))
+    finally:
+        if old is None:
+            os.environ.pop('DESK_OUTLETS', None)
+        else:
+            os.environ['DESK_OUTLETS'] = old
+
+    # md_to_site --syndicated names an OUTLET, so the URL recorded is that outlet's.
+    site = os.path.join(HERE, 'md_to_site.py')
+    root = os.path.join(tmp, 'syn')
+    pd = os.path.join(root, 'pieces', 'two')
+    os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    os.makedirs(pd, exist_ok=True)
+    open(os.path.join(root, 'publishing', 'outlets.yaml'), 'w').write(outlets_yaml)
+    open(os.path.join(root, 'publishing', 'publications.yaml'), 'w').write(
+        'publications:\n  two-pub:\n    name: Two\n    byline: T\n'
+        '    outlets: [substack, substack-two]\n')
+    open(os.path.join(pd, 'draft.md'), 'w').write('*scaffold*\n\n---\n\nProse of the piece.\n')
+    open(os.path.join(pd, 'publish.yaml'), 'w').write(
+        'title: Two\nsubtitle: Its subtitle\npublication: two-pub\noutlets:\n  - substack-two\n'
+        'public_url: https://one.substack.com/p/WRONG\n'
+        'substack_url: https://two.substack.com/p/two\npublished_at: 2026-09-02\n')
+    bundle = os.path.join(tmp, 'syn-bundle')
+    r = subprocess.run([sys.executable, site, bundle, pd, '--outlet', 'substack-two',
+                        '--syndicated', 'substack-two', '--apply'],
+                       capture_output=True, text=True, cwd=root)
+    md = ''
+    cdir = os.path.join(bundle, 'content')
+    if os.path.isdir(cdir):
+        md = open(os.path.join(cdir, sorted(os.listdir(cdir))[0])).read()
+    check('bundle: --syndicated records THAT outlet\'s url, not the first outlet\'s',
+          'url: https://two.substack.com/p/two' in md and 'WRONG' not in md,
+          (r.stderr[-300:] or md[:300]))
+    r = subprocess.run([sys.executable, site, bundle, pd, '--outlet', 'substack-two',
+                        '--syndicated', 'nosuch', '--apply'], capture_output=True, text=True, cwd=root)
+    check('bundle: --syndicated on an outlet the registry does not define is refused',
+          r.returncode == 8, (r.stdout + r.stderr)[-200:])
+
 
 
 # ---------------------------------------------------------------- unit: companions
@@ -3660,14 +3830,21 @@ def corpus_headers():
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
         man = read_manifest(os.path.join(d, 'publish.yaml'))
-        if not man.get('public_url'):
+        if not live_url(man):
             continue
         if not man.get('published_at'):
             stale.append(f'{p} (live but no published_at)'); continue
         n += 1
-        new, _note = header_rewrite(open(os.path.join(d, 'draft.md')).read(), man)
+        new, note = header_rewrite(open(os.path.join(d, 'draft.md')).read(), man,
+                                   corpus_outlets()[0])
         if new is not None:
             stale.append(p)
+        elif note != 'already current':
+            # `left alone` is not `current`. A live piece whose front matter piece_header
+            # cannot reach (no `---`, no H1) keeps whatever it said while it was a draft, and
+            # counting that as a pass is the same silence this check was written against —
+            # the fix is a person's, so it has to be said out loud rather than skipped.
+            stale.append(f'{p} ({note})')
     check(f'all {n} live pieces carry a current published header',
           not stale, '; '.join(stale[:4]) + '  (fix: piece_header.py --apply)')
 
@@ -3694,7 +3871,7 @@ def corpus_manifests():
         if errs:
             bad.append(f'{p}: ' + '; '.join(errs))
         head = [w for w in warns if not w.startswith('cover_caption')]
-        if head and read_manifest(os.path.join(d, 'publish.yaml')).get('public_url'):
+        if head and live_url(read_manifest(os.path.join(d, 'publish.yaml'))):
             unsettled.append(p)
         if any(w.startswith('cover_caption') for w in warns):
             captioned.append(p)
@@ -3814,7 +3991,7 @@ def corpus_prose():
             continue
         with open(mp, encoding='utf-8') as fh:
             m = yaml.safe_load(fh) or {}
-        if m.get('public_url') and not m.get('outlets') and m.get('site') is not True:
+        if live_url(m) and not m.get('outlets') and m.get('site') is not True:
             missing.append(d)
     check("every published piece declares its outlets", not missing, ', '.join(missing))
     # Eric, 2026-09-11: "all the pieces on being good should get a place on alignmentfellowship
@@ -3822,6 +3999,9 @@ def corpus_prose():
     # out only by writing the reason down (`outlets_exempt:`).
     import publications as pb
     pubs, _probs = pb.load(root)
+    # The registry, so a piece is PUBLISHED by its own outlet's key. Without it this gate
+    # asked nothing of a publication that does not write `public_url`.
+    outlets_reg, _legacy = corpus_outlets()
     short = []
     for d in sorted(os.listdir(PIECES)):
         mp = os.path.join(PIECES, d, 'publish.yaml')
@@ -3829,7 +4009,7 @@ def corpus_prose():
             continue
         with open(mp, encoding='utf-8') as fh:
             m = yaml.safe_load(fh) or {}
-        short += [f'{d} ({o}: {why})' for o, why in pb.missing_required(m, pubs)]
+        short += [f'{d} ({o}: {why})' for o, why in pb.missing_required(m, pubs, outlets_reg)]
     check("every published piece is on every outlet its publication requires, or says why not",
           not short, ', '.join(short[:6]))
 
@@ -3886,7 +4066,7 @@ def corpus_baselines():
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
         man = read_manifest(os.path.join(d, 'publish.yaml'))
-        if not man.get('public_url'):
+        if not live_url(man):
             continue                                              # composed drafts are not live
         pub += 1
         base = load_baseline(d)
@@ -4114,6 +4294,7 @@ def main():
         unit_commonmark(tmp)
         unit_notes(tmp)
         unit_outlet_urls(tmp)
+        unit_live_urls(tmp)
         unit_companions(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)

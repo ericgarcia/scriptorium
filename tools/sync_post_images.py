@@ -26,7 +26,13 @@ EXIT
 """
 import sys, os, re, json, html, hashlib, shutil, urllib.parse, urllib.request
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from md_to_substack import read_manifest                            # noqa: E402
+import substack_account as sa                                       # noqa: E402
+
 UA = {'User-Agent': 'writing-desk-image-sync/1.0'}
+DEFAULT_ORIGIN = 'https://elmuffin.substack.com'
 
 
 def log(*a): print(*a)
@@ -37,28 +43,38 @@ def read_manifest_text(piece_dir):
     return (open(p).read() if os.path.exists(p) else ''), p
 
 
-def slug_of(manifest_text):
-    """Prefer the public /p/<slug>; fall back to any /p/ URL in the manifest."""
-    m = re.search(r'^\s*public_url\s*:\s*\S*?/p/([a-z0-9-]+)', manifest_text, re.M)
-    if m: return m.group(1)
-    m = re.search(r'/p/([a-z0-9-]+)', manifest_text)
-    return m.group(1) if m else None
+def post_address(piece_dir, manifest_text):
+    """-> (origin, slug): WHOSE Substack this post is on, and what it is called there.
 
+    Both answers come from the piece's OWN outlet. Each outlet declares the manifest field
+    its reader URL is written under (`manifest_url_key`, publishing/outlets.yaml), and this
+    read `public_url` — which is one outlet's key (`substack`, Being Good), not a universal
+    one. On a second Substack publication that is not a near miss but a silent
+    cross-publication fetch: `public_url` is absent, so the slug fell through to the first
+    `/p/<slug>` anywhere in the file and the origin fell back to a hard-coded
+    elmuffin.substack.com — the other publication's host. The post either 404s, or worse
+    resolves to a different post that happens to share the slug, and its images are pulled
+    into this piece. Fixed 2026-09-11, the day after substack_verify and substack_notes
+    learned the same convention (scriptorium c1e192f).
 
-def origin_of(manifest_text):
-    """The publication this piece actually lives on, read from its own manifest.
-
-    One hard-coded host was harmless while the desk had a single Substack.  With a
-    second publication it becomes a silent cross-publication fetch: the slug resolves
-    on the wrong host, or 404s, and the failure looks like a missing post rather than
-    a wrong address.  The manifest already carries the answer in `public_url`, so ask
-    it.  A manifest with no URL keeps the historical default rather than guessing.
+    The fallbacks are kept for a desk with no registry, which is what a one-outlet desk is.
     """
-    m = re.search(r'^\s*public_url\s*:\s*(https?://[^/\s]+)', manifest_text, re.M)
+    try:
+        _outlet, spec = sa.substack_outlet_for_piece(piece_dir)
+    except Exception:                                   # noqa: BLE001 — unplaceable: fall back
+        spec = {}
+    url = str(read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+              .get((spec or {}).get('manifest_url_key') or 'public_url') or '')
+    m = re.search(r'(https?://[^/\s]+)/p/([a-z0-9-]+)', url)
     if m:
-        return m.group(1)
-    m = re.search(r'(https?://[^/\s]+)/p/[a-z0-9-]+', manifest_text)
-    return m.group(1) if m else 'https://elmuffin.substack.com'
+        return m.group(1), m.group(2)
+    # No recorded reader URL. The outlet still knows its own host; only the slug has to be
+    # scavenged, and a slug read off the wrong publication's URL is the failure above.
+    base = re.match(r'https?://[^/]+', str((spec or {}).get('reader_base') or ''))
+    m = re.search(r'(https?://[^/\s]+)/p/([a-z0-9-]+)', manifest_text)
+    if m:
+        return (base.group(0) if base else m.group(1)), m.group(2)
+    return (base.group(0) if base else DEFAULT_ORIGIN), None
 
 
 def fetch_json(url):
@@ -67,7 +83,7 @@ def fetch_json(url):
         return json.loads(r.read().decode())
 
 
-def originals_for(slug, origin='https://elmuffin.substack.com'):
+def originals_for(slug, origin=DEFAULT_ORIGIN):
     """Every distinct S3 original the post points at, cover first, then body order.
     Substack wraps images in a CDN transform URL with the real one percent-encoded
     inside; unwrap so we fetch the untouched upload rather than a re-encode."""
@@ -126,12 +142,13 @@ def main():
     srcs = srcs or ['~/Downloads']
 
     man_text, man_path = read_manifest_text(piece_dir)
-    slug = slug_of(man_text)
+    origin, slug = post_address(piece_dir, man_text)
     if not slug:
         log(f'{piece_dir}: no /p/<slug> in publish.yaml — not published yet, nothing to sync')
         sys.exit(0)
 
-    urls, post = originals_for(slug, origin_of(man_text))
+    log(f'  reading {origin}/p/{slug}')
+    urls, post = originals_for(slug, origin)
     if not urls:
         log(f'{piece_dir} ({slug}): the post has no images'); sys.exit(0)
 

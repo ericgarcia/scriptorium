@@ -63,6 +63,25 @@ two pieces — the way a talk and its essay are two — each in its own publicat
 - Notes, not failures: a README whose style or book is not one its publication lists, and an
   outlet `outlets.yaml` defines that no publication owns.
 
+**A piece is LIVE at its own outlet's address, and every gate asks it that way.** Each outlet
+declares the manifest field its reader URL is written under (`manifest_url_key`, `outlets.yaml`),
+because each outlet has its own: `public_url` is the `substack` outlet's key, `blog_url` is
+`muffinlabs`'s, `site_url` is `alignmentfellowship`'s. `check_status.live_url(man, outlets)` is the
+one answer to *is it live, and where does a reader go* — the piece's own `canonical:` when it
+records one, otherwise the first outlet in registry order that it has an address on, and
+`public_url` on a desk with no registry.
+
+Nothing about a second publication makes this optional, and nothing about it makes the failure
+loud. Every reader of `public_url` on a desk with two publications does not mis-report the second
+one — it reports it as **not published**, which is a state with no findings in it. On 2026-09-11
+that was seven tools at once: the suite's header, manifest, declares-its-outlets and baseline
+gates, `publications.missing_required`, `piece_header`, `md_to_site --syndicated`,
+`sync_post_images`, `substack_tags --verify`, and (until scriptorium c1e192f, the day before)
+`substack_verify` and `substack_notes`. The corpus counted 36 live pieces and the desk had 37;
+the one nothing could see was live with a `*Draft —*` header and no sealed baseline, and every
+check printed ok. **When you add a publication, grep for `public_url` before you trust a green
+run.**
+
 **Tags** are checked against the piece's own publication's vocabulary. The same tag id can
 mean different things in two publications; neither vocabulary knows the other exists.
 
@@ -88,3 +107,5 @@ registry the day a second publication arrives, then `assign` every piece to one 
 3. Give it styles (`styles/<prefix>-…`, per `STYLES.md`) and, when its pieces start carrying
    tags, a vocabulary: `tags.py define <tag> --label … --about … --publication <id>`.
 4. `publications.py check` — every piece named, every outlet owned.
+5. Publish one piece, then run the suite. A gate that has never seen this publication's pieces
+   has never been proved to *apply* to them; the section above is what that costs.

@@ -24,8 +24,10 @@ USAGE
   python3 md_to_site.py <bundle-dir> <piece-dir>... [options]
 
     --canonical-base URL   piece home is <URL>/<slug>; omit for no canonical
-    --syndicated PLATFORM  record publish.yaml's public_url as syndication
-                           (e.g. --syndicated substack)
+    --syndicated OUTLET    record the piece's address ON THAT OUTLET as syndication
+                           (e.g. --syndicated substack). The URL is read by the outlet's
+                           own `manifest_url_key` (publishing/outlets.yaml), so naming a
+                           second Substack records that Substack's URL, not the first's.
     --max-width PX         longest edge of a derived image (default 1600)
     --quality N            WebP quality (default 82)
     --image-store NAME     repo (default) | s3 — recorded in bundle.json
@@ -53,6 +55,7 @@ import yaml                                                          # noqa: E40
 from md_to_substack import clean_footnote, render_reader, load_captions, caption_for  # noqa: E402
 import tags as tagvocab                                              # noqa: E402
 import publications as pb                                            # noqa: E402
+import check_status as cs                                            # noqa: E402
 
 try:
     from PIL import Image
@@ -342,8 +345,15 @@ def export_piece(piece_dir, bundle, opts):
         fm['tags'] = bundle_tags(slug, man, opts.vocabs, publication)
     if opts.canonical_base:
         fm['canonical'] = f"{opts.canonical_base.rstrip('/')}/{slug}"
-    if opts.syndicated and man.get('public_url'):
-        fm['syndicated'] = [{'platform': opts.syndicated, 'url': man['public_url']}]
+    # `syndicated` names WHERE ELSE this piece lives, so the URL is that outlet's own —
+    # read by its `manifest_url_key`, never by `public_url`, which is one outlet's key
+    # (`substack`, Being Good). A bundle for the professional line asked for
+    # `--syndicated substack-muffinlabs` and recorded the Being Good address, or nothing.
+    syn = cs.reader_urls(man, opts.outlets, None).get(opts.syndicated) if opts.syndicated else None
+    if opts.syndicated and not syn and not opts.outlets:
+        syn = man.get('public_url')                 # no registry: the one-outlet desk's key
+    if syn:
+        fm['syndicated'] = [{'platform': opts.syndicated, 'url': syn}]
     if hero:
         fm['hero'] = hero
     if len(images) > 1:
@@ -421,6 +431,11 @@ def main():
     if o.tags and not os.path.exists(o.tags):
         die(8, f"--tags {o.tags}: no such file")
     o.vocabs = tagvocab.Vocabularies(root, o.tags, o.pubs)
+    o.outlets, _legacy = cs.outlets_for(root)
+    if o.syndicated and o.outlets and o.syndicated not in o.outlets:
+        die(8, f"--syndicated {o.syndicated}: not an outlet in publishing/outlets.yaml. "
+               f"It names WHERE ELSE the piece lives, and the URL comes from that outlet's "
+               f"own manifest key.")
 
     def opted_in(piece):
         m = load_manifest(piece)

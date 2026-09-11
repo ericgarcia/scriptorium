@@ -72,7 +72,7 @@ UA = 'Mozilla/5.0 (desk substack_tags)'
 
 
 def plan(pdir, clear=False):
-    """-> dict(slug, post, host, labels, skipped, live, public_url). Raises pb.Refused."""
+    """-> dict(slug, post, host, labels, skipped, live, reader_url, url_key). Raises pb.Refused."""
     root = pb.instance_root(pdir)
     pubs, probs = pb.load(root)
     if probs:
@@ -101,11 +101,24 @@ def plan(pdir, clear=False):
         raise pb.Refused(f'{slug}: no post_url (…/publish/post/<id>) in publish.yaml — compose the '
                          f'post first; a tag needs a post to go on')
     ordered = tg.ordered(names, vocab or {})
+    # The READER url, by the piece's OWN outlet's key. `plan` already derives `host` from
+    # post_url — the editor — correctly per publication; only the public leg read
+    # `public_url`, which is the `substack` outlet's key (Being Good), so `--verify` on a
+    # second Substack publication refused with "no public_url to verify against" about a
+    # post whose URL the manifest records under its own key. A desk with no registry keeps
+    # `public_url`, which is what a one-outlet desk writes.
+    key = 'public_url'
+    try:
+        _outlet, spec = sa.substack_outlet_for_piece(pdir)
+        key = (spec or {}).get('manifest_url_key') or key
+    except sa.NoAccount:                       # unplaceable: the single-outlet key stands
+        pass
     return {'slug': slug, 'post': int(m.group(1)), 'dir': pdir,
             'host': re.match(r'(https?://[^/]+)', man['post_url']).group(1),
             'labels': [vocab[t]['label'] for t in ordered if vocab[t]['substack']],
             'skipped': [t for t in ordered if not vocab[t]['substack']],
-            'live': bool(man.get('published_at')), 'public_url': man.get('public_url')}
+            'live': bool(man.get('published_at')),
+            'reader_url': man.get(key), 'url_key': key}
 
 
 def plan_json(plans, dry=False):
@@ -209,11 +222,12 @@ def snippet(plans, dry=False):
                    .replace('__SHA__', hashlib.sha256(pj.encode('utf-8')).hexdigest()))
 
 
-def public_tags(host, public_url):
+def public_tags(host, reader_url, url_key='public_url'):
     """Names on a LIVE post, from the public post JSON (no sign-in needed)."""
-    m = re.search(r'/p/([^/?#]+)', str(public_url or ''))
+    m = re.search(r'/p/([^/?#]+)', str(reader_url or ''))
     if not m:
-        raise pb.Refused('no public_url (…/p/<slug>) to verify against')
+        raise pb.Refused(f'no {url_key} (…/p/<slug>) in publish.yaml to verify against — '
+                         f'that is this outlet\'s own manifest key (publishing/outlets.yaml)')
     req = urllib.request.Request(f'{host}/api/v1/posts/{m.group(1)}?cb={os.urandom(3).hex()}',
                                  headers={'User-Agent': UA})
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -238,7 +252,7 @@ def main(argv=None):
                 if not p['live']:
                     raise pb.Refused(f"{p['slug']}: --verify reads the PUBLIC post, and this one is not live. "
                                      f"Read a draft back in the page — the snippet returns its tags itself.")
-                now = public_tags(p['host'], p['public_url'])
+                now = public_tags(p['host'], p['reader_url'], p['url_key'])
                 want = {x.lower() for x in p['labels']}
                 missing = [n for n in p['labels'] if n.lower() not in {x.lower() for x in now}]
                 extra = [n for n in now if n.lower() not in want]

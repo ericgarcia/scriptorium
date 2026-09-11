@@ -127,6 +127,48 @@ def reader_urls(man, outlets, legacy):
     return out
 
 
+DEFAULT_URL_KEY = 'public_url'
+
+
+def live_url(man, outlets, legacy=None):
+    """-> the ONE reader URL that names this piece, by ITS OWN outlet's manifest key, or ''.
+
+    `reader_urls` answers "every address this piece has"; this answers the narrower question
+    a dozen call sites actually ask — *is it live, and where does a human go* — and it is
+    here rather than in each of them because each of them answered it by reading
+    `public_url`, which is ONE outlet's key (`substack`, Being Good) and not a universal one.
+    outlets.yaml has said EACH OUTLET GETS ITS OWN MANIFEST KEY since the professional line
+    was added; substack_verify and substack_notes learned it on 2026-09-11 (scriptorium
+    c1e192f) and these did not, so a whole second publication read as *not published* to the
+    corpus gates, the required-outlets rule, the header check and the baseline check alike.
+
+    A `site: true` opt-in is deliberately NOT live here: it records that a piece goes
+    somewhere, not an address, and every caller of this wants the address. Hence legacy=None
+    by default — pass one only if a bare opt-in should count.
+
+    The piece's own `canonical:` wins when it records one, because that is the piece SAYING
+    which of its addresses is home; otherwise the first outlet in registry order that it has
+    an address on. A desk with no registry keeps `public_url`, which is what a one-outlet
+    desk has always written and what the fixtures are.
+    """
+    if not outlets:
+        return str(man.get(DEFAULT_URL_KEY) or '').rstrip('/')
+    urls = reader_urls(man, outlets, legacy)
+    urls = {k: v for k, v in urls.items() if v}
+    if not urls:
+        return ''
+    canon = str(man.get('canonical') or '').rstrip('/')
+    if canon in set(urls.values()):
+        return canon
+    return next(iter(urls.values()))
+
+
+def outlets_for(root, path=None):
+    """(outlets, legacy) for a desk root — its `publishing/outlets.yaml` unless one is named.
+    ({}, None) when the desk has none, which is the one-outlet case `live_url` falls back for."""
+    return load_outlets(path or os.path.join(root, 'publishing', 'outlets.yaml'))
+
+
 def load_manifests(pieces_dir, outlets, legacy):
     got = {}
     if not os.path.isdir(pieces_dir):

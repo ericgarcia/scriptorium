@@ -203,12 +203,30 @@ def load(root, explicit=None):
     return pubs, problems
 
 
-def missing_required(man, pubs):
+def missing_required(man, pubs, outlets=None):
     """-> [(outlet, why)] for a PUBLISHED piece: each outlet its publication requires that the
     piece neither declares nor exempts. An exemption is `outlets_exempt: {outlet: "reason"}` —
     with a reason, because the rule this serves is "every piece, unless Eric says otherwise",
-    and the saying has to be written down. A draft is not held to it."""
-    if not pubs or not man or not man.get('public_url'):
+    and the saying has to be written down. A draft is not held to it.
+
+    PUBLISHED is asked of the piece's OWN outlet, which is what `outlets` is for: pass the
+    registry (outlets.yaml's `outlets:` mapping) and liveness is read by each outlet's
+    `manifest_url_key`. Without it this read `public_url` — the `substack` outlet's key — so
+    a piece of a publication that does not use Substack was never published as far as this
+    gate was concerned, and its `required_outlets` silently asked nothing of it. Latent on
+    2026-09-11, when the second publication happened to require no outlets; a gate that does
+    not apply is worth fixing before the day it should have.
+    """
+    if not pubs or not man:
+        return []
+    if outlets is None:                     # no registry offered: the one-outlet desk's key
+        live = man.get('public_url')
+    else:
+        # Imported here, not at module scope: this file is the base the other tools stand on,
+        # and check_status is one of them.
+        import check_status as cs
+        live = cs.live_url(man, outlets)
+    if not live:
         return []
     e = pubs.get(man.get('publication') or '')
     if not e:

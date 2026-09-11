@@ -383,6 +383,19 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    reader of that answer cannot tell which side is wrong. `refindex.py --scheme pages` indexes
    any other reference PDF the same way, for sources checked by quotation rather than locus.
 
+0b-commonmark. **Check that the markup survives a strict parser:**
+   `python3 framework/tools/check_commonmark.py pieces/<name>` — must report **0 findings.**
+   The desk composes Substack with its own converter, which is lenient; every other outlet
+   renders the same draft through CommonMark, which is not. So a draft can be right on Substack
+   and print literal markup everywhere else — and every other check here compares the draft
+   against the outlet that tolerated it. Found live 2026-09-11, both reader-visible:
+   `not-yet` (`Confessions*, know` — a `*` after a letter and before a comma cannot open
+   emphasis) and `son-of-joseph` (ʿayin written as a backtick, which opens inline code).
+   **Fix only the occurrence the parser flags.** The not-yet repair matched the same characters
+   in a *correct* italic inside a verbatim footnote quotation and broke it; this check is what
+   caught that. Write ʿ (U+02BF) and ʾ (U+02BE), never a backtick. `md_to_site.py` also runs it
+   at export and warns without blocking, since the bundle is the whole site.
+
 0b-pronouns. **Run the pronoun sweep, and justify every hit by naming who it points at:**
    `python3 framework/tools/check_pronouns.py pieces/<name> --names <the named figures> --strict`
    It lists sentence-initial forced capitals (a capital *He* silently reassigns a referent to the

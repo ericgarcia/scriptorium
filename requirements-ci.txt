@@ -1,0 +1,6 @@
+# What CI installs, and what the pre-push hook's venv holds — nothing else. The tools' real
+# third-party imports, found 2026-09-11 by running the suite in a venv with none of them:
+PyYAML>=6.0          # publish.yaml, the registries, tags — ten tools
+boto3                # store_publish, snapshot (the store tests run against a local fake)
+Pillow               # bundle image derivation, review embeds
+markdown-it-py       # check_commonmark — without it that check SKIPS, and a skip is not a pass

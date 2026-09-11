@@ -37,27 +37,15 @@ jobs:
         with:
           node-version: '20'
 
-      # No pip install, no npm install: the tools are stdlib Python plus node's `fs`.
       - name: Show versions
         run: python3 --version && node --version
 
-      # The suite exists because its predecessor was a bash loop containing
-      # `rm -f $S/*` with $S unquoted. Keep it honest in CI, not just in review.
-      - name: The suite must not delete, fetch, or shell out
-        run: |
-          if grep -nE "rm -rf|shutil\.rmtree|os\.unlink|os\.remove|shell=True|urllib\.request\.urlopen|requests\." tools/test_suite.py; then
-            echo "::error::test_suite.py gained a deletion, network, or shell call"
-            exit 1
-          fi
-          echo "clean: no deletion, no network, no shell"
+      # The tools' packages, from the same file the pre-push hook builds its venv from,
+      # so a dependency cannot be present on one side and missing on the other.
+      - name: Install the CI requirements
+        run: python3 -m pip install -r requirements-ci.txt
 
-      - name: Regression suite
-        run: python3 tools/test_suite.py
-
-      # A golden file you can reseal by accident is not golden.
-      - name: Fixture baselines are sealed, not drifting
-        run: |
-          git diff --exit-code -- tools/fixtures || {
-            echo "::error::fixtures changed during the run — the suite must be read-only"
-            exit 1
-          }
+      # The no-deletion guard, the suite, and the read-only check, as ONE command shared
+      # with the pre-push hook (tools/prepush.py) so the two cannot drift. See ci_check.py.
+      - name: CI checks (guard, suite, read-only)
+        run: python3 tools/ci_check.py

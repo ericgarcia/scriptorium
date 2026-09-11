@@ -618,9 +618,11 @@ def unit_review_artifact(tmp):
           '&lt;!--' not in hi and 'internal' not in hi,
           'the converter strips them for the reader; this page is the author reading')
     check('review: raw image markdown never reaches the page', '![' not in hi)
+    # Embedding needs PIL; without it the fourth image cannot be shown either, and it must be
+    # NAMED like the others. A hard-coded 3 failed on every machine without PIL (CI, 2026-09-11).
     check('review: an image the page cannot show is NAMED, not dropped',
-          hi.count('image not shown') == 3,
-          'three of the four fixture images have no file; the fourth resolves via the map')
+          hi.count('image not shown') == (3 if have_pil else 4),
+          'three of the four fixture images have no file; the fourth resolves via the map (with PIL)')
     check('review: a CDN url maps back to its local file via publish.yaml',
           (not have_pil) or ('no local file for it' not in hi
                              and hi.count('data:image/jpeg') == 1),
@@ -1497,7 +1499,6 @@ def unit_pronouns(tmp):
         f.write("title: T\nsubtitle: S\npronouns_allow:\n  - some unrelated phrase\n")
     check('an unrelated pronouns_allow entry does NOT silence a D hit',
           len(check_pronouns.sweep(d2)['D']) == 1, str(check_pronouns.sweep(d2)['D']))
-    os.remove(os.path.join(d2, 'publish.yaml'))
 
     # G — the LORD takes capitals (2026-09-07): a mixed-case Lord in the body is listed, a
     # footnote definition's King James wording is not, and LORD itself is never a hit
@@ -1755,8 +1756,7 @@ def unit_deck(tmp):
           code == 1 and 'unbalanced' in log, log.strip())
 
     missing = os.path.join(tmp, 'deck-missing-asset')
-    shutil.copytree(src, missing)
-    os.remove(os.path.join(missing, 'assets', 'fig1.png'))
+    shutil.copytree(src, missing, ignore=shutil.ignore_patterns('fig1.png'))   # absent by construction
     code, log = _run_deck(missing, os.path.join(tmp, 'deck-out-missing'))
     check('a slide pointing at an asset that is not there names the asset',
           code == 1 and 'assets/fig1.png' in log, log.strip())
@@ -2042,8 +2042,10 @@ def unit_store(tmp):
 
         # A verifier that cannot fail is not a verifier. Each of these is a way a
         # backup rots quietly.
-        os.remove(os.path.join(snap, 'images', 'a-piece', 'hero.webp'))
-        r1 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+        # Each broken snapshot is a COPY made without the file — the suite deletes nothing.
+        gone_img = os.path.join(tmp, 'snap-missing-image')
+        shutil.copytree(snap, gone_img, ignore=shutil.ignore_patterns('hero.webp'))
+        r1 = subprocess.run([sys.executable, snapshot, gone_img, '--config', cfg_path,
                              '--verify-only'], capture_output=True, text=True)
         check('a missing image fails verification',
               r1.returncode == 1 and 'missing' in (r1.stdout + r1.stderr), r1.stderr.strip())
@@ -2059,8 +2061,9 @@ def unit_store(tmp):
               r2.returncode == 1 and 'digest disagrees' in (r2.stdout + r2.stderr),
               r2.stderr.strip())
 
-        os.remove(md)
-        r3 = subprocess.run([sys.executable, snapshot, snap, '--config', cfg_path,
+        gone_md = os.path.join(tmp, 'snap-missing-piece')
+        shutil.copytree(snap, gone_md, ignore=shutil.ignore_patterns('a-piece.md'))
+        r3 = subprocess.run([sys.executable, snapshot, gone_md, '--config', cfg_path,
                              '--verify-only'], capture_output=True, text=True)
         check('a missing piece fails verification',
               r3.returncode == 1 and 'missing' in (r3.stdout + r3.stderr), r3.stderr.strip())
@@ -2521,7 +2524,6 @@ def unit_publications(tmp):
     check('pubs: assign keeps the id and moves the old label into a comment',
           open(os.path.join(leg, 'publish.yaml')).read() == 'title: L\npublication: a   # The A Line\n',
           repr(open(os.path.join(leg, 'publish.yaml')).read()))
-    os.remove(os.path.join(leg, 'publish.yaml'))
     check('pubs: assigning an unknown publication is refused', pb.main(['--root', root, 'assign', 'one', 'zzz']) == 3)
     two = piece('two', 'title: Two\npublication: b\noutlets: [site-b]\npublished_at: 2026-09-01\n',
                 draft='# Two\n*header*\n\n---\n\nBody.\n')
@@ -2545,7 +2547,7 @@ def unit_publications(tmp):
     problems, _n = tg.check(root, None, pubs)
     check('pubs: check fails a tagged piece that names no publication',
           any(x.startswith('lone:') for x in problems), str(problems))
-    os.remove(os.path.join(lone, 'publish.yaml'))
+    open(os.path.join(lone, 'publish.yaml'), 'w').write('title: Lone\n')   # untagged again
 
     # out through the exporter: publication and per-publication labels travel
     site = os.path.join(HERE, 'md_to_site.py')

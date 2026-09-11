@@ -39,8 +39,10 @@ A POEM IN A NOTE (measured 2026-09-11)
   codeBlock, mention — nothing else), so a line break inside a paragraph cannot be sent. A poem
   goes ONE PARAGRAPH PER LINE, which is how multi-line Notes already render in the feed: tight
   lines, no gap (a posted five-line Note is five <p>, no <br>). Stanzas are separated by an EMPTY
-  paragraph. The editor keeps it; whether a posted Note keeps it is not yet measured — the first
-  poem Note measures it, and `verify` is where to look.
+  paragraph, which the editor keeps and a POSTED Note drops: measured 2026-09-11 on the first poem
+  Note (c-334978586), sent as 64 paragraphs with 11 empty, read back from the public feed as 53
+  with 0 empty. The lines survive; the stanza breaks do not. The empties are still sent — harmless,
+  and a Substack change that starts keeping them needs no edit here.
 
 CADENCE
 

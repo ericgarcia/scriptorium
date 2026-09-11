@@ -96,10 +96,13 @@ The Substack Notes editor's schema has **no hard-break node** (its nodes: paragr
 ordered lists, blockquote, codeBlock, mention). A line break inside a paragraph cannot be sent; a
 `setContent` that tries leaves the composer empty. So a poem goes **one paragraph per line**, which is
 exactly how multi-line Notes already render in the feed — tight lines, no gap (a posted five-line
-Note read back as five `<p>` and no `<br>`). **Stanzas are separated by an empty paragraph.** The
-editor keeps it; **whether a posted Note keeps it is not yet measured** — the first poem Note
-measures it. Until then, a poem that depends on its stanza breaks should be read on the live Note
-before anyone calls it shipped.
+Note read back as five `<p>` and no `<br>`). **Stanza breaks do not survive posting — measured 2026-09-11.**
+The composer keeps an empty paragraph, but a posted Note does not: *Earmuffs* (Note c-334978586)
+was sent as 64 paragraphs with 11 empty ones and the public feed returns **53 paragraphs, 0 empty**
+— every stanza gap stripped, the lines kept. So a poem posts as one unbroken run of lines. Until a
+stanza marker that survives has been measured, a poem whose stanzas carry meaning should be read
+that way before it is posted; the tool still sends the empty paragraphs, which are harmless and cost
+nothing, so a Substack change that starts keeping them is picked up without an edit.
 
 ## Voices: what ships, and what stays private
 

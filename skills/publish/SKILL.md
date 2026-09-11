@@ -676,8 +676,9 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
       URL**: the tool appends the post's public URL as the last paragraph, and the composer
       turns that bare URL into the post's card by itself. A poem goes one paragraph per line
       with an empty paragraph between stanzas — the Notes editor has no line-break node
-      (measured 2026-09-11); **read the first poem Note on the live feed to see whether the
-      stanza gaps survived posting**, and record what you saw in `COMPANIONS.md`.
+      (measured 2026-09-11). **A posted Note strips the empty paragraphs**, so a poem goes live
+      as one unbroken run of lines (measured the same day on the first poem Note: 64 sent, 53
+      live, 0 empty). Tell the author before posting a poem whose stanzas matter.
    2. **Show it to the author and get a yes that names the Note.** A Note is public the moment
       Post is clicked. The yes to publish the post does not cover it: ask for both in one line
       if that's convenient, but ask.

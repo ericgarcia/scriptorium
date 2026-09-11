@@ -787,6 +787,16 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    `verify` with no slug checks every recorded Note, and flags any Note naming a post that the
    desk has no record of as `UNRECORDED`. Record that Note; never post a second one.
 
+   **Notes belong to a PROFILE, and each outlet has its own.** `notes_profile_id` /
+   `notes_handle` / `notes_probe_draft_id` are read from the piece's **own** Substack outlet, and
+   `verify` groups the corpus by outlet and reads each profile's feed — so a two-publication desk
+   is swept in one run. Until 2026-09-11 both the corpus and the profile were hard-coded to the
+   `substack` outlet, which is two errors that compound: the second publication's posts were not
+   in the backlog at all, and had one been checked it would have been checked against the **first
+   publication's feed** — reporting a real Note as `MISSING` and an absent one as fine. An outlet
+   with no profile id recorded now reports `UNREAD` with its pieces counted, rather than passing
+   silently; `probe --outlet <name>` prints that outlet's own probe draft.
+
 ### The JS-snippet path — the pane's default, and Chrome's fallback
 
 `md_to_substack.py` emits a self-contained snippet that sets title and subtitle and pastes the
@@ -1215,7 +1225,18 @@ nothing keyed off `pieces/` could see it. Run it after every publish.
 
 ```
 python3 framework/tools/substack_verify.py --archive --fresh
+python3 framework/tools/substack_verify.py --archive --fresh --outlet <other-substack-outlet>
 ```
+
+**An archive belongs to ONE publication, and a desk can have two.** `--archive` walks the
+`substack_primary` outlet's by default; `--outlet` names another. Every mode finds a piece by
+**its own outlet's `manifest_url_key`** (outlets.yaml), never by `public_url` — which is one
+outlet's key, and was hard-coded here until 2026-09-11. While it was, the second Substack
+publication was invisible to this tool: its posts were skipped, and skipped with the wrong
+reason — *"composed but not published"* about a post live for a day — so **caption, text, mark
+and anchor drift went unchecked on a whole publication and every run still said the repo
+matched.** `--list` now prints each piece's outlet beside its state; a piece that reads `-`
+is one nothing places, and its URL will not be found.
 
 > Do not put this in CI on a GitHub-hosted runner. Measured 2026-09-02: Substack returns
 > **403 to Azure IP ranges** on every path — page, API, and RSS, with any user agent. It

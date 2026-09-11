@@ -43,7 +43,7 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
           and the store refusing one publication's piece over another's slug
   corpus  with a registry, every manifest names its publication and owns its outlets
 """
-import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib
+import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -338,8 +338,103 @@ def unit_notes(tmp):
     feed = [{'id': 1, 'blob': '{"url": "https://example.substack.com/p/a-old"}'},
             {'id': 2, 'blob': '{"url": "https://example.substack.com/p/a-older"}'}]
     check('notes: a feed match does not take a longer slug for a shorter one',
-          sn.match_notes([{'slug': 'a-old', 'public_url': 'https://example.substack.com/p/a-old'}], feed)
+          sn.match_notes([{'slug': 'a-old', 'url': 'https://example.substack.com/p/a-old'}], feed)
           == {'a-old': [1]})
+
+
+# ------------------------------------------------- unit: a second Substack outlet is in scope
+def unit_outlet_urls(tmp):
+    """Each outlet's posts are found by ITS OWN manifest key, and its own Notes profile.
+
+    `substack_verify` and `substack_notes` both read `public_url` — which is one outlet's key
+    (`substack`, Being Good), not a universal one. outlets.yaml has said so since the
+    professional line was added: EACH OUTLET GETS ITS OWN MANIFEST KEY. So every post on the
+    second Substack outlet was skipped by the verifier, with the wrong reason ("composed but not
+    published") about a post live for a day, and was not in the Notes corpus at all. Measured
+    2026-09-11 on `love-is-not-a-metric-space`, whose own manifest carried a comment saying so.
+
+    A desk with no registry keeps `public_url`: that is what a one-outlet desk writes, and the
+    fixtures above are exactly that case.
+    """
+    print("\n-- a second Substack outlet is in scope --------------------------")
+    import importlib, substack_notes as sn
+    import substack_verify as sv
+
+    repo = os.path.join(tmp, 'tworepo')
+    os.makedirs(os.path.join(repo, 'publishing'), exist_ok=True)
+    open(os.path.join(repo, 'publishing', 'outlets.yaml'), 'w').write(
+        'substack_primary: substack\n'
+        'outlets:\n'
+        '  substack:\n'
+        '    reader_base: https://one.substack.com/p/\n'
+        '    manifest_url_key: public_url\n'
+        '    account_handle: one\n'
+        '    notes_profile_id: 111\n'
+        '    notes_handle: one\n'
+        '  substack-two:\n'
+        '    reader_base: https://two.substack.com/p/\n'
+        '    manifest_url_key: substack_url\n'
+        '    account_handle: two\n'
+        '    notes_profile_id: 222\n'
+        '    notes_handle: two\n'
+        '    notes_probe_draft_id: 999\n'
+        '  blog:\n'
+        '    reader_base: https://example.com/blog/\n'
+        '    manifest_url_key: blog_url\n')
+    def mk(slug, body):
+        d = os.path.join(repo, 'pieces', slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(body)
+        open(os.path.join(d, 'draft.md'), 'w').write('x\n---\n\nProse.\n')
+        return d
+    mk('one-piece', 'title: One\noutlets:\n  - substack\n'
+                    'public_url: https://one.substack.com/p/one-piece\npublished_at: 2026-09-01\n')
+    mk('two-piece', 'title: Two\noutlets:\n  - blog\n  - substack-two\n'
+                    'substack_url: https://two.substack.com/p/two-piece\npublished_at: 2026-09-02\n')
+    mk('two-unpub', 'title: Unpublished\noutlets:\n  - substack-two\n')
+
+    old = os.environ.get('DESK_OUTLETS')
+    os.environ['DESK_OUTLETS'] = os.path.join(repo, 'publishing', 'outlets.yaml')
+    try:
+        url, outlet, key = sv.live_url(os.path.join(repo, 'pieces', 'two-piece'))
+        check("verify: the second outlet's piece is found by its own key",
+              (url, outlet, key) == ('https://two.substack.com/p/two-piece', 'substack-two', 'substack_url'),
+              str((url, outlet, key)))
+        check('verify: the first outlet still reads public_url',
+              sv.live_url(os.path.join(repo, 'pieces', 'one-piece'))[2] == 'public_url')
+        live = {n for n, _d, _u in sv.published_pieces(repo)}
+        check('verify: both publications are in scope for a sweep', live == {'one-piece', 'two-piece'}, str(live))
+        _d, u, why = sv.resolve_piece(repo, 'two-unpub')
+        check('verify: an unpublished piece names the key it is missing',
+              u is None and 'substack_url' in (why or '') and 'not published' in (why or ''), str(why))
+        name, base, problem = sv.archive_outlet(repo)
+        check('archive: the primary is the default publication', (name, base, problem) ==
+              ('substack', 'https://one.substack.com', None), str((name, base, problem)))
+        name2, base2, _p = sv.archive_outlet(repo, 'substack-two')
+        check('archive: --outlet walks the other publication',
+              (name2, base2) == ('substack-two', 'https://two.substack.com'), str((name2, base2)))
+        _n, _b, p3 = sv.archive_outlet(repo, 'blog')
+        check('archive: a non-Substack outlet has no archive, and says so',
+              p3 and 'not a Substack outlet' in p3, str(p3))
+
+        corpus = {p['slug']: p for p in sn.load(os.path.join(repo, 'pieces'))}
+        check('notes: a second-outlet post is in the corpus at all', 'two-piece' in corpus, str(list(corpus)))
+        check("notes: it carries its own url and outlet",
+              corpus.get('two-piece', {}).get('url') == 'https://two.substack.com/p/two-piece'
+              and corpus['two-piece']['outlet'] == 'substack-two', str(corpus.get('two-piece')))
+        ap = argparse.Namespace(profile=None, handle=None,
+                                outlets=os.environ['DESK_OUTLETS'], outlet=None)
+        check('notes: each outlet is checked against ITS OWN profile feed',
+              sn.config(ap, 'substack-two') == ('222', 'two')
+              and sn.config(ap, 'substack') == ('111', 'one'),
+              str((sn.config(ap, 'substack-two'), sn.config(ap, 'substack'))))
+        check('notes: the probe draft is the outlet\'s own',
+              sn.outlet_spec(ap.outlets, 'substack-two')[1].get('notes_probe_draft_id') == 999)
+    finally:
+        if old is None:
+            os.environ.pop('DESK_OUTLETS', None)
+        else:
+            os.environ['DESK_OUTLETS'] = old
+        importlib.invalidate_caches()
 
 
 # ---------------------------------------------------------------- unit: companions
@@ -4018,6 +4113,7 @@ def main():
         unit_outlet_content(tmp)
         unit_commonmark(tmp)
         unit_notes(tmp)
+        unit_outlet_urls(tmp)
         unit_companions(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)

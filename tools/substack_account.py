@@ -386,8 +386,14 @@ def _manifest(piece_dir):
         return yaml.safe_load(fh) or {}
 
 
-def outlet_for_piece(piece_dir, outlets_path=None):
-    """-> (outlet name, spec) of the ONE Substack outlet a piece writes to. Raises NoAccount.
+def substack_outlet_for_piece(piece_dir, outlets_path=None):
+    """-> (outlet name, spec) of the ONE Substack outlet a piece BELONGS to. Raises NoAccount.
+
+    WHOSE POST THIS IS, asked without asking permission to write it. `outlet_for_piece` is this
+    plus the account check, and every WRITE goes through that one. A read-only tool
+    (`substack_verify` fetching a public page, `substack_notes` reading a public feed) needs the
+    first question answered and must not be refused by the second: an outlet with no
+    `account_handle` recorded yet is one nothing may write, not one nothing may look at.
 
     Its publish.yaml `outlets:` list names it. A manifest with no list (it predates outlets) is
     settled by the host of its `post_url`, or by the desk having a single Substack outlet. A
@@ -425,8 +431,17 @@ def outlet_for_piece(piece_dir, outlets_path=None):
     else:
         raise NoAccount(f"{slug}: no outlets: list, and neither its post_url nor the desk settles "
                         f"which of {len(subs)} Substack outlets it is")
-    spec = doc['outlets'][name] or {}
+    return name, doc['outlets'][name] or {}
+
+
+def outlet_for_piece(piece_dir, outlets_path=None):
+    """-> (outlet name, spec) of the ONE Substack outlet a piece WRITES to. Raises NoAccount.
+
+    `substack_outlet_for_piece` settles which outlet; this adds the account requirement, and
+    every write path goes through it."""
+    name, spec = substack_outlet_for_piece(piece_dir, outlets_path)
     if not expected(spec):
+        slug = os.path.basename(os.path.normpath(piece_dir))
         raise NoAccount(f"{slug} goes to {name}, which names no account_handle — add one to outlets.yaml")
     return name, spec
 

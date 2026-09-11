@@ -76,6 +76,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from md_to_substack import read_manifest                                  # noqa: E402
 import companions                                                         # noqa: E402
+import substack_account as sa                                             # noqa: E402
 
 BLOCK = 'substack_note'
 
@@ -95,13 +96,32 @@ def default_pieces():
 
 
 # ------------------------------------------------------------------------ the corpus
+def live_url(piece_dir, man):
+    """-> (url, outlet): the piece's reader address on ITS OWN Substack outlet.
+
+    Each outlet declares the manifest key its URL is written under (`manifest_url_key` in
+    outlets.yaml). This read `public_url` — the `substack` outlet's key — so a post on the
+    second Substack outlet was not merely unannounced, it was not in the corpus at all: no
+    backlog slot, no status row, and `verify` could not have caught a Note posted for it by
+    hand. `love-is-not-a-metric-space` said so in its own manifest, in a comment, on the day
+    it went live (2026-09-11). A desk with no registry keeps `public_url`, which is what a
+    one-outlet desk has always written."""
+    try:
+        outlet, spec = sa.substack_outlet_for_piece(piece_dir)
+    except Exception:                                             # noqa: BLE001 — unplaceable
+        outlet, spec = None, {}
+    key = (spec or {}).get('manifest_url_key') or 'public_url'
+    return man.get(key, ''), outlet
+
+
 def load(pieces_dir):
     """Every piece that is a live POST (not a page), with its Note state."""
     out = []
     for slug in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, slug)
         man = read_manifest(os.path.join(d, 'publish.yaml'))
-        url, date = man.get('public_url', ''), man.get('published_at', '')
+        url, outlet = live_url(d, man)
+        date = man.get('published_at', '')
         if not url or not re.match(r'\d{4}-\d{2}-\d{2}$', date):
             continue                                        # not live
         if man.get('substack_type') == 'page':
@@ -116,7 +136,7 @@ def load(pieces_dir):
         else:
             state = 'missing'
         out.append({'slug': slug, 'dir': d, 'title': man.get('title', slug),
-                    'public_url': url, 'published_at': date, 'state': state,
+                    'url': url, 'outlet': outlet, 'published_at': date, 'state': state,
                     'posted_at': block.get('posted_at', ''),
                     'note_url': block.get('note_url', ''), 'skip': block.get('skip', '')})
     out.sort(key=lambda p: (p['published_at'], p['slug']))
@@ -152,7 +172,7 @@ def note_paragraphs(comp):
     return out + [gap]                       # the last stanza's gap, before the card
 
 
-def read_note(piece_dir, public_url):
+def read_note(piece_dir, post_url):
     """-> (paragraphs, problems). The last paragraph is the post URL, added here."""
     comp = companions.companion(piece_dir, 'note')
     if not comp:
@@ -160,7 +180,7 @@ def read_note(piece_dir, public_url):
     problems = companions.problems_of(comp, piece_dir)
     if problems:
         return [], problems
-    return note_paragraphs(comp) + [public_url], []
+    return note_paragraphs(comp) + [post_url], []
 
 
 def note_hash(paras):
@@ -248,15 +268,15 @@ def fetch_notes(profile_id, max_pages=40):
     return notes
 
 
-def slug_of(public_url):
-    return public_url.rstrip('/').rsplit('/p/', 1)[-1]
+def slug_of(post_url):
+    return post_url.rstrip('/').rsplit('/p/', 1)[-1]
 
 
 def match_notes(corpus, notes):
     """-> {piece slug: [note ids that name its post]}"""
     hits = {}
     for p in corpus:
-        needle = f'/p/{slug_of(p["public_url"])}'
+        needle = f'/p/{slug_of(p["url"])}'
         ids = [n['id'] for n in notes
                if re.search(re.escape(needle) + r'(?![\w-])', n['blob'])]
         if ids:
@@ -265,15 +285,32 @@ def match_notes(corpus, notes):
 
 
 # ------------------------------------------------------------------------ config
-def config(args):
-    """Profile id and handle: flags, else the instance's outlets.yaml."""
+def outlet_spec(path, outlet=None):
+    """-> (outlet name, spec) from the registry. `outlet` names one; otherwise the desk's
+    substack_primary, or its one Substack outlet.
+
+    NOTES BELONG TO A PROFILE, and each outlet records its own (`notes_profile_id`,
+    `notes_handle`, `notes_probe_draft_id`). This indexed `outlets['substack']` by literal name,
+    so a second publication's Notes would have been checked against the FIRST publication's feed
+    — which does not merely fail, it reports a real Note as MISSING and an absent one as fine."""
+    if not path or not os.path.exists(path):
+        return None, {}
+    doc = sa.load(path)
+    if outlet:
+        return outlet, (doc['outlets'].get(outlet) or {})
+    name, _problem = sa.primary(doc)
+    if not name:
+        name = 'substack' if 'substack' in doc['outlets'] else None
+    return name, (doc['outlets'].get(name) or {} if name else {})
+
+
+def config(args, outlet=None):
+    """Profile id and handle for ONE outlet: flags, else the instance's outlets.yaml."""
     pid, handle = args.profile, args.handle
-    path = args.outlets
-    if (not pid or not handle) and path and os.path.exists(path):
-        import yaml
-        sub = (yaml.safe_load(open(path)) or {}).get('outlets', {}).get('substack', {})
-        pid = pid or str(sub.get('notes_profile_id') or '')
-        handle = handle or sub.get('notes_handle')
+    if not pid or not handle:
+        _name, spec = outlet_spec(args.outlets, outlet or getattr(args, 'outlet', None))
+        pid = pid or str(spec.get('notes_profile_id') or '')
+        handle = handle or spec.get('notes_handle')
     return pid, handle
 
 
@@ -287,6 +324,8 @@ def main(argv=None):
     ap.add_argument('--date', help='record: YYYY-MM-DD (default today, local)')
     ap.add_argument('--today', help=argparse.SUPPRESS)           # for tests
     ap.add_argument('--outlets', default='publishing/outlets.yaml')
+    ap.add_argument('--outlet', help='which Substack outlet (probe, and a --profile-less verify '
+                                     'of one feed); a piece names its own')
     ap.add_argument('--profile'); ap.add_argument('--handle')
     args = ap.parse_args(argv)
 
@@ -297,16 +336,14 @@ def main(argv=None):
     def piece(slug):
         slug = os.path.basename(slug.rstrip('/'))
         if slug not in by:
-            raise SystemExit(f'{slug}: not a live post (needs public_url + published_at, not a page)')
+            raise SystemExit(f'{slug}: not a live post (needs its outlet\'s reader url + '
+                             f'published_at in publish.yaml, and not a page)')
         return by[slug]
 
     if args.cmd == 'probe':
-        pid = ''
-        if args.outlets and os.path.exists(args.outlets):
-            import yaml
-            sub = (yaml.safe_load(open(args.outlets)) or {}).get('outlets', {}).get('substack', {})
-            pid = str(sub.get('notes_probe_draft_id') or '')
-        print(json.dumps({'draft_id': pid or None, 'first_line': PROBE_LABEL,
+        name, spec = outlet_spec(args.outlets, args.outlet)
+        pid = str(spec.get('notes_probe_draft_id') or '')
+        print(json.dumps({'outlet': name, 'draft_id': pid or None, 'first_line': PROBE_LABEL,
                           'rule': 'private; reuse for probes; never post, never delete'},
                          indent=2, ensure_ascii=False))
         return 0 if pid else 1
@@ -337,7 +374,8 @@ def main(argv=None):
             print('backlog clear')
             return 0
         p = bl[0]
-        print(json.dumps({'slug': p['slug'], 'title': p['title'], 'public_url': p['public_url'],
+        print(json.dumps({'slug': p['slug'], 'title': p['title'], 'url': p['url'],
+                          'outlet': p['outlet'],
                           'published_at': p['published_at'], 'state': p['state'],
                           'remaining': len(bl)}, indent=2))
         return 0
@@ -346,7 +384,7 @@ def main(argv=None):
         if len(args.slugs) != 1:
             ap.error('text takes one slug')
         p = piece(args.slugs[0])
-        paras, problems = read_note(p['dir'], p['public_url'])
+        paras, problems = read_note(p['dir'], p['url'])
         if problems:
             print(f"{p['slug']}: " + '; '.join(problems), file=sys.stderr)
             return 1
@@ -358,8 +396,8 @@ def main(argv=None):
     if args.cmd == 'record':
         if len(args.slugs) != 1:
             ap.error('record takes one slug')
-        pid, handle = config(args)
         p = piece(args.slugs[0])
+        pid, handle = config(args, p['outlet'])         # the PIECE's profile, not the desk's first
         if args.url:
             url = normalize_note_url(args.url, handle or 'unknown')
         else:
@@ -386,18 +424,37 @@ def main(argv=None):
         return 0
 
     if args.cmd == 'verify':
-        pid, _handle = config(args)
-        if not pid:
-            print('no profile id: pass --profile or set outlets.substack.notes_profile_id', file=sys.stderr)
-            return 2
-        try:
-            notes = fetch_notes(pid)
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            print(f'could not read the notes feed: {e}', file=sys.stderr)
-            return 2
-        hits = match_notes(corpus, notes)
         scope = [piece(s) for s in args.slugs] if args.slugs else corpus
+        # ONE FEED PER PROFILE, and a desk can have two. Grouping by the piece's own outlet is
+        # what makes a cross-publication sweep possible at all: checking every piece against one
+        # profile's feed would report the other publication's recorded Notes as MISSING and its
+        # unrecorded ones as fine — both answers wrong, and both confidently.
+        groups = {}
+        for p in scope:
+            groups.setdefault(p['outlet'], []).append(p)
+        hits, notes, unread = {}, [], []
+        for outlet, members in groups.items():
+            pid, _handle = config(args, outlet)
+            if not pid:
+                unread.append((outlet, 'no notes_profile_id in outlets.yaml (or --profile)', members))
+                continue
+            try:
+                feed = fetch_notes(pid)
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                unread.append((outlet, f'could not read the feed: {e}', members))
+                continue
+            notes += feed
+            hits.update(match_notes(members, feed))
+        if unread and len(unread) == len(groups):
+            for outlet, why, _m in unread:
+                print(f'{outlet or "(no outlet)"}: {why}', file=sys.stderr)
+            return 2
         bad = 0
+        for outlet, why, members in unread:
+            bad += 1
+            print(f"  UNREAD      {outlet or '(no outlet)'}  {why} "
+                  f"({len(members)} piece(s) unchecked)")
+        scope = [p for p in scope if p['outlet'] not in {o for o, _w, _m in unread}]
         for p in scope:
             found = hits.get(p['slug'], [])
             rec = re.search(r'c-(\d+)', p['note_url'] or '')
@@ -412,7 +469,9 @@ def main(argv=None):
             elif found:
                 bad += 1
                 print(f"  UNRECORDED  {p['slug']}  feed has {found}; run `record` with that id")
-        print(f"\n{len(notes)} Notes on the profile; {sum(p['state'] == 'posted' for p in scope)} recorded in scope")
+        feeds = ', '.join(o or '(no outlet)' for o in groups if o not in {u[0] for u in unread})
+        print(f"\n{len(notes)} Notes across {len(groups) - len(unread)} profile(s) [{feeds}]; "
+              f"{sum(p['state'] == 'posted' for p in scope)} recorded in scope")
         return 1 if bad else 0
 
 

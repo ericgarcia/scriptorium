@@ -38,6 +38,15 @@ that promise is worth more than the convenience of one runner.
     python3 substack_verify.py --fresh        # bypass the CDN cache (use after an Update)
     python3 substack_verify.py --archive      # the reader's list: every live post has a
                                               # title + subtitle and the desk knows it
+    python3 substack_verify.py --archive --outlet substack-muffinlabs   # the other publication
+
+A PIECE IS FOUND BY ITS OWN OUTLET'S KEY. Each outlet declares the manifest field its reader
+URL is written under (`manifest_url_key`, outlets.yaml), because each outlet has its own. This
+tool read `public_url` — one outlet's key — at every site, so a desk's second Substack
+publication was invisible to it: skipped, and skipped with the wrong reason, "composed but not
+published", about a post that had been live for a day (2026-09-11, `love-is-not-a-metric-space`).
+An --archive walk belongs to ONE publication and now says which rather than deriving it from
+whichever manifest came first.
 
 WITHOUT --fresh THIS TOOL CAN REPORT DRIFT THAT DOES NOT EXIST, and it did on 2026-09-03: a
 sweep of 26 pieces returned three DRIFTED, and all three came back MATCH the moment the same
@@ -59,6 +68,7 @@ sys.path.insert(0, HERE)
 from md_to_substack import (render_captions, read_manifest, render_reader, render_marks,   # noqa: E402
                             render_anchors, anchor_tail, MarkRuns, mark_keys)
 from substack_sync import H                                      # noqa: E402
+import substack_account as sa                                    # noqa: E402
 
 UA = 'writing-desk-verify/1.0 (+repo consistency check)'
 TIMEOUT = 15          # per request; a page that takes longer is not going to arrive
@@ -313,6 +323,39 @@ def pieces_touched_by(repo, rev_range):
     return slugs, None
 
 
+DEFAULT_URL_KEY = 'public_url'
+
+
+def outlet_of(piece_dir):
+    """-> (outlet name, spec) for the piece's Substack outlet, or (None, {}) when nothing settles
+    it. Never raises: this tool reads public pages, and a piece it cannot place is one it reports
+    rather than one it crashes on."""
+    try:
+        return sa.substack_outlet_for_piece(piece_dir)
+    except Exception:                                             # noqa: BLE001 — see docstring
+        return None, {}
+
+
+def live_url(piece_dir, man=None):
+    """-> (url, outlet, key): where a reader finds this piece, by ITS OWN outlet's manifest key.
+
+    EVERY OUTLET GETS ITS OWN MANIFEST KEY — outlets.yaml says so, and `manifest_url_key` is where
+    it says it. This tool did not know that. It read `public_url` at four sites, which is one
+    publication's key (`substack`, Being Good), so every post on the second Substack outlet
+    (`substack-muffinlabs`, whose key is `substack_url`) was skipped — and skipped with the wrong
+    reason, "composed but not published", about a post that had been live for a day. Measured
+    2026-09-11 on `love-is-not-a-metric-space`, whose manifest had written the problem down in a
+    comment: *substack_notes.py cannot see a MuffinLabs post yet (it reads public_url)*. Three more
+    MuffinLabs pieces already declare the outlet and would have landed in the same hole.
+
+    A desk with no registry — a fresh instance, a test fixture — keeps the old key as the default,
+    because `public_url` is what a one-outlet desk has always written."""
+    man = read_manifest(os.path.join(piece_dir, 'publish.yaml')) if man is None else man
+    outlet, spec = outlet_of(piece_dir)
+    key = (spec or {}).get('manifest_url_key') or DEFAULT_URL_KEY
+    return man.get(key, ''), outlet, key
+
+
 def resolve_piece(repo, arg):
     """Resolve a piece argument to a directory, and say WHY when it cannot.
 
@@ -339,9 +382,9 @@ def resolve_piece(repo, arg):
     man = os.path.join(d, 'publish.yaml')
     if not os.path.isfile(man):
         return (d, None, "no publish.yaml — never composed to Substack")
-    url = read_manifest(man).get('public_url')
+    url, _outlet, key = live_url(d)
     if not url:
-        return (d, None, "no public_url in publish.yaml — composed but not published")
+        return (d, None, f"no {key} in publish.yaml — composed but not published")
     return (d, url, None)
 
 
@@ -356,7 +399,7 @@ def published_pieces(repo, only=None):
         d = os.path.join(pieces, name)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
-        url = read_manifest(os.path.join(d, 'publish.yaml')).get('public_url')
+        url, _outlet, _key = live_url(d)
         if not url or '.invalid' in url:          # fixtures are not reachable by design
             continue
         out.append((name, d, url))
@@ -505,13 +548,50 @@ def walk_archive(base, fresh=False, page=50):
         offset += len(batch)
 
 
-def audit_archive(repo, fresh):
+def archive_outlet(repo, want=None):
+    """-> (outlet name or None, reader base or None, problem or None) for an --archive run.
+
+    AN ARCHIVE IS ONE PUBLICATION'S, so this walk has to name which. It used to derive the base
+    URL from whichever manifest came first in the dict — `re.match(host, next(iter(known))…)` —
+    which is only ever right on a desk with one Substack outlet, and silently picks a side on a
+    desk with two. The primary is the default because it is the desk's own declared answer to
+    "which one, when nobody said"; `--outlet` names the other."""
+    path = sa.outlets_path_for(os.path.join(repo, 'pieces')) if os.path.isdir(repo) else None
+    if not path or not os.path.isfile(path):
+        return (None, None, None)                     # no registry: the old single-outlet path
+    doc = sa.load(path)
+    if want:
+        if want not in doc['outlets']:
+            return (None, None, f'{want!r} is not an outlet in {os.path.basename(path)}')
+        if want not in sa.substack_outlets(doc):
+            return (None, None, f'{want!r} is not a Substack outlet, so it has no post archive')
+        name = want
+    else:
+        name, problem = sa.primary(doc)
+        if problem:
+            return (None, None, f'{problem} — name one with --outlet')
+    base = re.match(r'https?://[^/]+', str(doc['outlets'][name].get('reader_base') or '') or '')
+    if not base:
+        return (None, None, f'{name} records no reader_base, so its archive cannot be located')
+    return (name, base.group(0), None)
+
+
+def audit_archive(repo, fresh, outlet=None):
     """Cross the live archive with the desk. Returns (rows, problems)."""
+    name_outlet, base, problem = archive_outlet(repo, outlet)
+    if problem:
+        return [], [problem]
     known = {}
     pieces = os.path.join(repo, 'pieces')
     for name in sorted(os.listdir(pieces)) if os.path.isdir(pieces) else []:
-        man = read_manifest(os.path.join(pieces, name, 'publish.yaml'))
-        u = man.get('public_url', '')
+        d = os.path.join(pieces, name)
+        man = read_manifest(os.path.join(d, 'publish.yaml'))
+        u, piece_outlet, _key = live_url(d, man)
+        # ONE publication's archive, so one publication's pieces. A post of the other outlet
+        # counted here would be reported as missing from a list it was never going to be in —
+        # the same false finding `--archive` exists to make impossible in the other direction.
+        if name_outlet and piece_outlet and piece_outlet != name_outlet:
+            continue
         if u:
             known[u.rstrip('/').rsplit('/', 1)[-1]] = (name, man)
     # A Substack PAGE is a post with `type: "page"` (measured 2026-09-10): same editor
@@ -521,9 +601,10 @@ def audit_archive(repo, fresh):
     # going to be in.
     pages = {k: v for k, v in known.items() if v[1].get('substack_type') == 'page'}
     known = {k: v for k, v in known.items() if v[1].get('substack_type') != 'page'}
-    if not known:
-        return [], ['no piece records a public_url, so the publication cannot be located']
-    base = re.match(r'https?://[^/]+', next(iter(known.values()))[1]['public_url']).group(0)
+    if base is None:                                  # no registry: the desk's own first URL
+        if not known:
+            return [], ['no piece records a public_url, so the publication cannot be located']
+        base = re.match(r'https?://[^/]+', next(iter(known.values()))[1]['public_url']).group(0)
     posts = walk_archive(base, fresh)
     rows, problems = [], []
     for p in posts:
@@ -643,10 +724,13 @@ def main():
     ap.add_argument('--archive', action='store_true',
                     help='walk the PUBLICATION\'s public archive instead of the repo: every '
                          'live post must have a title and a subtitle and be known to the desk')
+    ap.add_argument('--outlet',
+                    help='--archive: which Substack outlet\'s archive to walk (default: the '
+                         'desk\'s substack_primary). An archive belongs to one publication.')
     a = ap.parse_args()
 
     if a.archive:
-        rows, problems = audit_archive(a.repo, a.fresh)
+        rows, problems = audit_archive(a.repo, a.fresh, a.outlet)
         if not rows:
             print('FAILED: the archive returned no posts' + (f' ({problems[0]})' if problems else ''))
             return 2
@@ -664,7 +748,8 @@ def main():
 
     if a.list:
         # "Which pieces must match Substack?" should be one command, not an inference
-        # from a filename. public_url is the authoritative answer and the only one.
+        # from a filename. The piece's own outlet's URL key is the authoritative answer —
+        # and naming the outlet is half of it on a desk with more than one.
         pieces = os.path.join(a.repo, 'pieces')
         rows = []
         for name in sorted(os.listdir(pieces)):
@@ -672,16 +757,18 @@ def main():
             if not os.path.isfile(os.path.join(d, 'draft.md')):
                 continue
             man = read_manifest(os.path.join(d, 'publish.yaml'))
-            if man.get('public_url'):
+            url, outlet, _key = live_url(d, man)
+            if url:
                 state = 'LIVE'
             elif man.get('post_url'):
                 state = 'composed'
             else:
                 state = 'draft'
-            rows.append((name, state, man.get('public_url', '')))
+            rows.append((name, state, url, outlet or '-'))
         w = max(len(r[0]) for r in rows) if rows else 0
-        for name, state, url in rows:
-            print(f"  {name:<{w}}  {state:<9} {url}")
+        ow = max((len(r[3]) for r in rows), default=0)
+        for name, state, url, outlet in rows:
+            print(f"  {name:<{w}}  {state:<9} {outlet:<{ow}}  {url}")
         live = sum(1 for r in rows if r[1] == 'LIVE')
         print(f"\n{live} live (in scope for verification), "
               f"{sum(1 for r in rows if r[1]=='composed')} composed, "

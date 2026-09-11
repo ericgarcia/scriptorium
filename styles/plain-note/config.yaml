@@ -1,0 +1,10 @@
+# Starter voice for the `note` form. Copy into your instance's styles/ and tune.
+form: note              # the form this voice writes in — see docs/COMPANIONS.md
+length: 1-3 short paragraphs
+markdown: none          # plain text; the tool appends the post's link
+person: first
+contractions: yes
+avoid:
+  - announcing ("new post", "I wrote about", "in my latest")
+  - summarizing the whole argument
+  - hashtags, emoji punctuation, a second link

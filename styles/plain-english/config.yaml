@@ -10,3 +10,4 @@ avoid:
   - inflated verbs (utilize, leverage, facilitate)
   - hedging ("it could be argued that")
   - rhetorical-question openers
+form: essay            # the form this voice writes in — see docs/COMPANIONS.md

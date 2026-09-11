@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT; the author says publish and this skill clicks it. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. A FIRST publication SENDS the subscriber email — that is the only email a piece ever gets. Every re-sync after that sends NOTHING: the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks.
+description: Compose a finished piece as a Substack DRAFT in one pass — verify the footnotes, strip internal notes, then set title, subtitle, formatted body, images, and native footnotes — by driving the browser. Use when the user says "publish X to Substack", "load X into Substack", "put X on Substack", or wants a ready-to-review draft. For a piece already live, it re-syncs the published post SURGICALLY — changing only what actually changed (a fixed word, a casing sweep, a reworded clause) and touching nothing else. A FRESH compose produces a private DRAFT; the author says publish and this skill clicks it. A RE-SYNC of an already-published post STAGES (measured three times: the editor says Saved while the public page still serves the old text), so verify before writing AND after, against the cache-busted reader URL. Shipping a staged edit is NOT gated: click Update → Update now without asking — the decision was the edit. Only a FIRST publication needs the author. A FIRST publication SENDS the subscriber email — that is the only email a piece ever gets. Every re-sync after that sends NOTHING: the confirm dialog's text is read first, and any delivery control must be provably off or it stops and asks. Every publication also gets ONE Substack Note, posted on the author's word (step 9); posts that predate that are a backlog worked one Note per day — use this skill for "post today's note", "next note", "catch up on notes".
 ---
 
 # Publish (to Substack)
@@ -639,6 +639,47 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
 
    **Then run `substack_verify --fresh` anyway.** A cover write should touch nothing else; that is
    a claim, and this is the cheap check that it held.
+
+9. **Post the Note: one per publication, the day it goes live.** A Substack Note is the feed's
+   short-form post. Every live post gets exactly one, announcing it. `substack_notes.py` holds
+   the state and the checks; posting happens in the browser, on the author's word.
+
+   1. **Write the piece's `note` companion** ([`COMPANIONS.md`](../../docs/COMPANIONS.md)):
+      `pieces/<slug>/note.md`, declared as `companions:` / `note: note.md` in `publish.yaml`,
+      under a header naming its form and voice (`form: note` or `form: poem`, `style: <voice>`,
+      closed by `---`). A prose Note is one to three short paragraphs (the piece's own best
+      lines, lifted verbatim, are usually right); a poem is lines and stanzas. Plain text, **no
+      URL**: the tool appends the post's public URL as the last paragraph, and the composer
+      turns that bare URL into the post's card by itself. A poem goes one paragraph per line
+      with an empty paragraph between stanzas — the Notes editor has no line-break node
+      (measured 2026-09-11); **read the first poem Note on the live feed to see whether the
+      stanza gaps survived posting**, and record what you saw in `COMPANIONS.md`.
+   2. **Show it to the author and get a yes that names the Note.** A Note is public the moment
+      Post is clicked. The yes to publish the post does not cover it: ask for both in one line
+      if that's convenient, but ask.
+   3. **Open the Notes composer** (*What's on your mind?* at the top of the Substack home feed)
+      and fill it from disk:
+
+          python3 framework/tools/substack_notes.py text <slug>
+
+      prints `paragraphs`, `sha256` and `js`. Run the `js` in the page. It refuses unless exactly
+      one **visible** composer is open and empty. Substack keeps a hidden `[role=dialog]` in the
+      DOM after the composer closes, so "the dialog" is not a selector. It returns
+      `{sha256, card, postEnabled}`: **the sha256 must equal the tool's**, `card` must be true
+      (the post's card rendered), and Post must be enabled. On any miss, stop.
+   4. **Click Post.** Never use Schedule unless the author asks for it.
+   5. **Record, then verify.** `substack_notes.py record <slug>` takes the Note's id from the
+      public feed (exactly one Note must name the post, or it writes nothing) and adds a
+      `substack_note:` block to `publish.yaml`. Then `substack_notes.py verify <slug>`. Commit
+      the manifest and `note.md` with the publication.
+
+   **The backlog: one a day.** Posts that went live before this step existed have no Note. The
+   backlog is derived, not queued: every live post with no `substack_note:` block, oldest first.
+   It is worked **one per calendar day**. `substack_notes.py next` names today's post, and exits 3
+   once today's backlog Note is recorded. A fresh publication's own Note does not use the day's
+   slot. Triggers: *"post today's note"*, *"next note"*, *"catch up on notes"*. Same steps 1–5.
+   `verify` with no slug checks every recorded Note, and flags any Note naming a post that the
+   desk has no record of as `UNRECORDED`. Record that Note; never post a second one.
 
 ### The JS-snippet path — the pane's default, and Chrome's fallback
 

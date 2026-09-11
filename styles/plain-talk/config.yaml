@@ -1,0 +1,14 @@
+# Starter voice for the `talk` form. Copy into your instance's styles/ and tune.
+form: talk              # the form this voice writes in — see docs/COMPANIONS.md
+formality: 2
+sentence_length: short-to-medium
+person: we/you
+pace_wpm: 130           # md_to_marp.py and the review page report minutes at this pace
+slide_text_max_words: 20
+bullets_max: 3
+closing: do-then-line
+contractions: yes
+avoid:
+  - reading the slide
+  - announcing the procedure
+  - more than three bullets

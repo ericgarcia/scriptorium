@@ -41,8 +41,17 @@ the corrections accumulate in `corrections.md`. A deliberate, **gated**
 `tune-style` pass distills those corrections into `style.md` — the constitution
 is never silently rewritten. See [docs/STYLES.md](docs/STYLES.md).
 
-Starter styles ship here (public, generic). Your *personal* trained voices live
-only in your instance.
+Starter styles ship here (public, generic), one per form — `plain-english` (essay),
+`plain-poem`, `plain-note`, `plain-talk`. Your *personal* trained voices live only in your
+instance, and `tools/voice_privacy.py` checks that none of their text has reached this repo.
+
+## A piece can carry companions
+
+A piece is one main text, and it may carry **companions** that go out with it: a poem posted as
+its Substack Note, the talk of the same argument. Each companion has its own **form** and its
+own **voice**, is declared under `companions:` in the piece's `publish.yaml`, and is previewed
+on the same review page as the piece. Role, form and voice are three separate things; see
+[docs/COMPANIONS.md](docs/COMPANIONS.md).
 
 ## A piece can be a talk
 

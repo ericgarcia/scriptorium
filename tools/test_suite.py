@@ -231,17 +231,19 @@ def unit_notes(tmp):
     import substack_notes as sn
     root = os.path.join(tmp, 'notesrepo')
 
-    def piece(slug, date=None, extra='', note=None):
+    def piece(slug, date=None, extra='', note=None, form='note', style='plain-note'):
         d = os.path.join(root, slug); os.makedirs(d, exist_ok=True)
         url = f'https://example.substack.com/p/{slug}'
         live = f'public_url: {url}\npublished_at: {date}   # a comment\n' if date else ''
-        open(os.path.join(d, 'publish.yaml'), 'w').write(f'title: T {slug}\n{live}{extra}')
-        if note is not None:
-            open(os.path.join(d, 'substack-note.md'), 'w').write(note.replace('URL', url))
+        comp = 'companions:\n  note: note.md\n' if note is not None else ''
+        open(os.path.join(d, 'publish.yaml'), 'w').write(f'title: T {slug}\n{live}{extra}{comp}')
+        if note is not None:          # the Note is the piece's `note` companion (docs/COMPANIONS.md)
+            open(os.path.join(d, 'note.md'), 'w').write(
+                f'form: {form}\nstyle: {style}\n# a scaffold comment\n---\n' + note.replace('URL', url))
         return d
 
     piece('a-old', '2026-08-01')
-    piece('b-mid', '2026-08-02', note='A line.\n\nURL\n')
+    piece('b-mid', '2026-08-02', note='A line.\n')
     piece('c-done', '2026-08-03',
           extra='substack_note:\n  posted_at: 2026-09-09\n  note_url: https://substack.com/@x/note/c-9\n')
     piece('colophon', '2026-08-01', extra='substack_type: page\n')
@@ -271,8 +273,20 @@ def unit_notes(tmp):
           sn.note_hash(paras) == hashlib.sha256('A line.\n\nhttps://example.substack.com/p/b-mid'.encode()).hexdigest())
     bad = piece('f-bad', '2026-08-04', note='A *marked* line.\n\nhttps://elsewhere.example/p/x\n')
     _, probs = sn.read_note(bad, 'https://example.substack.com/p/f-bad')
-    check('notes: the URL must be the last paragraph', any('last paragraph' in p for p in probs), str(probs))
+    check('notes: a Note carries no URL of its own — the tool adds the post link',
+          any('URL' in p for p in probs), str(probs))
     check('notes: markdown is refused in a plain-text Note', any('markdown' in p for p in probs), str(probs))
+    check('notes: the post URL is appended as the last paragraph',
+          paras[-1] == 'https://example.substack.com/p/b-mid', str(paras))
+    poem = piece('g-poem', '2026-08-05', note='one\ntwo\n\nthree\n', form='poem', style='plain-poem')
+    pp, pprobs = sn.read_note(poem, 'https://example.substack.com/p/g-poem')
+    check('notes: a poem goes one paragraph per line, an empty one between stanzas (2026-09-11)',
+          pp == ['one', 'two', '', 'three', '', 'https://example.substack.com/p/g-poem'], str(pp or pprobs))
+    check('notes: an empty paragraph is sent as an empty ProseMirror paragraph, not a hard break',
+          '{"type": "paragraph"}' in sn.composer_js(pp, 'T') and 'hardBreak' not in sn.composer_js(pp, 'T'))
+    wrong = piece('h-wrong', '2026-08-06', note='one\n', form='poem', style='plain-note')
+    _, wp = sn.read_note(wrong, 'https://example.substack.com/p/h-wrong')
+    check('notes: a voice pointed at a form it does not write is refused', any('writes' in p for p in wp), str(wp))
 
     a = os.path.join(root, 'a-old')
     sn.record(a, '2026-09-11', 'https://substack.com/@x/note/c-11')
@@ -291,6 +305,59 @@ def unit_notes(tmp):
     check('notes: a feed match does not take a longer slug for a shorter one',
           sn.match_notes([{'slug': 'a-old', 'public_url': 'https://example.substack.com/p/a-old'}], feed)
           == {'a-old': [1]})
+
+
+# ---------------------------------------------------------------- unit: companions
+def unit_companions(tmp):
+    """A piece's companions resolve — role, form, voice, back-pointer — and the review page
+    shows them beside the piece, with findings anchorable in a Note (2026-09-11)."""
+    print("\n-- companions -------------------------------------------------------")
+    import companions as cp
+    import review_artifact as ra
+    root = os.path.join(tmp, 'compdesk'); pieces = os.path.join(root, 'pieces')
+    os.makedirs(os.path.join(root, 'styles', 'v-poem'))
+    open(os.path.join(root, 'styles', 'v-poem', 'config.yaml'), 'w').write('form: poem\n')
+
+    def mk(slug, manifest='', draft='*scaffold*\n---\n\nThe body.\n', files=None):
+        d = os.path.join(pieces, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write('title: T\nsubtitle: S\n' + manifest)
+        open(os.path.join(d, 'draft.md'), 'w').write(draft)
+        for k, v in (files or {}).items():
+            open(os.path.join(d, k), 'w').write(v)
+        return d
+
+    poem = 'form: poem\nstyle: v-poem\n# scaffold\n---\nline one\nline two\n\nline three\n'
+    a = mk('a-essay', 'companions:\n  note: note.md\n  talk: b-talk\n', files={'note.md': poem})
+    b = mk('b-talk', draft='*d*\n---\n## I. Start\n<!-- slide: Hi -->\n> Shown.\n\nSaid aloud here.\n',
+           files={'talk.yaml': 'title: The Talk\nduration_min: 5\n',
+                  'README.md': '# The Talk\n**Style:** [plain-talk](../../framework/styles/plain-talk/style.md)\n'})
+    probs = [p for _s, p in cp.check(pieces)]
+    check('companions: a talk that does not point back at its essay is refused',
+          any('companion_of' in p for p in probs), str(probs))
+    open(os.path.join(b, 'talk.yaml'), 'a').write('companion_of: a-essay\n')
+    check('companions: a poem Note and a talk resolve cleanly', not cp.check(pieces), str(cp.check(pieces)))
+    check('companions: a poem keeps its lines and stanzas',
+          cp.paragraphs(cp.companion(a, 'note')) == [['line one', 'line two'], ['line three']])
+    open(os.path.join(a, 'note.md'), 'w').write(poem.replace('v-poem', 'plain-note'))
+    check('companions: a voice pointed at a form it does not write is refused',
+          any('writes' in p for _s, p in cp.check(pieces)))
+    open(os.path.join(a, 'note.md'), 'w').write(poem)
+    legacy = os.path.join(tmp, 'compdesk-legacy', 'pieces')          # built apart, never deleted
+    os.makedirs(os.path.join(legacy, 'old-piece'))
+    open(os.path.join(legacy, 'old-piece', 'substack-note.md'), 'w').write('old\n')
+    check('companions: a legacy substack-note.md is refused', any('legacy' in p for _s, p in cp.check(legacy)))
+
+    page = ra.build(a, {})
+    check('review page: the Note renders beside the piece with its lines kept',
+          'id="c-note"' in page and 'line one<br>line two' in page)
+    check('review page: the talk renders with its script', 'id="c-talk"' in page and 'Said aloud here.' in page)
+    f = [{'anchor': 'line three', 'now': 'line 3', 'title': 'a poem finding'}]
+    page2 = ra.build(a, {'findings': [dict(x) for x in f]})
+    check('review page: a finding can anchor in the Note', 'hl-open' in page2 and 'line 3' in page2)
+    n, errs = ra.apply_findings(a, [dict(x) for x in f])
+    body = open(os.path.join(a, 'note.md')).read()
+    check('review --apply: a Note finding is written into note.md, header and lines intact',
+          n == 1 and not errs and body.startswith('form: poem') and 'line two\n\nline 3' in body, str(errs))
 
 
 # ---------------------------------------------------------------- unit: scripture check
@@ -2739,6 +2806,31 @@ def corpus_publications():
           + ' — every manifest names one, and owns its outlets', not problems, '; '.join(problems[:5]))
 
 
+def corpus_companions():
+    """Every companion the corpus declares resolves — `companions.py check` (2026-09-11)."""
+    print("\n-- corpus: companions resolve -----------------------------------------")
+    import companions as cp
+    found = cp.check(PIECES)
+    check('corpus companions: every declared companion resolves (role, form, voice, back-pointer)',
+          not found, '; '.join(f'{s}: {p}' for s, p in found[:4]))
+
+
+def corpus_voice_privacy():
+    """No private voice's text has reached the framework — `voice_privacy.py` (2026-09-11)."""
+    print("\n-- corpus: the instance's voices stay out of the framework ------------")
+    import voice_privacy as vp, io, contextlib
+    root = os.path.dirname(PIECES)
+    if not vp.private_voices(root):
+        skip('voice privacy', 'no instance voices — the framework alone has none to leak')
+        return
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = vp.main(['--instance', root])
+    lines = buf.getvalue().strip().splitlines()
+    check('voice privacy: no new run of a private voice anywhere in the framework', rc == 0,
+          ' | '.join(lines[:3]))
+
+
 def corpus_tags():
     """Every tag on every piece is in its publication's vocabulary — `tags.py check`."""
     print("\n-- corpus: tags are all in their vocabulary --------------------------")
@@ -2993,6 +3085,7 @@ def main():
         unit_outlet_content(tmp)
         unit_commonmark(tmp)
         unit_notes(tmp)
+        unit_companions(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)
         unit_three_way()
@@ -3019,6 +3112,8 @@ def main():
         corpus_headers()
         corpus_manifests()
         corpus_publications()
+        corpus_companions()
+        corpus_voice_privacy()
         corpus_tags()
         corpus_baselines()
         corpus_commonmark()

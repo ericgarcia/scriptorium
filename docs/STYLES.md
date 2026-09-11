@@ -124,8 +124,10 @@ Rules of thumb:
 
 - **Name the family by the publication, the voice by its job** — `being-good-journal`,
   `being-good-essay`. Siblings read as siblings.
-- **A piece picks exactly one.** Never blend two voices in a single draft; if a piece
-  seems to need both, it's probably two pieces.
+- **Each text picks exactly one.** Never blend two voices in a single text; if a piece
+  seems to need both, it's probably two pieces — or a piece and a **companion** (a Note, a
+  talk), which is a text of its own and names its own voice. See
+  [COMPANIONS.md](COMPANIONS.md).
 - **Cross-link the constitutions.** Each voice's `style.md` says what it shares with
   its siblings and where it deliberately parts from them, so the contrast is a
   decision, not an accident.
@@ -149,9 +151,30 @@ This mirrors how a rule of life is edited: deliberately, with evidence, not in
 the heat of a single session. It keeps a style stable enough to trust and honest
 about why it says what it says.
 
+## A voice writes a form
+
+Every text has a **form** — `essay`, `poem`, `note`, `talk` — and a voice says which it writes:
+`form:` in `config.yaml` (`form: poem`, or `form: [essay, note]` for a voice that also writes its
+pieces' Notes; no key means `essay`). The forms are the framework's and are defined in
+[COMPANIONS.md](COMPANIONS.md); `companions.py check` fails a voice pointed at a form it does not
+write.
+
 ## Starter vs. trained styles
 
-The framework ships **starter** styles — generic, clean, safe to share
-(`plain-english`, …). You copy one into your instance and tune it into *your*
-voice. Trained styles carry your corrections and your exemplars; they stay
-private. Don't push a personal voice back into the public framework.
+The framework ships **starter** styles — generic, clean, safe to share — **one per form**:
+
+| Starter | Form |
+|---|---|
+| `plain-english` | essay |
+| `plain-poem` | poem |
+| `plain-note` | note |
+| `plain-talk` | talk |
+
+You copy one into your instance and tune it into *your* voice; say where it came from with
+`seeded_from: <starter>` in its `config.yaml`. Trained styles carry your corrections and your
+exemplars; they stay private. Don't push a personal voice back into the public framework —
+**`tools/voice_privacy.py` checks that you haven't** whenever an instance is present: no framework
+style shares a name with one of yours, and no run of twelve words from any of your voices appears
+anywhere in the framework (runs from the template and from a declared seed excepted). Existing
+overlaps are baselined as hashes in your instance (`styles/.privacy-baseline.json`, `--accept`),
+so the check fails on *new* leaks.

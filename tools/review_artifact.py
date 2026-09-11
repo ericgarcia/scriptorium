@@ -25,7 +25,9 @@ USAGE
 
   Everything the page shows about the PIECE is read from the piece: title and
   subtitle from publish.yaml, prose and notes from draft.md, the hero from
-  assets/. Everything it shows about the REVIEW comes from --facts (see FACTS
+  assets/, and its COMPANIONS (docs/COMPANIONS.md) after the notes — a Note as it
+  will sit in the feed, a talk as its minutes and script. A finding may anchor in
+  a Note's text, and --apply writes it into the Note's file. Everything it shows about the REVIEW comes from --facts (see FACTS
   below); with no facts file the page still renders, and the review strip simply
   reports what can be counted.
 
@@ -118,7 +120,7 @@ def manifest(piece_dir):
     out, path = {}, os.path.join(piece_dir, 'publish.yaml')
     if os.path.exists(path):
         for line in open(path):
-            m = re.match(r'\s*(title|subtitle|public_url|post_url)\s*:\s*(.+)', line)
+            m = re.match(r'\s*(title|subtitle|public_url|post_url|publication)\s*:\s*(.+)', line)
             if m and m.group(1) not in out:
                 # strip a trailing inline comment, however much space precedes it —
                 # `title: X   # settled` and `title: X # settled` both leak otherwise,
@@ -259,26 +261,87 @@ def apply_findings(piece_dir, findings, width=100):
     parts = re.split(r'(\n[ \t]*\n)', body)        # keep the separators, rejoin exactly
     errs, touched = [], set()
 
+    # A finding may land in the piece's Note companion instead (docs/COMPANIONS.md). Same
+    # contract: exact substitution, unique across the draft AND the Note, all or nothing.
+    # The Note is never re-wrapped: in a poem the line break is text.
+    note_path, note_head, note_body = None, '', ''
+    for c in piece_companions(piece_dir):
+        if c['role'] == 'note' and c['path'] and os.path.exists(c['path']):
+            note_path = c['path']
+            note_head, _, note_body = open(note_path, encoding='utf-8').read().partition('\n---\n')
+    note_touched = False
+
     for i, f in enumerate(findings, 1):
         a = ' '.join((f.get('anchor') or '').split())
         pat = re.compile(r'\s+'.join(re.escape(w) for w in a.split()))
+        now = ' '.join(str(f['now']).split())
         hits = [(j, m) for j, b in enumerate(parts) if j % 2 == 0
                 for m in [pat.search(b)] if m]
         total = sum(len(pat.findall(parts[j])) for j, _ in hits)
-        if not hits:
-            errs.append(f'finding {i}: anchor not in draft.md — {a[:70]!r}'); continue
-        if total > 1:
-            errs.append(f'finding {i}: anchor appears {total} times in draft.md'); continue
+        in_note = len(pat.findall(note_body)) if note_path else 0
+        if not hits and not in_note:
+            errs.append(f'finding {i}: anchor not in draft.md or the Note — {a[:70]!r}'); continue
+        if total + in_note > 1:
+            errs.append(f'finding {i}: anchor appears {total + in_note} times in draft.md and the Note'); continue
+        if in_note:
+            m = pat.search(note_body)
+            if '\n' in m.group(0):
+                errs.append(f'finding {i}: anchor crosses a line break in the Note — anchor within one line')
+                continue
+            note_body = note_body[:m.start()] + now + note_body[m.end():]
+            note_touched = True
+            continue
         j, m = hits[0]
-        parts[j] = parts[j][:m.start()] + ' '.join(str(f['now']).split()) + parts[j][m.end():]
+        parts[j] = parts[j][:m.start()] + now + parts[j][m.end():]
         touched.add(j)
     if errs:
         return 0, errs
 
     for j in sorted(touched):                      # re-wrap only what changed
         parts[j] = rewrap(parts[j], width)
-    open(path, 'w', encoding='utf-8').write(head + sep + ''.join(parts))
+    if touched:
+        open(path, 'w', encoding='utf-8').write(head + sep + ''.join(parts))
+    if note_touched:
+        open(note_path, 'w', encoding='utf-8').write(note_head + '\n---\n' + note_body)
     return len(findings), []
+
+
+def piece_companions(piece_dir):
+    """The piece's companions (docs/COMPANIONS.md), each with its text split the form's way."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import companions as cmp
+    except ImportError:
+        return []
+    out = []
+    for c in cmp.companions(piece_dir):
+        c['blocks'] = cmp.paragraphs(c) if c['form'] in cmp.FORMS and c['body'].strip() else []
+        c['problems'] = cmp.problems_of(c, piece_dir)
+        out.append(c)
+    return out
+
+
+def byline(piece_dir, man):
+    """The publication's byline, for the Note's feed mock. '' when the desk has no registry."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(piece_dir))),
+                        'publishing', 'publications.yaml')
+    try:
+        import yaml
+        pubs = (yaml.safe_load(open(path, encoding='utf-8')) or {}).get('publications', {})
+        return (pubs.get(man.get('publication', '')) or {}).get('byline', '')
+    except Exception:                               # no registry, no yaml: the mock goes unsigned
+        return ''
+
+
+def voice_pace(style, piece_dir):
+    """A talk voice's `pace_wpm`, else the house 130."""
+    try:
+        import companions as cmp
+        _forms, d = cmp.style_form(style, os.path.dirname(os.path.abspath(piece_dir)))
+        m = re.search(r'^pace_wpm\s*:\s*(\d+)', open(os.path.join(d, 'config.yaml')).read(), re.M)
+        return int(m.group(1)) if m else 130
+    except Exception:
+        return 130
 
 
 LINK = re.compile(r'\[[^\]]*\]\([^)\s]*\)')
@@ -496,6 +559,44 @@ a.sib:hover{border-bottom-color:var(--accent)}
 .back{color:var(--accent);text-decoration:none;font-size:13px}
 :target{background:var(--accent-soft)}
 a:focus-visible,.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* --- companions: what goes out with the piece (docs/COMPANIONS.md) ------------ */
+.comps{margin:72px 0 0;border-top:1px solid var(--rule);padding-top:26px}
+.comps>h2{font-family:var(--sans);font-size:12px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 24px}
+.comp{margin:0 0 52px;max-width:66ch}
+.comp>header{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:0 0 14px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.comp>header span{color:var(--accent);font-weight:500}
+.comp>header b{font-weight:500;color:var(--ink)}
+.comp>header em{font-style:normal}
+.comp .slot{margin:0 0 12px;padding:10px 14px;text-transform:none;letter-spacing:0;text-align:left}
+.feed{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:18px 20px}
+.feed .by{font-family:var(--sans);font-size:14px;font-weight:600;margin:0 0 12px}
+.feed .by em{font-weight:400;font-style:normal;color:var(--muted)}
+.feed .nb p{font-family:var(--sans);font-size:16px;line-height:1.6;margin:0 0 14px}
+.pcard{display:grid;grid-template-columns:minmax(0,1fr) auto;border:1px solid var(--rule);
+  border-radius:8px;overflow:hidden;margin-top:6px}
+.pcard>div{padding:12px 14px;font-family:var(--sans);min-width:0}
+.pcard b{display:block;font-size:15px;line-height:1.3}
+.pcard span{display:block;font-size:13px;color:var(--muted);margin-top:4px;line-height:1.45}
+.pcard em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  margin-top:8px;letter-spacing:.06em}
+.pcard img{width:132px;height:100%;object-fit:cover;display:block}
+.comp .meta{font-family:var(--sans);font-size:13px;line-height:1.55;color:var(--muted);margin:10px 0 0}
+.comp .ct{font-weight:600;font-size:clamp(21px,2.6vw,26px);line-height:1.2;margin:0}
+.tmv{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:14px;margin:16px 0 0}
+.tmv th{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  font-weight:500;color:var(--muted);text-align:left}
+.tmv td,.tmv th{border-bottom:1px solid var(--rule);padding:7px 8px 7px 0}
+.tmv .n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.comp details{margin-top:16px}
+.comp summary{cursor:pointer;font-family:var(--sans);font-size:14px;color:var(--accent)}
+.comp h4{font-family:var(--sans);font-size:15px;font-weight:600;margin:26px 0 6px}
+.sl{border-left:2px solid var(--rule);padding:4px 0 4px 14px;margin:14px 0}
+.sl>b{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--accent);font-weight:500}
+.sl .on{font-family:var(--sans);font-size:14px;font-style:italic;margin:6px 0}
+.sl p{font-size:16px;line-height:1.62;margin:6px 0}
 @media (max-width:720px){
   .fidx a{grid-template-columns:26px 1fr;gap:4px 10px}
   .fidx a>em.sev{grid-column:2}
@@ -622,7 +723,15 @@ def build(piece_dir, facts):
     mv_h = [split_blocks(md) for _, md in movements]
     note_h = {k: {'q': False, 'kind': 'note', 'cards': [], 'marks': [],
                   'text': ' '.join(defs[k].split())} for k in order}
-    holders = lead_h + [h for lst in mv_h for h in lst] + [note_h[k] for k in order]
+    # --- companions: the texts that go out with the piece (docs/COMPANIONS.md) ---
+    # The Note's lines are holders like any paragraph, so a finding anchors in the poem
+    # exactly as it does in the prose — one holder per line, because a line break is text.
+    comps = piece_companions(piece_dir)
+    note_lines = next(([[{'q': False, 'kind': 'comp', 'cards': [], 'marks': [], 'text': ln}
+                         for ln in block] for block in c['blocks']]
+                       for c in comps if c['role'] == 'note'), [])
+    holders = (lead_h + [h for lst in mv_h for h in lst] + [note_h[k] for k in order]
+               + [h for st in note_lines for h in st])
     errs = place(findings, holders)
     if errs:
         print('review_artifact: findings did not anchor —', file=sys.stderr)
@@ -676,6 +785,8 @@ def build(piece_dir, facts):
     strip = (cell('Body words', body_words, prior.get('words'))
              + cell('Movements', len(movements), prior.get('movements'))
              + cell('Footnotes', len(order), prior.get('notes')))
+    if comps:
+        strip += cell('Companions', len(comps), prior.get('companions'))
 
     gates = ''.join(f'<span><b>{html.escape(k)}</b> {html.escape(v)}</span>'
                     for k, v in facts.get('gates', []))
@@ -716,6 +827,88 @@ def build(piece_dir, facts):
         f'{"".join(card(j) for j in note_h[k]["cards"])}</div></li>'
         for k in order)
 
+    # --- companions, rendered the way each will be met --------------------------
+    def comp_head(c, label):
+        probs = ''.join(f'<div class="slot">{html.escape(p)}</div>' for p in c.get('problems', []))
+        return (f'<header><span>{label}</span><b>{html.escape(c["form"] or "no form")}</b>'
+                f'<em>{html.escape(c["style"] or "no voice")}</em></header>{probs}')
+
+    def thumb(src):
+        b64, _why = embed_file(piece_dir, imgmap.get(src, src), width=320)
+        return f'<img src="data:image/jpeg;base64,{b64}" alt="">' if b64 else ''
+
+    def render_note(c):
+        keep = c['form'] == 'poem'
+        paras = ''.join('<p>' + ('<br>' if keep else ' ').join(
+            demark(inline(h['text'], num, notes=False)) for h in st) + '</p>' for st in note_lines)
+        cards = ''.join(card(i) for st in note_lines for h in st for i in h['cards'])
+        n = sum(len(st) for st in note_lines)
+        host = re.sub(r'^https?://([^/]+).*$', r'\1', man.get('public_url', '')) or 'not yet live'
+        pcard = (f'<div class="pcard"><div><b>{html.escape(man.get("title", ""))}</b>'
+                 f'<span>{html.escape(man.get("subtitle", ""))}</span><em>{html.escape(host)}</em></div>'
+                 f'{thumb(hero_h["src"]) if hero_h else ""}</div>')
+        count = f'{n} line{"s" if n != 1 else ""}' if keep else f'{words(c["body"]):,} words'
+        return (f'<article class="comp" id="c-note">{comp_head(c, "Note")}'
+                f'<div class="feed"><div class="by">{html.escape(byline(piece_dir, man) or "Substack")}'
+                f' <em>&middot; Substack Note</em></div><div class="nb">{paras}</div>{pcard}</div>'
+                f'<p class="meta">{count} &middot; the post&rsquo;s link is added when the Note is '
+                f'posted, and the feed turns it into the card</p>{cards}</article>'), count
+
+    def render_talk(c):
+        import md_to_marp as mm
+        tdir = c['path']
+        tman = mm.read_manifest(os.path.join(tdir, 'talk.yaml'))
+        dpath = os.path.join(tdir, 'draft.md')
+        slides = mm.parse(open(dpath, encoding='utf-8').read()) if os.path.exists(dpath) else []
+        per = mm.per_movement(slides, os.path.join(tdir, 'outline.md'))
+        pace = voice_pace(c['style'], piece_dir)
+        total = sum(w for _, w, _ in per)
+        rows = ''.join(f'<tr><td>{html.escape(t)}</td><td class="n">{w:,}</td>'
+                       f'<td class="n">{w / pace:.1f}</td><td class="n">{"" if b is None else f"{b:g}"}</td></tr>'
+                       for t, w, b in per)
+        table = (f'<table class="tmv"><tr><th>Movement</th><th class="n">spoken words</th>'
+                 f'<th class="n">min at {pace} wpm</th><th class="n">outline min</th></tr>{rows}'
+                 f'<tr><td><b>Total</b></td><td class="n"><b>{total:,}</b></td>'
+                 f'<td class="n"><b>{total / pace:.1f}</b></td>'
+                 f'<td class="n">{html.escape(tman.get("duration_min", ""))}</td></tr></table>')
+        script = []
+        for s in slides:
+            if s['kind'] == 'section':
+                script.append(f'<h4>{html.escape(s["title"])}</h4>')
+                continue
+            on = []
+            for l in s['on']:
+                fm = mm.FIG_RE.match(l.strip())
+                alt = fm.group(1) if fm else ''
+                on.append(f'<div class="on">figure &mdash; {html.escape(alt[:180])}{"&hellip;" if len(alt) > 180 else ""}</div>'
+                          if fm else f'<div class="on">{inline(l.lstrip("> ").strip(), num, notes=False)}</div>')
+            ps = ''.join(f'<p>{inline(p, num, notes=False)}</p>' for p in s['notes'])
+            script.append(f'<div class="sl"><b>{html.escape(s["title"] or "slide")}</b>{"".join(on)}{ps}</div>')
+        live = tman.get('public_url', '')
+        bits = [html.escape(tman.get('subtitle', '')), f'{html.escape(tman.get("duration_min", "?"))} min planned',
+                f'<a class="sib" href="{html.escape(live)}" target="_blank" rel="noopener">{html.escape(live)}</a>'
+                if live else 'no public page yet']
+        nslides = sum(1 for s in slides if s['kind'] == 'slide')
+        return (f'<article class="comp" id="c-talk">{comp_head(c, "Talk")}'
+                f'<h3 class="ct">{html.escape(tman.get("title", c["target"]))}</h3>'
+                f'<p class="meta">{" &middot; ".join(b for b in bits if b)}</p>{table}'
+                f'<details><summary>The script, and what the room sees &mdash; {nslides} slides</summary>'
+                f'{"".join(script)}</details><p class="meta">The talk has its own review page: '
+                f'<code>review_artifact.py pieces/{html.escape(c["target"])}</code></p></article>'), f'~{total / pace:.0f} min'
+
+    comp_html = []
+    for c in comps:
+        render = {'note': render_note, 'talk': render_talk}.get(c['role'])
+        if not render:
+            continue
+        block, count = render(c)
+        comp_html.append(block)
+        toc.append(f'<a href="#c-{c["role"]}"><span>{c["role"][0].upper()}</span>'
+                   f'<span class="tt">{c["role"].title()} &mdash; {html.escape(c["form"] or "?")}, '
+                   f'{html.escape(c["style"] or "no voice")}</span><em>{count}</em></a>')
+    comps_blk = (f'<section class="comps" id="companions"><h2>Goes out with it</h2>'
+                 f'{"".join(comp_html)}</section>') if comp_html else ''
+
     # The page is no longer a faithful rendering of draft.md once a mark shows a
     # replacement. Every one of them is highlighted and numbered, so it is not a silent
     # edit — but the stamp says so, because an author must never have to wonder whether
@@ -747,6 +940,7 @@ def build(piece_dir, facts):
 </header>
 {''.join(essay)}
 <section class="notes"><h2>Notes</h2><ol>{notes}</ol></section>
+{comps_blk}
 </div>
 """
 

@@ -37,6 +37,12 @@ the loop — write freely, revise later, let git remember old versions.
    is where it gets answered while it is still cheap. (Eric, 2026-09-09: *"the skill for
    creating a piece should define which outlets it will go to and confirm with the user.
    we should not silently select one."*)
+1b. **A companion is drafted like a piece, in its own voice.** When the ask is the Note, the
+   poem, or the talk that goes out *with* a piece ([`COMPANIONS.md`](../../docs/COMPANIONS.md)),
+   the target style is the one the companion names (`style:` in a `note.md` header; the talk's
+   README), not the piece's — and that voice must write the companion's form. Read the piece's
+   `draft.md` first: a companion is made *from* the piece, and its facts are the piece's. Write
+   into the companion's file, never into `draft.md`.
 2. Load the style as steering, in this order:
    - `styles/<style>/style.md` — the constitution (voice, do/don't).
    - `styles/<style>/config.yaml` — mechanical knobs. Honor them literally

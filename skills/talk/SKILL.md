@@ -70,6 +70,12 @@ not on disk, and on a slide with no script over it.
    movement its minutes, at the style's words-per-minute, and not more. Read `notes.md` for
    the citations; a talk cites less than an essay and must be exact where it does.
 4. Read `talk.yaml`. Duration, venue and audience live there, not in the prose.
+5. **If the talk is the companion of an essay** — the same argument, written for a room — it
+   stays its own piece, and the two point at each other: `companion_of: <essay slug>` in
+   `talk.yaml`, and `talk: <talk slug>` under `companions:` in the essay's `publish.yaml`
+   ([`COMPANIONS.md`](../../docs/COMPANIONS.md)). The essay's review page then carries the talk's
+   minutes and script. The two are different texts in different forms and voices: never paste
+   one into the other; reason from the same outline.
 
 ## Drafting
 

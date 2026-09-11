@@ -29,9 +29,15 @@ A style is structured context that steers a draft — never model weights.
   as steering.
 - **A publication can carry more than one voice.** A book/publication may name
   several styles — e.g. a witness voice that testifies and an argued-essay voice
-  that reasons. Each piece picks exactly one; never blend them in a draft. Name
+  that reasons. Each text picks exactly one; never blend them in a draft. Name
   siblings by a shared prefix (`being-good`, `being-good-essay`); the book README
   lists the voices and says when to use each. See `docs/STYLES.md`.
+- **A piece can carry companions** — the poem posted as its Note, the talk of the same
+  argument. Each is its own text, in its own **form** (`essay`, `poem`, `note`, `talk`) and its
+  own voice, declared under `companions:` in the piece's `publish.yaml` and previewed on the
+  piece's one review page. `tools/companions.py check`; see `docs/COMPANIONS.md`.
+- **Your voices stay in your instance.** The framework ships generic starters, one per form;
+  `tools/voice_privacy.py` fails on any run of your voices' text that reaches the framework.
 - **Corrections are append-only.** When you change Claude's wording, the *why*
   goes in `styles/<name>/corrections.md`. Never edit a past correction.
 - **The constitution changes only during a `tune-style` pass.** Don't rewrite

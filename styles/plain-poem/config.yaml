@@ -1,0 +1,16 @@
+# Starter voice for the `poem` form. Copy into your instance's styles/ and tune.
+form: poem              # see docs/COMPANIONS.md for the forms
+verse: free             # rhyme and meter optional, never required
+line: breath-or-beat    # end the line at a natural pause, or to delay the next word
+stanza: 1-5 lines
+length: no floor        # stop when it lands
+title: plain-noun
+capitalization: sentence-case
+person: first
+closing: smallest-true-sentence
+contractions: yes
+avoid:
+  - restating the source piece's argument
+  - poetic diction (thee, ere, O, inverted syntax)
+  - elevated comparisons where a household one would do
+  - imperatives to the reader

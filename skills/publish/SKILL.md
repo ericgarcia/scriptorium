@@ -78,12 +78,20 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   ```
   python3 framework/tools/substack_account.py route <outlet>   # the pane (primary), or which Chrome browser
   #   there, on any *.substack.com page (the editor's host is fine), run the snippet it prints
-  python3 framework/tools/substack_account.py check <outlet> --handle <what it returned> --surface pane|chrome
+  python3 framework/tools/substack_account.py check <outlet> --surface pane|chrome --result '<its JSON, verbatim>'
   ```
 
   **Exit 5 is a refusal: stop** — signed in as the wrong account. Do not compose, re-sync or click
   anything there, and never switch the pane to fix it. **Exit 4** means you checked this outlet in
-  the wrong browser. Exit 3 is signed out: the author signs in.
+  the wrong browser. Exit 3 is signed out (a 401/403): the author signs in. **Exit 7** means the
+  answer settles nothing — not the snippet's JSON, read on a page that is neither the outlet's nor
+  Substack's, or another HTTP status: run it again on the right page, and do not send the author to
+  sign in. Pass the snippet's answer as-is; never type a handle in.
+
+  **Reaching the Chrome browser:** `list_connected_browsers`, then `select_browser` the one named
+  *exactly* as `chrome_browser` says (`route` prints the steps). If it isn't listed, `switch_browser`
+  and give it exactly that name at the Connect prompt. Never pick one by guessing from the list, and
+  ask the author before driving a browser.
 - **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
   *Requirements* in the framework README for install and troubleshooting. In short: extension
   **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or

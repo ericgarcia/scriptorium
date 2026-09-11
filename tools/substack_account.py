@@ -35,18 +35,30 @@ CONFIG (instance-side, publishing/outlets.yaml; the framework holds no handles)
 
   A Substack outlet is one whose `reader_base` is on `*.substack.com`, or that says
   `platform: substack` (a custom domain). With only one Substack outlet it is the primary without
-  saying so. `account_handle` falls back to `notes_handle`, the same person.
+  saying so. `account_handle` is REQUIRED to write: `notes_handle` names the same person today,
+  but it is a Notes-feed display setting, never a write permission.
 
 USAGE
     substack_account.py route <outlet>          # its surface (pane | chrome + browser), account, snippet
     substack_account.py primary                 # the primary, and where every Substack outlet runs
     substack_account.py primary <outlet>        # make <outlet> the primary (edits outlets.yaml)
-    substack_account.py check <outlet> --handle <h> [--surface pane|chrome]
+    substack_account.py check <outlet> --surface pane|chrome --result '<the snippet's JSON>'
     substack_account.py snippet
 
   Run the snippet on any `*.substack.com` page of that surface — the publication's own host, where
   the editor lives, is fine. It must be SAME-ORIGIN: a fetch from a publication host to
   substack.com fails in the pane (measured), so the snippet uses a relative path.
+
+  `check` takes the snippet's answer VERBATIM, never a handle typed in: a typed handle can pass
+  without the snippet ever running. The answer carries its origin and HTTP status, so `check` also
+  refuses one read on a page that is neither the outlet's own nor Substack's, and treats only a
+  401/403 as signed out — a 404 or 5xx says nothing about who is signed in.
+
+  FINDING THE CHROME BROWSER.  `chrome_browser` is the name the browser was given at Claude in
+  Chrome's Connect prompt — until someone names it, list_connected_browsers shows "Browser 1/2/3".
+  So: list_connected_browsers; select_browser the one named EXACTLY as outlets.yaml says; if it is
+  not there, switch_browser and give it exactly that name. Never pick one by guessing from the
+  list, and ask the author before driving a browser.
 
 EXIT
   0  ok — signed in as the outlet's account, on the outlet's surface (or: primary changed)
@@ -54,8 +66,11 @@ EXIT
   3  signed out — the author signs in (automation never enters credentials)
   4  checked on the wrong surface — this outlet runs in the other browser
   5  signed in as SOMEONE ELSE — stop; do not write here, and do not switch this surface
-  6  misconfigured — no account declared, several Substack outlets and no primary, a non-primary
+  6  misconfigured — no account_handle, several Substack outlets and no primary, a non-primary
      with no chrome_browser, or a demotion that would leave an outlet nowhere to run
+  7  the answer settles nothing — not the snippet's JSON, read on a page that is neither the
+     outlet's nor Substack's, or an HTTP status other than 401/403. Run the snippet again on the
+     right page; do NOT send the author off to sign in
 """
 import argparse
 import json
@@ -79,6 +94,9 @@ SNIPPET = (
     "return {signed_in: true, handle: j.handle, name: j.name, origin: location.origin}; })()"
 )
 PRIMARY_KEY = 'substack_primary'
+# The only HTTP answers that mean nobody is signed in. Anything else — a 404, a 5xx — says nothing
+# about who is, and must not send the author off to sign in for nothing.
+SIGNED_OUT = (401, 403)
 
 
 def load(path):
@@ -97,9 +115,31 @@ def norm(handle):
 
 
 def expected(spec):
-    """The handle allowed to write to this outlet: `account_handle`, else `notes_handle`."""
+    """The handle allowed to WRITE to this outlet: `account_handle`, and only that. `notes_handle`
+    names the same person today, but it is a display setting and does not authorise a write."""
+    return norm((spec or {}).get('account_handle')) or None
+
+
+def shown(spec):
+    """For display only: `account_handle`, else `notes_handle`."""
     spec = spec or {}
     return norm(spec.get('account_handle') or spec.get('notes_handle')) or None
+
+
+def origin_ok(spec, origin):
+    """Is an answer read on `origin` about this outlet's account? Its own reader host, or any
+    *.substack.com page — one login cookie covers them all."""
+    host = urlparse(str(origin or '')).hostname or ''
+    own = urlparse(str((spec or {}).get('reader_base') or '')).hostname or ''
+    return bool(host) and (host == own or host == 'substack.com' or host.endswith('.substack.com'))
+
+
+def browser_steps(chrome_browser):
+    """How to reach a named Claude in Chrome browser without guessing (see FINDING THE CHROME BROWSER)."""
+    n = repr(chrome_browser)
+    return [f"list_connected_browsers — find the browser named exactly {n}",
+            f"select_browser {n} (ask the author before driving it) — never pick one by guessing from the list",
+            f"not listed? switch_browser, and at the Connect prompt name it exactly {n}, as outlets.yaml does"]
 
 
 def is_substack(spec):
@@ -142,7 +182,7 @@ def route(doc, name):
     r = {'outlet': name, 'account': expected(spec), 'primary': is_primary,
          'surface': 'pane' if is_primary else 'chrome',
          'chrome_browser': (spec or {}).get('chrome_browser'),
-         'problem': None, 'snippet': SNIPPET}
+         'problem': None, 'snippet': SNIPPET, 'browser_steps': []}
     if not is_substack(spec):
         r['problem'] = f"{name} is not a Substack outlet"
     elif problem and prim is None:
@@ -150,30 +190,51 @@ def route(doc, name):
     elif not is_primary and not r['chrome_browser']:
         r['problem'] = (f"{name} is not the primary, so it opens in Claude in Chrome — but it names "
                         f"no chrome_browser. Add the browser that holds its login to outlets.yaml.")
+    if not is_primary and r['chrome_browser']:
+        r['browser_steps'] = browser_steps(r['chrome_browser'])
     return r
 
 
-def verdict(doc, name, observed, surface=None):
-    """-> (exit code, message). `observed` is the handle the snippet returned, or None;
-    `surface` is where it was read."""
+def verdict(doc, name, result, surface):
+    """-> (exit code, message). `result` is the snippet's own answer (a dict), exactly as the
+    browser returned it — never a handle typed in; `surface` is where it ran, 'pane' or 'chrome'."""
     r = route(doc, name)
     if r is None:
         return 1, f"no outlet {name!r} in the registry"
+    if surface not in ('pane', 'chrome'):
+        return 1, "say where the snippet ran: --surface pane|chrome"
     if r['problem']:
         return 6, r['problem']
+    spec = doc['outlets'][name]
     want = r['account']
     if not want:
-        return 6, (f"{name} names no account_handle — refusing rather than assuming who may "
+        why = (f" (its notes_handle @{shown(spec)} is a display setting, not a write permission)"
+               if shown(spec) else "")
+        return 6, (f"{name} names no account_handle{why} — refusing rather than assuming who may "
                    f"write there. Add one to outlets.yaml.")
     where = ("the built-in pane (it is the primary)" if r['surface'] == 'pane'
              else f"Claude in Chrome, browser {r['chrome_browser']!r}")
-    if surface and surface != r['surface']:
+    if surface != r['surface']:
         return 4, (f"STOP: {name} runs in {where}, not the {surface}. Checking or writing it here "
                    f"would use whichever account this surface holds.")
-    got = norm(observed)
+    if not isinstance(result, dict) or 'signed_in' not in result or 'origin' not in result:
+        return 7, ("that is not the snippet's answer. Run `route`'s snippet in that browser and pass "
+                   "its JSON verbatim — a handle typed in proves nothing.")
+    own = urlparse(str(spec.get('reader_base') or '')).hostname or '*.substack.com'
+    if not origin_ok(spec, result.get('origin')):
+        return 7, (f"the snippet ran on {result.get('origin')!r}, which is neither {name}'s "
+                   f"publication nor a Substack page. Run it on {own}.")
+    if not result.get('signed_in'):
+        status = result.get('status')
+        if status in SIGNED_OUT:
+            return 3, (f"signed out in {where} (HTTP {status}). {name} needs @{want}; the author "
+                       f"signs in — automation never enters credentials.")
+        return 7, (f"the profile check answered HTTP {status}, which says nothing about who is "
+                   f"signed in. Reload {own} and run the snippet again — do not ask the author to "
+                   f"sign in.")
+    got = norm(result.get('handle'))
     if not got:
-        return 3, (f"signed out in {where}. {name} needs @{want}; the author signs in — "
-                   f"automation never enters credentials.")
+        return 7, "the answer says signed in but carries no handle — run the snippet again"
     if got != want:
         return 5, (f"STOP: {where} is signed in as @{got}, and {name} needs @{want}. Do not write, "
                    f"and do not sign this surface into another account — "
@@ -233,7 +294,7 @@ def set_primary(path, name):
     for n in others:
         s = doc['outlets'][n] or {}
         msg.append(f"  {n} opens in Claude in Chrome, browser {s.get('chrome_browser')!r} — "
-                   f"it must be signed in as @{expected(s)}.")
+                   f"it must be signed in as @{expected(s) or shown(s)}.")
     msg.append("  The pane's login is shared by every session: tell anyone mid-write before you switch it.")
     return 0, "\n".join(msg)
 
@@ -256,9 +317,11 @@ def main(argv=None):
     p = sub.add_parser('route'); p.add_argument('outlet')
     p = sub.add_parser('primary'); p.add_argument('outlet', nargs='?')
     sub.add_parser('snippet')
-    p = sub.add_parser('check'); p.add_argument('outlet'); p.add_argument('--handle', default='')
-    p.add_argument('--surface', choices=('pane', 'chrome'), default=None,
+    p = sub.add_parser('check'); p.add_argument('outlet')
+    p.add_argument('--surface', choices=('pane', 'chrome'), required=True,
                    help='where the snippet ran; checking in the wrong browser is exit 4')
+    p.add_argument('--result', required=True,
+                   help="the snippet's JSON answer, verbatim ('-' reads it from stdin)")
     p.add_argument('--json', action='store_true', help='print the verdict as JSON')
     o = ap.parse_args(argv)
 
@@ -274,17 +337,26 @@ def main(argv=None):
         prim, problem = primary(doc)
         print(f"primary  {prim or '— none: ' + str(problem)}")
         for n in substack_outlets(doc):
-            print(f"  {n:24} @{expected(doc['outlets'][n]) or '?':16} {_describe(route(doc, n))}")
+            print(f"  {n:24} @{expected(doc['outlets'][n]) or '? (no account_handle)':16} "
+                  f"{_describe(route(doc, n))}")
         return 0 if prim and not any(route(doc, n)['problem'] for n in substack_outlets(doc)) else 6
     if o.cmd == 'route':
         r = route(doc, o.outlet)
         if r is None:
             print(f"no outlet {o.outlet!r} in {o.outlets}", file=sys.stderr)
             return 1
-        print(f"outlet   {r['outlet']}\naccount  @{r['account'] or '?  (none declared — check will refuse)'}\n"
-              f"surface  {_describe(r)}\nsnippet  {r['snippet']}")
+        print(f"outlet   {r['outlet']}\naccount  @{r['account'] or '?  (no account_handle — check will refuse)'}\n"
+              f"surface  {_describe(r)}")
+        for i, step in enumerate(r['browser_steps'], 1):
+            print(f"  {i}. {step}")
+        print(f"snippet  {r['snippet']}")
         return 6 if r['problem'] else 0
-    code, msg = verdict(doc, o.outlet, o.handle, o.surface)
+    raw = sys.stdin.read() if o.result == '-' else o.result
+    try:
+        result = json.loads(raw)
+    except ValueError:
+        result = None
+    code, msg = verdict(doc, o.outlet, result, o.surface)
     print(json.dumps({'code': code, 'message': msg}) if o.json else msg,
           file=sys.stdout if code == 0 else sys.stderr)
     return code

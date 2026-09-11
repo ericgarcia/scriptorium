@@ -2335,8 +2335,10 @@ def unit_prose(tmp):
 def unit_substack_account(tmp):
     """substack_account.py: with several Substack outlets ONE is primary and runs in the pane; the
     rest open in Claude in Chrome. The pane's login is one cookie store shared by every tab and
-    every session (measured 2026-09-11), so every write also proves it is on the right account."""
+    every session (measured 2026-09-11), so every write also proves it is on the right account —
+    from the snippet's own answer, never a handle typed in."""
     print("\n-- substack account: one primary in the pane, the rest in Chrome --------")
+    import json as _json
     import substack_account as sa
 
     def w(name, text):
@@ -2345,11 +2347,18 @@ def unit_substack_account(tmp):
             fh.write(text)
         return path
 
+    def said(handle=None, host='bg.substack.com', status=401):
+        """The snippet's answer, as a browser returns it."""
+        if handle is None:
+            return {'signed_in': False, 'status': status, 'origin': f'https://{host}'}
+        return {'signed_in': True, 'handle': handle, 'name': 'x', 'origin': f'https://{host}'}
+    ml = 'ml.substack.com'
+
     base = ("# a comment that must survive a primary switch\n"
             "substack_primary: bg\n"
             "outlets:\n"
             "  bg:\n    reader_base: https://bg.substack.com/p/\n    account_handle: elmuffin\n"
-            "  ml:\n    reader_base: https://ml.substack.com/p/\n    notes_handle: ericgarciaphd\n"
+            "  ml:\n    reader_base: https://ml.substack.com/p/\n    account_handle: ericgarciaphd\n"
             "    chrome_browser: eric@muffinlabs.ai\n"
             "  site:\n    reader_base: https://site.test/writings/\n")
     cfg = w('acct-outlets.yaml', base)
@@ -2359,19 +2368,46 @@ def unit_substack_account(tmp):
           sa.route(doc, 'bg')['surface'] == 'pane' and sa.route(doc, 'ml')['surface'] == 'chrome'
           and sa.route(doc, 'ml')['chrome_browser'] == 'eric@muffinlabs.ai')
     check("substack_account: the primary, in the pane, as its account, passes",
-          sa.verdict(doc, 'bg', 'elmuffin', 'pane')[0] == 0)
-    check("substack_account: a non-primary, in its browser, as its account (notes_handle), passes",
-          sa.verdict(doc, 'ml', 'ericgarciaphd', 'chrome')[0] == 0)
+          sa.verdict(doc, 'bg', said('elmuffin'), 'pane')[0] == 0)
+    check("substack_account: a non-primary, in its browser, as its account, passes",
+          sa.verdict(doc, 'ml', said('ericgarciaphd', ml), 'chrome')[0] == 0)
+    check("substack_account: any *.substack.com page answers for the account (one login cookie)",
+          sa.verdict(doc, 'bg', said('elmuffin', 'substack.com'), 'pane')[0] == 0
+          and sa.verdict(doc, 'ml', said('ericgarciaphd', 'bg.substack.com'), 'chrome')[0] == 0)
     check("substack_account: a non-primary checked in the pane is the wrong browser (exit 4)",
-          sa.verdict(doc, 'ml', 'elmuffin', 'pane')[0] == 4)
+          sa.verdict(doc, 'ml', said('elmuffin'), 'pane')[0] == 4)
     check("substack_account: signed in as someone else is a refusal (exit 5)",
-          sa.verdict(doc, 'ml', 'elmuffin', 'chrome')[0] == 5 and sa.verdict(doc, 'bg', 'ericgarciaphd', 'pane')[0] == 5)
-    check("substack_account: signed out is its own answer (exit 3)",
-          sa.verdict(doc, 'bg', None, 'pane')[0] == 3 and sa.verdict(doc, 'bg', '', 'pane')[0] == 3)
+          sa.verdict(doc, 'ml', said('elmuffin', ml), 'chrome')[0] == 5
+          and sa.verdict(doc, 'bg', said('ericgarciaphd'), 'pane')[0] == 5)
+    check("substack_account: only a 401/403 is signed out (exit 3)",
+          sa.verdict(doc, 'bg', said(status=401), 'pane')[0] == 3
+          and sa.verdict(doc, 'bg', said(status=403), 'pane')[0] == 3)
+    check("substack_account: a 404 or 5xx settles nothing — no sign-in errand (exit 7)",
+          sa.verdict(doc, 'bg', said(status=404), 'pane')[0] == 7
+          and sa.verdict(doc, 'bg', said(status=502), 'pane')[0] == 7)
+    check("substack_account: an answer read off Substack is refused (exit 7)",
+          sa.verdict(doc, 'bg', said('elmuffin', 'evil.example'), 'pane')[0] == 7
+          and sa.verdict(doc, 'bg', said('elmuffin', 'substack.com.evil.example'), 'pane')[0] == 7)
+    check("substack_account: a handle typed in instead of the snippet's answer is refused (exit 7)",
+          sa.verdict(doc, 'bg', 'elmuffin', 'pane')[0] == 7 and sa.verdict(doc, 'bg', None, 'pane')[0] == 7)
+    check("substack_account: where it ran must be said — there is no default browser",
+          sa.verdict(doc, 'bg', said('elmuffin'), None)[0] == 1)
     check("substack_account: handles compare without the @ or case",
-          sa.verdict(doc, 'bg', '@ElMuffin', 'pane')[0] == 0)
+          sa.verdict(doc, 'bg', said('@ElMuffin'), 'pane')[0] == 0)
     check("substack_account: a non-Substack outlet and an unknown one are not routed",
-          sa.verdict(doc, 'site', 'x')[0] == 6 and sa.verdict(doc, 'nope', 'x')[0] == 1)
+          sa.verdict(doc, 'site', said('x'), 'pane')[0] == 6 and sa.verdict(doc, 'nope', said('x'), 'pane')[0] == 1)
+    notes = sa.load(w('acct-notes.yaml', base.replace("    account_handle: ericgarciaphd\n",
+                                                      "    notes_handle: ericgarciaphd\n")))
+    check("substack_account: a notes_handle alone does not authorise a write (exit 6)",
+          sa.verdict(notes, 'ml', said('ericgarciaphd', ml), 'chrome')[0] == 6)
+    steps = ' '.join(sa.route(doc, 'ml')['browser_steps'])
+    check("substack_account: route spells out reaching the Chrome browser by its exact name",
+          all(k in steps for k in ('list_connected_browsers', 'select_browser', 'switch_browser',
+                                   "'eric@muffinlabs.ai'")) and sa.route(doc, 'bg')['browser_steps'] == [])
+    check("substack_account: the CLI takes the snippet's JSON verbatim",
+          sa.main(['--outlets', cfg, 'check', 'bg', '--surface', 'pane',
+                   '--result', _json.dumps(said('elmuffin'))]) == 0
+          and sa.main(['--outlets', cfg, 'check', 'bg', '--surface', 'pane', '--result', 'elmuffin']) == 7)
 
     one = sa.load(w('acct-one.yaml', "outlets:\n  bg:\n    reader_base: https://bg.substack.com/p/\n"
                                      "    account_handle: elmuffin\n"))
@@ -2379,10 +2415,10 @@ def unit_substack_account(tmp):
           sa.primary(one) == ('bg', None))
     two = sa.load(w('acct-two.yaml', base.replace("substack_primary: bg\n", "")))
     check("substack_account: several Substack outlets and no primary is refused, not guessed",
-          sa.primary(two)[0] is None and sa.verdict(two, 'bg', 'elmuffin', 'pane')[0] == 6)
+          sa.primary(two)[0] is None and sa.verdict(two, 'bg', said('elmuffin'), 'pane')[0] == 6)
     homeless = sa.load(w('acct-homeless.yaml', base.replace("    chrome_browser: eric@muffinlabs.ai\n", "")))
     check("substack_account: a non-primary with no chrome_browser has nowhere to run (exit 6)",
-          sa.verdict(homeless, 'ml', 'ericgarciaphd', 'chrome')[0] == 6)
+          sa.verdict(homeless, 'ml', said('ericgarciaphd', ml), 'chrome')[0] == 6)
 
     code, _msg = sa.set_primary(cfg, 'ml')
     check("substack_account: switching refuses to demote an outlet with no browser to go to",

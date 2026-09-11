@@ -70,9 +70,10 @@ next completed `seal`; nothing needs re-sealing on purpose.
   different URLs and both are needed.
 - **The right browser, signed in as the outlet's account.** The primary Substack outlet runs in
   the pane; every other one in Claude in Chrome, in its `chrome_browser` (`substack_account.py
-  route <outlet>`). Run its snippet there, then `check --surface pane|chrome` (see the `publish`
-  skill, *Confirm the ACCOUNT*). A push from the wrong browser or account edits a post its session
-  does not own, or fails halfway. Exit 5 or 4 is a stop, not a prompt to sign in again.
+  route <outlet>`). Run its snippet there, then `check --surface pane|chrome --result '<its JSON>'`
+  (see the `publish` skill, *Confirm the ACCOUNT*). A push from the wrong browser or account edits a
+  post its session does not own, or fails halfway. Exit 5 or 4 is a stop, not a prompt to sign in
+  again; exit 7 means run the snippet again on the right page.
 - The browser is open and **logged in** on that post's editor. Automation cannot enter
   credentials.
 - The piece has a **baseline** (`<piece>/sync-baseline.json`). If it does not, seed one

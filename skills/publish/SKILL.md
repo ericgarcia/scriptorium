@@ -475,6 +475,13 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    (below), which reads the **publication's** list rather than the repo's and is the only check
    that can see a post the desk never composed.
 
+0e. **Tags gate — a piece publishes with its tags, so ask if it has none.** Run
+   `python3 framework/tools/tags.py show <slug>`. A piece with **no tags** warns rather than
+   refuses (tags are not a correctness property of the post), but say so in chat and offer the
+   `tags` skill's Mode 2 before composing: once a piece is live, tagging it means a public edit
+   on every outlet that carries tags. A tag the vocabulary does not define is not a warning —
+   `tags.py check` fails, and `md_to_site.py` refuses to export it.
+
 ## Steps — composing the body
 
 **Two transports, and the choice is the surface, not the quality.** On the **built-in pane**
@@ -639,6 +646,21 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
 
    **Then run `substack_verify --fresh` anyway.** A cover write should touch nothing else; that is
    a claim, and this is the cheap check that it held.
+
+8b. **Put the tags on the post — after the publish click, from `/publish/home`.** The desk's tags
+   are part of the piece the author approved, so the yes to publish covers them; a post that goes
+   live untagged on Substack is missing from every `/t/<tag>` archive page it belongs on.
+
+       python3 framework/tools/substack_tags.py pieces/<slug> --live --dry-run --out tags-dry.js
+       python3 framework/tools/substack_tags.py pieces/<slug> --live --out tags.js
+       python3 framework/tools/substack_tags.py pieces/<slug> --verify
+
+   Run the dry run first and read its diff (on a fresh post: attach every tag, detach nothing),
+   then the real one, on a non-editor page — the snippet refuses the editor holding the post, the
+   same rule as the cover. Both carry a checksum of their plan; carry them with `pane_carry.py`
+   or paste them exactly as generated. `--verify` reads the public post and fails on a tag
+   missing or extra. **Tags changed later on a live piece** are the same three commands, and the
+   author's word on the tag change is the word for the sync.
 
 9. **Post the Note: one per publication, the day it goes live.** A Substack Note is the feed's
    short-form post. Every live post gets exactly one, announcing it. `substack_notes.py` holds

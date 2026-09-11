@@ -121,6 +121,12 @@ coincidence of spelling, not one tag: report the results per publication.
 
 ## Where tags go from here
 
+**When a published piece's tags change, sync the outlets that carry them** — the manifest is the
+source of record, and nothing reaches a reader until it is pushed. Substack: the three
+`substack_tags.py` commands below (dry run, `--live`, `--verify`). A site that reads the content
+store: the next bundle export and store publish (`md_to_site.py` → `bundle_pieces.py` →
+`store_publish.py`, dry run first). The author's word on the tag change is the word for both.
+
 - **The sites.** `md_to_site.py` carries each tag and its label — from the piece's own
   publication's vocabulary — into the bundle, and **refuses** (exit 8) a tag that vocabulary does
   not define. A site reads the store by outlet, and every outlet belongs to one publication, so a

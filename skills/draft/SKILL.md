@@ -37,6 +37,16 @@ the loop — write freely, revise later, let git remember old versions.
    is where it gets answered while it is still cheap. (Eric, 2026-09-09: *"the skill for
    creating a piece should define which outlets it will go to and confirm with the user.
    we should not silently select one."*)
+1c. **When the piece is NEW, settle its publication and its tags with the outlets, in the same
+   exchange.** On a desk with a publication registry (`publishing/publications.yaml`), every
+   manifest names its one publication — the outlets just proposed belong to exactly one, and the
+   book and style usually agree; propose it and, on the yes,
+   `python3 framework/tools/publications.py assign <slug> <publication>`. Then propose **one to
+   four tags** from that publication's vocabulary (`tags.py list --publication <it>`), each with a
+   line from the piece's premise, exactly as the `tags` skill's Mode 2 does — and apply only what
+   is approved. A piece can be tagged again once it is written; what this prevents is a piece
+   reaching `publish` never having been asked, which is how the desk grew a forty-piece untagged
+   backlog before tags existed. (Eric, 2026-09-11.)
 1b. **A companion is drafted like a piece, in its own voice.** When the ask is the Note, the
    poem, or the talk that goes out *with* a piece ([`COMPANIONS.md`](../../docs/COMPANIONS.md)),
    the target style is the one the companion names (`style:` in a `note.md` header; the talk's

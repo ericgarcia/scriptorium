@@ -57,6 +57,23 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   never retype it; the **`window.name` carrier** below solves that, and it is surface-independent.
   Real Chrome plus the clipboard remains a working fallback, not the default. **Never switch
   transports silently: say which surface you are on.**
+- **Confirm the ACCOUNT before any write — the surface decides whose byline it is.** A Substack
+  login is one cookie for every `*.substack.com` publication, and **the built-in pane's cookie
+  store is shared by every tab and every session** (measured 2026-09-11: a cookie set in one tab
+  was present in a fresh one, and a session that never signed in found the pane signed in). So a
+  desk with two Substack accounts cannot hold both in the pane — and **never sign the pane out, or
+  into the other account**: that silently turns every concurrent session's work into the other
+  byline's. Each account gets its own persistent login instead, declared per outlet in
+  `outlets.yaml` (`account_handle`, `surface: pane|chrome`, `chrome_browser`):
+
+  ```
+  python3 framework/tools/substack_account.py route <outlet>   # which surface, which account
+  #   on that surface, on any *.substack.com page (the editor's host is fine), run the snippet
+  python3 framework/tools/substack_account.py check <outlet> --handle <what it returned>
+  ```
+
+  **Exit 5 is a refusal: stop.** Do not compose, re-sync or click anything on a surface signed in
+  as the wrong account — go to the outlet's surface. Exit 3 is signed out: the author signs in.
 - **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
   *Requirements* in the framework README for install and troubleshooting. In short: extension
   **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or
@@ -554,7 +571,8 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    **The two-step still exists and is still lease-guarded:** run without `--paste` to load and hold
    the lease, `--verify` immediately before a ⌘V sent from the browser tool, then `--release`. Use it
    only where System Events cannot reach the browser.
-2. **Open the composer on your chosen surface — the pane by default** — and set Title + Subtitle by JS (small, no prose in it),
+2. **Open the composer on the outlet's surface (`substack_account.py route`), confirmed by
+   `substack_account.py check` — the pane by default** — and set Title + Subtitle by JS (small, no prose in it),
    then `clearContent(true)` so a retry can't append to a half-paste. **Snapshot any image or embed
    the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
    `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared

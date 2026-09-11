@@ -2312,6 +2312,44 @@ def unit_prose(tmp):
           pb.missing_required({'publication': 'bg', 'outlets': []}, pubs) == [])
 
 
+def unit_substack_account(tmp):
+    """substack_account.py: a Substack write runs on a surface signed in as the outlet's account.
+    The pane's login is one cookie store shared by every tab and every session (measured
+    2026-09-11), so the check is what stops one byline's work landing under the other's."""
+    print("\n-- substack account: the surface is signed in as the outlet's account ---")
+    import substack_account as sa
+    cfg = os.path.join(tmp, 'acct-outlets.yaml')
+    with open(cfg, 'w', encoding='utf-8') as fh:
+        fh.write("outlets:\n"
+                 "  substack:\n    account_handle: elmuffin\n    surface: pane\n"
+                 "  substack-muffinlabs:\n    notes_handle: ericgarciaphd\n    surface: chrome\n"
+                 "    chrome_browser: MuffinLabs\n"
+                 "  site:\n    reader_base: https://site.test/\n")
+    outs = sa.load(cfg)
+    check("substack_account: the account is the outlet's account_handle",
+          sa.expected(outs['substack']) == 'elmuffin')
+    check("substack_account: falls back to notes_handle, the same person",
+          sa.expected(outs['substack-muffinlabs']) == 'ericgarciaphd')
+    check("substack_account: signed in as the outlet's account passes",
+          sa.verdict(outs, 'substack', 'elmuffin')[0] == 0)
+    check("substack_account: the other account is refused — the pane as E. L. Muffin, writing to MuffinLabs",
+          sa.verdict(outs, 'substack-muffinlabs', 'elmuffin')[0] == 5)
+    check("substack_account: signed out is its own answer, not a pass",
+          sa.verdict(outs, 'substack', None)[0] == 3 and sa.verdict(outs, 'substack', '')[0] == 3)
+    check("substack_account: an outlet naming no account is refused, not assumed",
+          sa.verdict(outs, 'site', 'elmuffin')[0] == 6)
+    check("substack_account: an unknown outlet is a usage error",
+          sa.verdict(outs, 'nope', 'elmuffin')[0] == 1)
+    check("substack_account: handles compare without the @ or case",
+          sa.verdict(outs, 'substack', '@ElMuffin')[0] == 0)
+    r = sa.route(outs, 'substack-muffinlabs')
+    check("substack_account: route names the surface and the Chrome browser; the pane is the default",
+          r['surface'] == 'chrome' and r['chrome_browser'] == 'MuffinLabs'
+          and sa.route(outs, 'site')['surface'] == 'pane', str(r))
+    check("substack_account: the snippet is same-origin (a cross-origin fetch fails in the pane)",
+          "fetch('/api/v1/user/profile/self'" in sa.SNIPPET and 'substack.com/api' not in sa.SNIPPET)
+
+
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
     here is a refusal: every case is a way the copy could go up wrong or go up first."""
@@ -3368,6 +3406,7 @@ def main():
         unit_scratch(tmp)
         unit_captions(tmp)
         unit_prose(tmp)
+        unit_substack_account(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()

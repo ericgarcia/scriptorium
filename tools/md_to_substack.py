@@ -683,18 +683,38 @@ class MarkRuns:
         the same formatting, and the draft's own regexes can emit either nesting; close
         order would report that as drift forever.
     """
-    _MARKER = re.compile(r'\[\[FN\w+\]\]')
+    _MARKER = re.compile(r'\[\[FN(\w+)\]\]')
 
     def __init__(self):
         self.stack = []          # [kind, href, start]
         self.out = []
         self.text = ''
+        self.anchors = []        # [(pos, label)] — where each footnote is CITED
 
-    def data(self, s):
-        s = re.sub(r'\s+', ' ', self._MARKER.sub('', s))
+    def _feed(self, s):
+        s = re.sub(r'\s+', ' ', s)
         if s.startswith(' ') and (not self.text or self.text.endswith(' ')):
             s = s.lstrip()
         self.text += s
+
+    def data(self, s):
+        # The footnote markers are not reader-text, but WHERE they sat is: the text is fed
+        # around them so the recorded position indexes the same reader-text every offset
+        # here indexes. Splitting rather than deleting is the whole point -- `_MARKER.sub`
+        # erased the one fact that says which sentence carries the note.
+        parts = self._MARKER.split(s)
+        self._feed(parts[0])
+        for i in range(1, len(parts), 2):
+            self.anchor(parts[i])
+            self._feed(parts[i + 1])
+
+    def anchor(self, label):
+        """Record a footnote citation at the current position.
+
+        Called by the draft side from `data` (the `[[FNn]]` marker) and by the live side
+        from substack_verify's extractor (the `<a class="footnote-anchor">` element, whose
+        digit is likewise not reader-text). One recorder, both sides, as with the runs."""
+        self.anchors.append((len(self.text), str(label).strip()))
 
     def enter(self, tag, attrs):
         kind = MARK_TAGS.get(tag)
@@ -753,8 +773,11 @@ class MarkRuns:
                 runs.append((start, end, k, self.text[start:end], h))
         runs.sort(key=lambda r: (r[0], -r[1], r[2]))
         text = self.text.rstrip()
-        self.stack, self.out, self.text = [], [], ''
-        return runs, text
+        # An anchor on the last word sits at a position the rstrip just removed; clamp it
+        # rather than hand back an offset that does not index the text it came with.
+        anchors = [(min(pos, len(text)), lab) for pos, lab in self.anchors]
+        self.stack, self.out, self.text, self.anchors = [], [], '', []
+        return runs, text, anchors
 
 
 class _FragmentMarks(HTMLParser):
@@ -778,11 +801,12 @@ class _FragmentMarks(HTMLParser):
 
 
 def marks_in(html_fragment):
-    """(runs, reader_text) for one block or footnote of the converter's own HTML.
+    """(runs, reader_text, anchors) for one block or footnote of the converter's own HTML.
 
-    `runs` are (start, end, kind, text, href) with kind in {em, strong, link}. The
-    caller is expected to check `reader_text == strip_to_reader(html_fragment)`
-    before using an offset — see `render_marks`."""
+    `runs` are (start, end, kind, text, href) with kind in {em, strong, link};
+    `anchors` are (pos, footnote-name) for each `[[FNn]]` citation. The caller is
+    expected to check `reader_text == strip_to_reader(html_fragment)` before using an
+    offset — see `render_marks` and `render_anchors`."""
     p = _FragmentMarks()
     p.feed(html_fragment)
     p.close()
@@ -825,15 +849,65 @@ def render_marks(piece_dir):
         txt = strip_to_reader(b)
         if not txt:
             continue
-        runs, scanned = marks_in(b)
+        runs, scanned, _anchors = marks_in(b)
         offsets_ok = offsets_ok and scanned == txt
         body.append(runs)
     fns = []
     for _n, c in ordered:
-        runs, scanned = marks_in(c)
+        runs, scanned, _anchors = marks_in(c)
         offsets_ok = offsets_ok and scanned == strip_to_reader(c)
         fns.append(runs)
     return body, fns, offsets_ok
+
+
+# --- anchors: WHERE a footnote is cited --------------------------------------
+# Third domain, same lesson as the second. Reader-text drops the superscript digit, and
+# the mark scan never looked at it: a footnote attached to the wrong sentence is invisible
+# to both. Measured 2026-09-11 on `for-the-love-of-dogs` -- live since 2026-08-05, its
+# footnote 1 anchored after "It was slow. It worked." while the draft cites it after
+# "I stopped trying to frighten him." -- and `substack_verify --fresh` reported MATCH every
+# time it was run. Only `substack_repatch --structural` noticed, and only because it refuses
+# to patch a block whose footnote count it cannot align.
+#
+# The comparison domain is (footnote number, TAIL): the few words of reader-text the anchor
+# follows. A tail rather than a bare offset because a bare offset is unreadable in a report
+# and says nothing about which sentence moved -- and the tail is exact, not fuzzy, since only
+# blocks whose text ALREADY agrees are ever compared.
+
+def anchor_tail(text, pos, n=40):
+    """The reader-text an anchor follows: where it sits, in a form a person can check."""
+    return re.sub(r'\s+', ' ', flatten_quotes(text[:pos]))[-n:]
+
+
+def render_anchors(piece_dir):
+    """(body_anchors, fn_anchors) — the anchor layer of render_reader.
+
+    Parallel to `render_reader` and `render_marks`, filtered identically, so index i means
+    the same block in all three. Each entry is a list of (number, tail) in document order,
+    where `number` is the footnote's live number (first-reference order, 1-based; 0 for a
+    ref with no definition) and `tail` is the text it follows — or None where the scanned
+    text did not reproduce `strip_to_reader`'s, in which case the offsets are not to be
+    trusted and only the NUMBERS are comparable.
+    """
+    blocks, ordered, _stripped, _residual, _unverified, _fn_issues, _sources = parse_blocks(piece_dir)
+    number = {n: i + 1 for i, (n, _c) in enumerate(ordered)}
+
+    def entries(fragment, want):
+        _runs, scanned, anchors = marks_in(fragment)
+        ok = scanned == want
+        return [(number.get(lab, 0), anchor_tail(scanned, pos) if ok else None)
+                for pos, lab in anchors]
+
+    body = []
+    for b in blocks:
+        if b.strip() == '<hr>':
+            continue
+        txt = strip_to_reader(b)
+        if not txt:
+            continue
+        body.append(entries(b, txt))
+    fns = [entries(c, strip_to_reader(c)) for _n, c in ordered]
+    return body, fns
 
 
 def render_reader(piece_dir):

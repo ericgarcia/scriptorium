@@ -407,6 +407,31 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    formatting drift** that every previous run had passed. The lesson is 0b-embeds' lesson again:
    **the scrape defines what can be checked, and what it does not collect cannot be verified.**
 
+0b-anchors. **A footnote on the wrong sentence was invisible to BOTH of the above — the same
+   shape again, one layer further down.** Reader-text drops the superscript digit, and the mark
+   scan does not count an anchor as a mark, so **which sentence carries a note** was collected by
+   nothing and therefore compared by nothing.
+
+   Measured 2026-09-11 on `for-the-love-of-dogs`, live since 2026-08-05: the post anchored
+   footnote 1 after *"It was slow. It worked."* while `draft.md` cites it after *"I stopped trying
+   to frighten him."* — two paragraphs apart, a different claim carrying the note — and
+   `substack_verify --fresh` reported **MATCH** every time it was run for five weeks. The only
+   tool that ever saw it was `substack_repatch --structural`, and only because it refuses to patch
+   a block whose footnote count it cannot align: *"the draft adds footnote(s) to block 3
+   ([[FN1]]) that the live post lacks."*
+
+   `substack_verify` now enumerates each block's anchors from both sides as an ordered list of
+   **(footnote number, the words it follows)** and reports a difference as **`DRIFT-ANCHORS`**,
+   a third kind beside DRIFT and DRIFT-MARKS, with an `anchors` column beside `marks`. Read the
+   kind: DRIFT means a word changed, DRIFT-MARKS means the formatting is wrong, DRIFT-ANCHORS
+   means the words and the formatting are right and the **note is hanging off the wrong
+   sentence**. The repair is dragging the superscript in the editor — a repatch will not do it,
+   and a recompose is the heavy way.
+
+   Only blocks whose text already agrees are compared, so an anchor report never doubles a text
+   report. The sweep the day it landed (2026-09-11, 36 live posts, 663 anchors) found **no other
+   piece with anchor drift**.
+
 0b-links. **Status-check the in-body cross-links:**
    `python3 framework/tools/check_links.py pieces/<name>` — exits non-zero and names any link
    that does not resolve. A cross-link URL copied out of the scaffold is **unverified by

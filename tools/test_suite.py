@@ -79,11 +79,13 @@ PIECES, CORPUS_KIND = _resolve_corpus()
 from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
                             read_manifest, parse_blocks, manifest_gate,
-                            render_marks, marks_in, mark_keys)
+                            render_marks, render_anchors, anchor_tail,
+                            marks_in, mark_keys)
 from substack_sync import (H, HM, three_way, align, canonical_image_url,
                            reader_to_source_map, edit_block_source, load_baseline,
                            baseline_has_marks, write_baseline, draft_state)
-from substack_verify import live_blocks, extract_post, header_drift, mark_drift
+from substack_verify import (live_blocks, extract_post, header_drift, mark_drift,
+                             anchor_drift)
 from piece_header import rewrite as header_rewrite
 from check_links import extract as extract_links, unrenderable as unrenderable_links
 import check_pronouns
@@ -1087,37 +1089,37 @@ def unit_live_extraction():
 
     # A list is ONE block. Substack nests <li><p>..</p></li>; if the inner </p> closes
     # the buffer, one list becomes N blocks and every piece with a list reports drift.
-    b, f, bm, fm = live_blocks('<ul><li><p>alpha</p></li><li><p>beta</p></li></ul>')
+    b, f, bm, fm, _ba, _fa = live_blocks('<ul><li><p>alpha</p></li><li><p>beta</p></li></ul>')
     check('a bullet list extracts as a single block', b == ['alphabeta'], repr(b))
 
     # Same bug, different tag -- and adjacent quotes merge, as the draft renderer merges them.
-    b, _f, _bm, _fm = live_blocks('<blockquote><p>one</p></blockquote><blockquote><p>two</p></blockquote>')
+    b, _f, _bm, _fm, _ba, _fa = live_blocks('<blockquote><p>one</p></blockquote><blockquote><p>two</p></blockquote>')
     check('adjacent blockquotes merge into one block', b == ['onetwo'], repr(b))
 
-    b, _f, _bm, _fm = live_blocks('<p>plain</p><blockquote><p>q</p></blockquote><p>after</p>')
+    b, _f, _bm, _fm, _ba, _fa = live_blocks('<p>plain</p><blockquote><p>q</p></blockquote><p>after</p>')
     check('a lone blockquote does not swallow the paragraph after it',
           b == ['plain', 'q', 'after'], repr(b))
 
     # Furniture Substack injects into the body: not prose, must not count as drift.
-    b, _f, _bm, _fm = live_blocks('<p>real</p><div class="subscription-widget-wrap-editor">'
+    b, _f, _bm, _fm, _ba, _fa = live_blocks('<p>real</p><div class="subscription-widget-wrap-editor">'
                        '<div class="subscription-widget"><div class="preamble">'
                        '<p class="cta-caption">Thanks for reading! Subscribe.</p>'
                        '</div></div></div><p>also real</p>')
     check('a subscribe widget is not counted as body', b == ['real', 'also real'], repr(b))
 
-    b, _f, _bm, _fm = live_blocks('<div class="captioned-image-container"><figure>'
+    b, _f, _bm, _fm, _ba, _fa = live_blocks('<div class="captioned-image-container"><figure>'
                        '<img src="x"><figcaption>a caption</figcaption></figure></div><p>text</p>')
     check('an image and its caption are not body', b == ['text'], repr(b))
 
     # Void tags inside a skipped subtree once wedged the parser open forever: <img>,
     # <source> and <hr> have no end tag, so a depth counter that increments on them
     # never comes back down and the whole rest of the post vanishes.
-    b, _f, _bm, _fm = live_blocks('<div class="captioned-image-container"><picture>'
+    b, _f, _bm, _fm, _ba, _fa = live_blocks('<div class="captioned-image-container"><picture>'
                        '<source srcset="a"><img src="b"></picture></div><hr><p>survives</p>')
     check('void tags in skipped subtrees do not wedge the parser', b == ['survives'], repr(b))
 
     # The superscript marker is not prose; the footnote body is not body.
-    b, f, bm, fm = live_blocks('<p>Sentence<a class="footnote-anchor" href="#footnote-1">1</a> ends.</p>'
+    b, f, bm, fm, _ba, _fa = live_blocks('<p>Sentence<a class="footnote-anchor" href="#footnote-1">1</a> ends.</p>'
                        '<div class="footnote"><a class="footnote-number">1</a>'
                        '<div class="footnote-content"><p>The note.</p></div></div>')
     check('a footnote anchor leaves no digit in the prose', b == ['Sentence ends.'], repr(b))
@@ -1126,7 +1128,7 @@ def unit_live_extraction():
     # ---- marks: the layer reader-text cannot see --------------------------------------
     # Everything above compares TEXT. Wrapping a word already in the post in <em> changes
     # none of it, so none of the checks above can fail on it. These can.
-    _b, _f, bm, fm = live_blocks(
+    _b, _f, bm, fm, _ba, _fa = live_blocks(
         '<p>Plain <em>satsang</em> and <strong>bold</strong> '
         '<a href="https://elmuffin.substack.com/p/x">a link</a>.</p>')
     check('em, strong and link are each enumerated from the live page',
@@ -1137,8 +1139,8 @@ def unit_live_extraction():
     # THE FALSE PASS, in one assertion. Same reader-text on both sides, one <em> apart:
     # the digest cannot tell them apart, and the mark scan must.
     plain, italic = '<p>He sat in the satsang.</p>', '<p>He sat in the <em>satsang</em>.</p>'
-    pb, _pf, pbm, _pfm = live_blocks(plain)
-    ib, _if, ibm, _ifm = live_blocks(italic)
+    pb, _pf, pbm, _pfm, _ba, _fa = live_blocks(plain)
+    ib, _if, ibm, _ifm, _ba, _fa = live_blocks(italic)
     check('an italics-only difference is INVISIBLE to the text digest',
           H(pb[0]) == H(ib[0]), f'{pb[0]!r} vs {ib[0]!r}')
     check('an italics-only difference IS visible to the mark scan',
@@ -1149,9 +1151,9 @@ def unit_live_extraction():
     # elements around the em; the converter emits one <strong> wrapping it. Compared
     # element-by-element that is drift on every bold-containing-an-italic in the corpus --
     # 8 pieces of 34 on the first sweep, 2026-09-09, not one a real difference.
-    _b1, _f1, split, _m1 = live_blocks('<p><strong>There is no </strong><em><strong>toward'
+    _b1, _f1, split, _m1, _ba, _fa = live_blocks('<p><strong>There is no </strong><em><strong>toward'
                                        '</strong></em><strong> in the index.</strong></p>')
-    _b2, _f2, whole, _m2 = live_blocks('<p><strong>There is no <em>toward</em> in the '
+    _b2, _f2, whole, _m2, _ba, _fa = live_blocks('<p><strong>There is no <em>toward</em> in the '
                                        'index.</strong></p>')
     check('a bold split around an italic is one run, not three',
           mark_keys(split[0]) == mark_keys(whole[0])
@@ -1160,7 +1162,7 @@ def unit_live_extraction():
 
     # The two <a> tags that are not links. A footnote superscript counted as a link would
     # put a phantom run in every footnoted block of every piece in the corpus.
-    _b3, _f3, anch, fnm = live_blocks(
+    _b3, _f3, anch, fnm, _ba, _fa = live_blocks(
         '<p>Sentence<a class="footnote-anchor" href="#footnote-1">1</a> ends.</p>'
         '<div class="footnote"><a class="footnote-number" href="#footnote-anchor-1">1</a>'
         '<div class="footnote-content"><p>The <em>note</em>.</p></div></div>')
@@ -1170,9 +1172,30 @@ def unit_live_extraction():
 
     # Substack curls quotes on paste; the draft has straight ones. A run must not report
     # drift for that -- the same flattening the text digest has always applied.
-    _b4, _f4, cur, _m4 = live_blocks('<p>She said <em>\u201cno\u201d</em> once.</p>')
+    _b4, _f4, cur, _m4, _ba, _fa = live_blocks('<p>She said <em>\u201cno\u201d</em> once.</p>')
     check('a run with curled quotes compares straight',
           mark_keys(cur[0]) == [('em', '"no"', '')], repr(mark_keys(cur[0])))
+
+    # ---- anchors: the layer neither text NOR marks can see ----------------------------
+    # The superscript digit is dropped from the prose above and is not a mark; before this,
+    # WHERE a footnote hung was simply not collected, so it could not be compared.
+    _b5, _f5, _m5, _fm5, ba, fa = live_blocks(
+        '<p>He stopped.<a class="footnote-anchor" href="#footnote-1">1</a> Then he waited.'
+        '<a class="footnote-anchor" href="#footnote-2">2</a></p>'
+        '<div class="footnote"><a class="footnote-number">1</a>'
+        '<div class="footnote-content"><p>A note.</p></div></div>')
+    check('each anchor is collected with its number and the words it follows',
+          ba[0] == [(1, 'He stopped.'), (2, 'He stopped. Then he waited.')], repr(ba))
+    check('a block with no anchors collects none', fa == [[]], repr(fa))
+
+    # The draft's `[[FNn]]` marker and the live `<a class="footnote-anchor">` must land on
+    # the SAME offset, or the two sides are being measured with different rulers.
+    _runs, scanned, danch = marks_in('<p>He stopped.[[FN1]] Then he waited.[[FN2]]</p>')
+    check('the draft marker and the live anchor agree on the position',
+          scanned == 'He stopped. Then he waited.' and danch == [(11, '1'), (27, '2')],
+          f'{danch} {scanned!r}')
+    check('the marker leaves no trace in the reader-text it is measured against',
+          anchor_tail(scanned, danch[0][0]) == 'He stopped.', repr(anchor_tail(scanned, danch[0][0])))
 
     # A page that shipped no post (login wall, layout change) must read as "could not
     # check", never as an empty post that trivially matches nothing.
@@ -1217,7 +1240,7 @@ def unit_mark_drift(tmp):
                  '<div class="footnote"><a class="footnote-number">1</a>'
                  '<div class="footnote-content"><p>The word is satsang, a sitting-together.</p>'
                  '</div></div>')
-    lb, lf, lbm, lfm = live_blocks(live_html)
+    lb, lf, lbm, lfm, _ba, _fa = live_blocks(live_html)
     check('the live page and the draft agree on every block of TEXT',
           [H(x) for x in lb] == [H(x) for x in body] and [H(x) for x in lf] == [H(x) for x in fns],
           f'live={lb} draft={body}')
@@ -1242,11 +1265,119 @@ def unit_mark_drift(tmp):
         f.write('*Draft*\n\n---\n\nSee [the essay](https://elmuffin.substack.com/p/right).\n')
     body2, _f2, _r2, _i2 = render_reader(d)
     dbm2, _dfm2, _ok2 = render_marks(d)
-    lb2, _lf2, lbm2, _lfm2 = live_blocks(
+    lb2, _lf2, lbm2, _lfm2, _ba, _fa = live_blocks(
         '<p>See <a href="https://elmuffin.substack.com/p/wrong">the essay</a>.</p>')
     d2 = mark_drift(lbm2, dbm2, lb2, body2, 'block')
     check('a wrong href is reported as a link target, not as emphasis',
           len(d2) == 1 and 'link target' in d2[0] and 'wrong' in d2[0] and 'right' in d2[0], repr(d2))
+
+
+def unit_anchor_drift(tmp):
+    """The regression the mark scan ALSO passed.
+
+    A draft and a live post whose reader-text is identical block for block, whose marks are
+    identical run for run, and whose one difference is which sentence carries footnote 1.
+    Every digest on this desk reports MATCH, the mark scan reports nothing, and the anchor
+    comparison must report drift — and must say it is ANCHOR drift, because the repair is
+    dragging a superscript in the editor, not repatching a block or restoring an italic.
+
+    Measured 2026-09-11 on `for-the-love-of-dogs`, live since 2026-08-05: footnote 1 sat
+    after "It was slow. It worked." on the post and after "I stopped trying to frighten
+    him." in the draft — two paragraphs apart — and `substack_verify --fresh` said MATCH for
+    five weeks. Only `substack_repatch --structural` ever noticed, by refusing to patch.
+    """
+    print("\n-- anchors: a footnote on the wrong sentence is caught ------------")
+    d = os.path.join(tmp, 'anchors'); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'publish.yaml'), 'w') as f:
+        f.write('title: A Piece\nsubtitle: With one footnote\n')
+    with open(os.path.join(d, 'draft.md'), 'w') as f:
+        f.write('*Draft*\n\n---\n\n'
+                'I stopped trying to frighten him.[^1] He was a terror on the leash.\n\n'
+                'It was slow. It worked.\n\n'
+                '[^1]: The training book I followed.\n')
+
+    body, fns, _r, _i = render_reader(d)
+    dba, dfa = render_anchors(d)
+    check('the anchor scan stays 1:1 with render_reader',
+          len(dba) == len(body) and len(dfa) == len(fns),
+          f'{len(dba)}/{len(body)} {len(dfa)}/{len(fns)}')
+    check('the draft says which sentence carries the note',
+          dba[0] == [(1, 'I stopped trying to frighten him.')] and dba[1] == [], repr(dba))
+
+    # the live post: same words, same formatting, the superscript two blocks later
+    right = ('<p>I stopped trying to frighten him.'
+             '<a class="footnote-anchor" href="#footnote-1">1</a>'
+             ' He was a terror on the leash.</p>'
+             '<p>It was slow. It worked.</p>')
+    wrong = ('<p>I stopped trying to frighten him. He was a terror on the leash.</p>'
+             '<p>It was slow. It worked.'
+             '<a class="footnote-anchor" href="#footnote-1">1</a></p>')
+    fn = ('<div class="footnote"><a class="footnote-number">1</a>'
+          '<div class="footnote-content"><p>The training book I followed.</p></div></div>')
+
+    lb, lf, lbm, lfm, lba, lfa = live_blocks(wrong + fn)
+    dbm, dfm, _ok = render_marks(d)
+    check('a moved anchor is INVISIBLE to the text digest',
+          [H(x) for x in lb] == [H(x) for x in body] and [H(x) for x in lf] == [H(x) for x in fns],
+          f'live={lb} draft={body}')
+    check('a moved anchor is INVISIBLE to the mark scan',
+          mark_drift(lbm, dbm, lb, body, 'block') == [],
+          repr(mark_drift(lbm, dbm, lb, body, 'block')))
+
+    drift = anchor_drift(lba, dba, lb, body, 'block')
+    check('the anchor scan catches what neither of them can', len(drift) == 2, repr(drift))
+    check('it names the block the note LEFT and the words it should follow',
+          any('block #0' in x and 'frighten him.' in x for x in drift), repr(drift))
+    check('it names the block the note LANDED in and the words it now follows',
+          any('block #1' in x and 'It worked.' in x for x in drift), repr(drift))
+
+    # and the converse: the anchor where the draft puts it is silence, not noise
+    ok_lb, _f, _m, _fm2, ok_lba, _fa = live_blocks(right + fn)
+    check('an anchor in the right place reports nothing',
+          anchor_drift(ok_lba, dba, ok_lb, body, 'block') == [],
+          repr(anchor_drift(ok_lba, dba, ok_lb, body, 'block')))
+
+    # A note that moved WITHIN one block: same block, same count, different sentence. The
+    # per-block count check cannot see this one -- only the tail can.
+    same_block = ('<p>I stopped trying to frighten him. He was a terror on the leash.'
+                  '<a class="footnote-anchor" href="#footnote-1">1</a></p>'
+                  '<p>It was slow. It worked.</p>')
+    sb, _f2, _m2, _fm3, sba, _fa2 = live_blocks(same_block + fn)
+    d2 = anchor_drift(sba, dba, sb, body, 'block')
+    check('a note that moved within its own block is caught by the tail',
+          len(d2) == 1 and 'moved' in d2[0] and 'terror on the leash.' in d2[0], repr(d2))
+
+    # Two anchors in one block must keep their ORDER, not merely their count.
+    with open(os.path.join(d, 'draft.md'), 'w') as f:
+        f.write('*Draft*\n\n---\n\nFirst claim.[^a] Second claim.[^b]\n\n'
+                '[^a]: Note A.\n\n[^b]: Note B.\n')
+    body3, _f3, _r3, _i3 = render_reader(d)
+    dba3, _dfa3 = render_anchors(d)
+    check('footnote NAMES become the live NUMBERS, in first-reference order',
+          dba3[0] == [(1, 'First claim.'), (2, 'First claim. Second claim.')], repr(dba3))
+    swapped = ('<p>First claim.<a class="footnote-anchor" href="#footnote-2">2</a>'
+               ' Second claim.<a class="footnote-anchor" href="#footnote-1">1</a></p>')
+    sw, _f4, _m4, _fm4, swa, _fa4 = live_blocks(swapped)
+    d3 = anchor_drift(swa, dba3, sw, body3, 'block')
+    check('two anchors swapped in one block are caught', len(d3) == 1 and '2 after' in d3[0], repr(d3))
+
+    # A merged blockquote is the one shape where the two sides count blocks differently:
+    # the draft renders two adjacent `> ` blocks as ONE, and live_blocks merges the live
+    # pair to match. An anchor in the SECOND quote must move with it, or every footnoted
+    # blockquote in the corpus reports a drift that is not there.
+    with open(os.path.join(d, 'draft.md'), 'w') as f:
+        f.write('*Draft*\n\n---\n\n> Alpha line.\n\n> Beta line.[^1]\n\n[^1]: A note.\n')
+    body4, _f5, _r5, _i5 = render_reader(d)
+    dba4, _dfa4 = render_anchors(d)
+    mb, _f6, _m5, _fm5, mba, _fa5 = live_blocks(
+        '<blockquote><p>Alpha line.</p></blockquote>'
+        '<blockquote><p>Beta line.<a class="footnote-anchor" href="#footnote-1">1</a></p>'
+        '</blockquote>')
+    check('the merged blockquote is one block on both sides',
+          len(mb) == len(body4) == 1, f'{mb} vs {body4}')
+    check('an anchor in the second of two merged quotes does not report false drift',
+          anchor_drift(mba, dba4, mb, body4, 'block') == [],
+          f'{mba} vs {dba4}')
 
 
 def unit_sync_baseline_marks(tmp):
@@ -3898,6 +4029,7 @@ def main():
         unit_images()
         unit_live_extraction()
         unit_mark_drift(tmp)
+        unit_anchor_drift(tmp)
         unit_sync_baseline_marks(tmp)
         unit_manifest_gate(tmp)
         unit_pronouns(tmp)

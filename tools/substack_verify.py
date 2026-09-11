@@ -21,6 +21,15 @@ link with its href -- are enumerated from both sides and compared for count, str
 order, and formatting drift is reported as DRIFT-MARKS, distinct from text drift, because
 the fix for it is different.
 
+The THIRD domain is where each footnote is CITED, and it exists because the first two were
+blind to it too. Reader-text drops the superscript digit; the mark scan does not count it as
+a mark. So a footnote attached to the wrong sentence produced no diff at all — measured
+2026-09-11 on `for-the-love-of-dogs`, live since 2026-08-05 with footnote 1 anchored two
+paragraphs away from where the draft cites it, reported MATCH on every run. The ordered
+(number, preceding-words) of each block's anchors is therefore compared on both sides, and
+that drift is reported as DRIFT-ANCHORS — a third name, because a moved superscript is
+fixed in the editor rather than by repatching text or restoring an italic.
+
 It is deliberately NOT part of test_suite.py. That suite promises no network calls, and
 that promise is worth more than the convenience of one runner.
 
@@ -48,7 +57,7 @@ from html.parser import HTMLParser
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from md_to_substack import (render_captions, read_manifest, render_reader, render_marks,   # noqa: E402
-                            MarkRuns, mark_keys)
+                            render_anchors, anchor_tail, MarkRuns, mark_keys)
 from substack_sync import H                                      # noqa: E402
 
 UA = 'writing-desk-verify/1.0 (+repo consistency check)'
@@ -73,8 +82,11 @@ class Extract(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.body, self.fns = [], []
         self.body_marks, self.fn_marks = [], []
+        self.body_anchors, self.fn_anchors = [], []
+        self.body_norm, self.fn_norm = [], []     # reader-text the anchor offsets index
         self.depth = 0
         self.skip_to = self.fn_to = self.cap_to = self.anchor_to = None
+        self.anchor_buf = None
         self.buf = self.buf_depth = self.buf_tag = None
         self.marks = MarkRuns()          # the second domain: which words are marked
 
@@ -83,7 +95,9 @@ class Extract(HTMLParser):
         if self.skip_to is not None:
             return
         if 'footnote-anchor' in cls:                 # superscript marker: drop its text
-            self.anchor_to = self.depth; return
+            # ...but not its POSITION. The digit is not reader-text; which sentence it
+            # follows is the third comparison domain (see MarkRuns.anchor).
+            self.anchor_to = self.depth; self.anchor_buf = []; return
         if 'footnote-content' in cls:
             self.cap_to = self.depth; self.buf = []; self.buf_depth = None
             self.marks = MarkRuns(); return
@@ -112,12 +126,17 @@ class Extract(HTMLParser):
             if self.depth == self.skip_to: self.skip_to = None
             return
         if self.anchor_to is not None and self.depth == self.anchor_to:
-            self.anchor_to = None; return
+            self.anchor_to = None
+            if self.buf is not None:
+                self.marks.anchor(''.join(self.anchor_buf or []))
+            self.anchor_buf = None
+            return
         if self.cap_to is not None:
             if self.depth == self.cap_to:
                 self.cap_to = None
-                runs, _txt = self.marks.take()
+                runs, txt, anchors = self.marks.take()
                 self.fns.append(''.join(self.buf or [])); self.fn_marks.append(runs)
+                self.fn_anchors.append(anchors); self.fn_norm.append(txt)
                 self.buf = None
             elif self.buf is not None:
                 self.marks.leave(tag)
@@ -129,8 +148,10 @@ class Extract(HTMLParser):
             self.marks.leave(tag)
         if tag in BLOCK and self.buf is not None and self.depth == self.buf_depth:
             t = ''.join(self.buf)
-            runs, _txt = self.marks.take()
-            if t.strip(): self.body.append((self.buf_tag, t)); self.body_marks.append(runs)
+            runs, txt, anchors = self.marks.take()
+            if t.strip():
+                self.body.append((self.buf_tag, t)); self.body_marks.append(runs)
+                self.body_anchors.append(anchors); self.body_norm.append(txt)
             self.buf = self.buf_depth = self.buf_tag = None
 
     def handle_starttag(self, tag, attrs):
@@ -145,27 +166,51 @@ class Extract(HTMLParser):
         self.depth -= 1; self._leave(tag)
 
     def handle_data(self, d):
-        if self.skip_to is not None or self.anchor_to is not None: return
+        if self.skip_to is not None: return
+        if self.anchor_to is not None:
+            # The superscript's own digit: kept only long enough to say WHICH footnote
+            # this anchor is, then dropped before it can reach the prose.
+            if self.anchor_buf is not None: self.anchor_buf.append(d)
+            return
         if self.buf is not None: self.buf.append(d); self.marks.data(d)
 
 
 def live_blocks(body_html):
-    """(body_texts, footnote_texts, body_marks, footnote_marks) as the reader gets them.
+    """(body_texts, footnotes, body_marks, fn_marks, body_anchors, fn_anchors) as the
+    reader gets them.
 
-    Two domains, one parse. The texts are what every digest on this desk compares; the
-    marks are the layer those digests cannot see (see MarkRuns in md_to_substack)."""
+    Three domains, one parse. The texts are what every digest on this desk compares; the
+    marks are the layer those digests cannot see (see MarkRuns in md_to_substack); the
+    anchors are the layer neither of them sees — WHICH sentence carries each footnote.
+    Anchors come back in `render_anchors`' shape, (number, tail), so the two sides are
+    directly comparable."""
     p = Extract(); p.feed(body_html); p.close()
     # The draft renderer merges adjacent blockquotes; Substack keeps them separate.
     # The marks merge with them: order is preserved by concatenation, which is all the
     # equality domain uses (offsets are never compared).
-    out, marks = [], []
-    for (tag, text), runs in zip(p.body, p.body_marks):
+    out, marks, anchors, norms = [], [], [], []
+    for (tag, text), runs, anch, norm in zip(p.body, p.body_marks, p.body_anchors, p.body_norm):
         if tag == 'blockquote' and out and out[-1][0] == 'blockquote':
             out[-1] = (tag, out[-1][1] + text)
             marks[-1] = marks[-1] + runs
+            # ANCHOR OFFSETS *ARE* COMPARED, unlike the marks', so a merged block's anchors
+            # have to move with the text that is now in front of them. The shift is the
+            # reader-text length of the block they were merged into, which is exactly the
+            # normalization the draft's own merged block produces.
+            anchors[-1] = anchors[-1] + [(pos + len(norms[-1]), lab) for pos, lab in anch]
+            norms[-1] = norms[-1] + norm
         else:
             out.append((tag, text)); marks.append(runs)
-    return [t for _, t in out], p.fns, marks, p.fn_marks
+            anchors.append(list(anch)); norms.append(norm)
+    return ([t for _, t in out], p.fns, marks, p.fn_marks,
+            [_anchor_entries(a, n) for a, n in zip(anchors, norms)],
+            [_anchor_entries(a, n) for a, n in zip(p.fn_anchors, p.fn_norm)])
+
+
+def _anchor_entries(anchors, norm_text):
+    """Raw (pos, label) anchors as the (number, tail) pairs render_anchors produces."""
+    return [(int(lab) if lab.isdigit() else 0, anchor_tail(norm_text, pos))
+            for pos, lab in anchors]
 
 
 class _Captions(HTMLParser):
@@ -394,6 +439,50 @@ def mark_drift(live, draft, live_text, draft_text, label, base=0):
     return out
 
 
+def _fmt_anchors(entries, limit=4):
+    """Anchors as a reader can check them: 1 after 'frighten him.'  2 after 'cower.'"""
+    out = [f"{n or '?'} after {t!r}" if t is not None else f"{n or '?'} after ?"
+           for n, t in entries[:limit]]
+    if len(entries) > limit:
+        out.append(f'+{len(entries) - limit} more')
+    return '[' + '; '.join(out) + ']' if out else '[none]'
+
+
+def anchor_drift(live, draft, live_text, draft_text, label, base=0):
+    """WHERE each footnote is cited — the domain text and marks are both blind to.
+
+    Measured 2026-09-11 on `for-the-love-of-dogs`, live since 2026-08-05: the post anchored
+    footnote 1 after "It was slow. It worked." while the draft cites it after "I stopped
+    trying to frighten him." — two paragraphs apart, a different claim carrying the note —
+    and `--fresh` reported MATCH every time it was run. Reader-text drops the superscript
+    digit and the mark scan never looked at it, so nothing on this desk could see it except
+    `substack_repatch --structural`, which refused to patch and said why.
+
+    Only blocks whose TEXT already agrees are compared, for the same reason mark_drift does
+    it: when the words changed, so did every position in the block, and saying so a second
+    time buries the finding that matters. A tail of None means the block's offsets were not
+    trustworthy (its scanned text did not reproduce the reader-text), so only the numbers
+    are compared there — a degraded check, never a silent pass."""
+    out = []
+    for i, (la, da) in enumerate(zip(live, draft)):
+        if i >= len(live_text) or i >= len(draft_text):
+            break
+        if H(live_text[i]) != H(draft_text[i]):
+            continue                                   # text drift already explains this one
+        n = i + base                     # blocks are 0-based, footnotes 1-based, as above
+        if [x for x, _t in la] != [x for x, _t in da]:
+            out.append(f'{label} #{n} footnote anchors: live {_fmt_anchors(la)} '
+                       f'vs draft {_fmt_anchors(da)}')
+            continue
+        moved = [(x, lt, dt) for (x, lt), (_x, dt) in zip(la, da)
+                 if lt is not None and dt is not None and lt != dt]
+        if moved:
+            out.append(f'{label} #{n} footnote anchor moved: '
+                       + '; '.join(f'[^{x}] live after {lt!r} vs draft after {dt!r}'
+                                   for x, lt, dt in moved[:2]))
+    return out
+
+
 def walk_archive(base, fresh=False, page=50):
     """Every post the publication serves publicly, via its archive API, newest first.
 
@@ -473,9 +562,10 @@ def verify(name, piece_dir, url, fresh):
     if not post:
         return ('UNREACHABLE', 'no _preloads in page (login wall or layout change?)', {})
 
-    lb, lf, lbm, lfm = live_blocks(post.get('body_html') or '')
+    lb, lf, lbm, lfm, lba, lfa = live_blocks(post.get('body_html') or '')
     body, fns, _residual, _iss = render_reader(piece_dir)
     dbm, dfm, _offsets_ok = render_marks(piece_dir)
+    dba, dfa = render_anchors(piece_dir)
     n_marks = sum(len(r) for r in lbm) + sum(len(r) for r in lfm)
     n_want = sum(len(r) for r in dbm) + sum(len(r) for r in dfm)
     facts = {'audience': post.get('audience'),
@@ -493,11 +583,17 @@ def verify(name, piece_dir, url, fresh):
     # Marks are compared only when the two sides are structurally alignable at all. If the
     # block counts differ, index i is not the same block on both sides and every mark
     # comparison after the first insertion is noise.
-    marks = []
+    marks, anchors = [], []
     if len(lb) == len(body) and len(lf) == len(fns):
         marks = (mark_drift(lbm, dbm, lb, body, 'block')
                  + mark_drift(lfm, dfm, lf, fns, 'footnote', base=1))
-    if not header and text_ok and not marks and not caps:
+        anchors = (anchor_drift(lba, dba, lb, body, 'block')
+                   + anchor_drift(lfa, dfa, lf, fns, 'footnote', base=1))
+    n_anch = sum(len(a) for a in lba) + sum(len(a) for a in lfa)
+    n_anch_want = sum(len(a) for a in dba) + sum(len(a) for a in dfa)
+    if n_anch or n_anch_want:
+        facts['anchors'] = f'{n_anch}/{n_anch_want}'
+    if not header and text_ok and not marks and not caps and not anchors:
         return ('MATCH', '', facts)
 
     detail = list(header)
@@ -511,16 +607,24 @@ def verify(name, piece_dir, url, fresh):
         if a != b:
             detail.append(f'first differing footnote #{i + 1}: live {lf[i][:70]!r}')
             break
-    detail += marks[:3] + caps[:3]
+    detail += marks[:3] + caps[:3] + anchors[:3]
     if len(marks) > 3:
         detail.append(f'(+{len(marks) - 3} more formatting difference(s))')
+    if len(anchors) > 3:
+        detail.append(f'(+{len(anchors) - 3} more anchor difference(s))')
     # A formatting-only drift gets its OWN status. It is invisible to every text digest on
     # this desk, so a run that reported it as plain DRIFT would send the reader looking for
     # a word that changed and find none -- and the surgical patcher, asked to fix it, would
     # report `unchanged` and apply nothing. Naming the kind is what makes it actionable.
     # Captions likewise: media text no reader digest covers, so they get their own name.
-    status = ('DRIFT-MARKS' if (marks and text_ok and not header and not caps) else
-              'DRIFT-CAPTION' if (caps and text_ok and not header and not marks) else 'DRIFT')
+    # An ANCHOR-only drift is its own kind for the same reason a formatting-only one is:
+    # nothing in the reader-text changed, so a plain DRIFT sends the reader hunting for a
+    # word that is not there — and the fix is different again. A moved anchor is repaired
+    # by moving the superscript in the editor, not by repatching a block.
+    only = lambda mine, *others: bool(mine) and text_ok and not header and not any(others)
+    status = ('DRIFT-MARKS'   if only(marks, caps, anchors) else
+              'DRIFT-CAPTION' if only(caps, marks, anchors) else
+              'DRIFT-ANCHORS' if only(anchors, marks, caps) else 'DRIFT')
     return (status, '; '.join(detail), facts)
 
 
@@ -632,13 +736,17 @@ def main():
         if facts.get('blocks'):
             line += (f" {facts['blocks']:>10} body {facts['fns']:>8} fn"
                      f" {facts.get('marks', '-'):>9} marks")
+            if facts.get('anchors'):
+                line += f" {facts['anchors']:>7} anchors"
         print(line + (f"   {detail}" if detail else ''))
         if status == 'MATCH':
             ok += 1
             if facts.get('emailed'): emailed.append(f"{name} ({facts['emailed']})")
         elif status.startswith('DRIFT'):
             drift.append(name + ('  (formatting only)' if status == 'DRIFT-MARKS' else
-                                 '  (captions only)' if status == 'DRIFT-CAPTION' else ''))
+                                 '  (captions only)' if status == 'DRIFT-CAPTION' else
+                                 '  (footnote anchor positions only)'
+                                 if status == 'DRIFT-ANCHORS' else ''))
         else:
             unreachable.append(f'{name}: {detail}')
         time.sleep(0.3)                                # be a polite client

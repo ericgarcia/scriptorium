@@ -135,6 +135,9 @@ def main():
     # Keyed by (slug, kind), not slug: a talk and an essay can share a slug, and merging
     # one must never replace the other's entry (2026-09-10, the first MuffinLabs essay).
     by_key = {(p['slug'], p.get('kind', 'piece')): p for p in index.get('pieces', [])}
+    # What the index said before this run, so an unchanged corpus can keep its timestamp.
+    before = json.dumps({'spec': index.get('spec'), 'pieces': index.get('pieces', [])},
+                        sort_keys=True, ensure_ascii=False)
 
     copied = set()
     for name in files:
@@ -218,7 +221,13 @@ def main():
     index['spec'] = '2'
     index['pieces'] = sorted(by_key.values(),
                              key=lambda p: p.get('published_at', ''), reverse=True)
-    index['generated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # A new timestamp only when the entries changed. Stamping every run made a no-change
+    # publish re-upload index.json and invalidate it at the CDN, every time: the digests
+    # matched and store_publish still saw new bytes (measured 2026-09-11).
+    after = json.dumps({'spec': index['spec'], 'pieces': index['pieces']},
+                       sort_keys=True, ensure_ascii=False)
+    if after != before or not index.get('generated_at'):
+        index['generated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     with open(index_path, 'w', encoding='utf-8') as fh:
         json.dump(index, fh, indent=2, ensure_ascii=False)
         fh.write('\n')

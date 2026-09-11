@@ -1687,6 +1687,48 @@ def unit_store(tmp):
     check('images travel with the piece',
           os.path.exists(os.path.join(b2, 'images', 'a-piece', 'hero.webp')))
 
+    # An unchanged re-run must write a byte-identical index. Stamping generated_at on every
+    # run made each no-change publish re-upload index.json and invalidate it (2026-09-11).
+    bp_args = [sys.executable, os.path.join(HERE, 'bundle_pieces.py'), content, b2,
+               '--outlet', 'alignmentfellowship', '--images', os.path.join(tmp, 'vendored-images')]
+    idx = os.path.join(b2, 'index.json')
+    with open(idx, 'rb') as f:
+        idx_before = f.read()
+    r4 = subprocess.run(bp_args, capture_output=True, text=True)
+    with open(idx, 'rb') as f:
+        idx_after = f.read()
+    check('an unchanged re-run leaves index.json byte-identical',
+          r4.returncode == 0 and idx_before == idx_after, (r4.stdout + r4.stderr).strip())
+    # ...and a real change still stamps a new time. Backdate first: a same-second rerun
+    # would otherwise pass without proving anything.
+    stale = json.loads(idx_after)
+    stale['generated_at'] = '2000-01-01T00:00:00Z'
+    with open(idx, 'w', encoding='utf-8') as f:
+        json.dump(stale, f)
+    md = os.path.join(content, 'a-piece.md')
+    with open(md, encoding='utf-8') as f:
+        orig_md = f.read()
+    with open(md, 'w', encoding='utf-8') as f:
+        f.write(orig_md.replace('title: A Piece', 'title: A Piece, Retitled'))
+    r5 = subprocess.run(bp_args, capture_output=True, text=True)
+    with open(idx, encoding='utf-8') as f:
+        changed = json.load(f)
+    with open(md, 'w', encoding='utf-8') as f:
+        f.write(orig_md)
+    check('a changed entry stamps a new generated_at',
+          r5.returncode == 0 and changed['generated_at'] != '2000-01-01T00:00:00Z'
+          and changed['pieces'][0]['title'] == 'A Piece, Retitled', str(changed.get('generated_at')))
+    # ...and an unchanged run keeps even a backdated stamp.
+    r6 = subprocess.run(bp_args[:], capture_output=True, text=True)  # title restored -> entries change back
+    with open(idx, encoding='utf-8') as f:
+        kept = json.load(f)
+    stamp = kept['generated_at']
+    subprocess.run(bp_args, capture_output=True, text=True)
+    with open(idx, encoding='utf-8') as f:
+        again = json.load(f)
+    check('a second unchanged run keeps the same generated_at',
+          r6.returncode == 0 and again['generated_at'] == stamp, f'{stamp} -> {again.get("generated_at")}')
+
     # ---- snapshot: the way back ----
     # Served from a local directory rather than the real store: the suite makes no
     # network calls, and a backup tool that needs the thing it is backing up to be

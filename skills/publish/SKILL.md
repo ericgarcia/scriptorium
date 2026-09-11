@@ -676,9 +676,10 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
       URL**: the tool appends the post's public URL as the last paragraph, and the composer
       turns that bare URL into the post's card by itself. A poem goes one paragraph per line
       with an empty paragraph between stanzas — the Notes editor has no line-break node
-      (measured 2026-09-11). **A posted Note strips the empty paragraphs**, so a poem goes live
-      as one unbroken run of lines (measured the same day on the first poem Note: 64 sent, 53
-      live, 0 empty). Tell the author before posting a poem whose stanzas matter.
+      (measured 2026-09-11). **A posted Note strips whitespace-only paragraphs**, so the gap
+      between stanzas is a marker line, `stanza_break:` in the header — `braille` (U+2800, looks
+      empty; default), `dot` ("·"), or `none` ([`COMPANIONS.md`](../../docs/COMPANIONS.md)). Read
+      the posted Note on the feed to confirm the gaps held.
    2. **Show it to the author and get a yes that names the Note.** A Note is public the moment
       Post is clicked. The yes to publish the post does not cover it: ask for both in one line
       if that's convenient, but ask.
@@ -813,7 +814,9 @@ path they were composed by, not to Substack discarding it.
 > `scratch_draft:`; `python3 framework/tools/scratch_draft.py <outlet>` prints its edit URL and
 > the title to set. Open it, set that title, clear the body, paste — and never Continue or
 > Publish from it. An outlet with none: create one, give it that title, and record it in the
-> same session. The fidelity digest does not care what the title says.
+> same session. The fidelity digest does not care what the title says. **A site's scratch** is a
+> store record, not a draft: `bundle_pieces.py … --outlet <site> --scratch`, then
+> `store_publish.py`, and the site shows it at its noindexed `/scratch/` (quire 0.16).
 
 ## Pages — the same machinery, three differences
 

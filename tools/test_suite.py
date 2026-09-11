@@ -2437,7 +2437,7 @@ def unit_scratch(tmp):
         'half': {'scratch_draft': {'id': 1}},
         'wrong': {'scratch_draft': {'id': 7, 'edit_url': 'https://x.test/publish/post/8'}}}}
     check('a recorded scratch draft is returned as recorded',
-          sd.scratch_for(cfg, 'sub') == {'id': '215233016',
+          sd.scratch_for(cfg, 'sub') == {'kind': 'editor', 'id': '215233016',
                                          'edit_url': 'https://x.substack.com/publish/post/215233016'})
     check('an outlet with none recorded says so rather than inventing one',
           sd.scratch_for(cfg, 'bare') is None)
@@ -2453,6 +2453,50 @@ def unit_scratch(tmp):
         ok = True
     check('an outlet outlets.yaml does not define is an error, not a None', ok)
     check('the title says what the draft is', sd.TITLE.startswith('TEST') and 'never publish' in sd.TITLE)
+
+    # --- a site's scratch is a store record the site renders (quire 0.16) -----------------
+    site = {'outlets': {'af': {'scratch_draft': {'view_url': 'https://af.test/scratch/'}},
+                        'mixed': {'scratch_draft': {'view_url': 'https://af.test/scratch/', 'id': 3}}}}
+    check("a site's scratch is its store key and the page that shows it",
+          sd.scratch_for(site, 'af') == {'kind': 'store', 'store_key': 'scratch/af.json',
+                                         'view_url': 'https://af.test/scratch/'})
+    try:
+        sd.scratch_for(site, 'mixed'); ok = False
+    except ValueError:
+        ok = True
+    check('a scratch that is half editor, half site is refused', ok)
+
+    import subprocess
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bundle_pieces.py')
+    content, imgs, bundle = (os.path.join(tmp, 'scr-' + n) for n in ('content', 'imgs', 'bundle'))
+    os.makedirs(content); os.makedirs(os.path.join(imgs, 'live-one'))
+    with open(os.path.join(imgs, 'live-one', 'fig.webp'), 'wb') as f:
+        f.write(b'RIFF-not-really-webp')
+    with open(os.path.join(content, 'live-one.md'), 'w', encoding='utf-8') as f:
+        f.write('---\ntitle: Live One\npublished_at: 2026-09-11\ndigest: sha256:abc\n'
+                'hero:\n  src: /images/live-one/fig.webp\n  alt: A figure\n---\n\n'
+                'Words.\n\n![A figure](/images/live-one/fig.webp "What it means")\n')
+    r = subprocess.run([sys.executable, tool, content, bundle, '--outlet', 'af', '--images', imgs,
+                        '--scratch'], capture_output=True, text=True)
+    rec = os.path.join(bundle, 'scratch', 'af.json')
+    check('--scratch writes scratch/<outlet>.json', r.returncode == 0 and os.path.exists(rec),
+          r.stderr[-300:])
+    if os.path.exists(rec):
+        with open(rec, encoding='utf-8') as f:
+            got = json.load(f)
+        check("the scratch's pictures are its own, never the live piece's",
+              '../scratch/images/af/fig.webp' in got['body'] and '../images/live-one/' not in got['body']
+              and got['hero']['src'] == '../scratch/images/af/fig.webp', got['body'][-120:])
+    check('--scratch never writes the index, a piece record, or images/<slug>/',
+          not os.path.exists(os.path.join(bundle, 'index.json'))
+          and not os.path.exists(os.path.join(bundle, 'pieces'))
+          and not os.path.exists(os.path.join(bundle, 'images'))
+          and os.path.exists(os.path.join(bundle, 'scratch', 'images', 'af', 'fig.webp')))
+    with open(os.path.join(content, 'second.md'), 'w', encoding='utf-8') as f:
+        f.write('---\ntitle: Two\npublished_at: 2026-09-11\ndigest: sha256:def\n---\n\nMore.\n')
+    r = subprocess.run([sys.executable, tool, content, bundle, '--outlet', 'af', '--scratch'],
+                       capture_output=True, text=True)
+    check('--scratch refuses more than one piece', r.returncode != 0 and 'exactly one' in r.stderr, r.stderr)
 
 
 # ---------------------------------------------------------------- unit: tags

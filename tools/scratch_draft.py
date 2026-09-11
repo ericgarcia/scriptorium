@@ -24,6 +24,16 @@ is set on every use, so the draft always says what it is, whatever the last test
 
 AN OUTLET WITH NONE: create one draft, give it TITLE, and record its id and edit URL in
 outlets.yaml in the same session. From then on it is that outlet's scratch, for good.
+
+A SITE has no editor, so its scratch is a store record, scratch/<outlet>.json, that the site
+renders with its real renderer at a noindexed page no list or sitemap shows (quire 0.16):
+
+    alignmentfellowship:
+      scratch_draft:
+        view_url: https://alignmentfellowship.org/scratch/
+
+  python3 framework/tools/bundle_pieces.py <content-dir> <bundle-dir> --outlet <o> --scratch [--images DIR]
+  python3 framework/tools/store_publish.py <bundle-dir>      # then open view_url
 """
 import sys, argparse
 import yaml
@@ -41,11 +51,15 @@ def scratch_for(cfg, outlet):
     s = (outlets[outlet] or {}).get('scratch_draft')
     if not s:
         return None
+    if isinstance(s, dict) and s.get('view_url'):
+        if not str(s['view_url']).startswith('https://') or s.get('id') or s.get('edit_url'):
+            raise ValueError(f'{outlet}: a site scratch is an https view_url alone, got {s!r}')
+        return {'kind': 'store', 'store_key': f'scratch/{outlet}.json', 'view_url': s['view_url']}
     if not isinstance(s, dict) or not s.get('id') or not str(s.get('edit_url', '')).startswith('https://'):
         raise ValueError(f'{outlet}: scratch_draft needs an id and an https edit_url, got {s!r}')
     if str(s['id']) not in s['edit_url']:
         raise ValueError(f"{outlet}: scratch_draft edit_url does not carry its id {s['id']}")
-    return {'id': str(s['id']), 'edit_url': s['edit_url']}
+    return {'kind': 'editor', 'id': str(s['id']), 'edit_url': s['edit_url']}
 
 
 def main(argv=None):
@@ -60,7 +74,7 @@ def main(argv=None):
         if a.list:
             for name in (cfg.get('outlets') or {}):
                 s = scratch_for(cfg, name)
-                print(f"{name:24} {s['edit_url'] if s else '(none recorded)'}")
+                print(f"{name:24} {(s.get('edit_url') or s.get('view_url')) if s else '(none recorded)'}")
             return 0
         if not a.outlet:
             ap.error('name an outlet, or pass --list')
@@ -74,6 +88,11 @@ def main(argv=None):
               f'and record it under outlets.{a.outlet}.scratch_draft (id, edit_url) in {a.config}\n'
               f'in this session. Never make a second.', file=sys.stderr)
         return 2
+    if s['kind'] == 'store':
+        print(f"view_url:  {s['view_url']}\nstore_key: {s['store_key']}\n"
+              f"upload:    bundle_pieces.py <content-dir> <bundle-dir> --outlet {a.outlet} --scratch "
+              f"[--images DIR], then store_publish.py <bundle-dir>")
+        return 0
     print(f"edit_url: {s['edit_url']}\ntitle:    {TITLE}")
     return 0
 

@@ -17,6 +17,11 @@ BUNDLE.md states both; this converts the first into the second.
           <bundle-dir>/images/<slug>/…
           <bundle-dir>/index.json     merged, never rewritten from scratch
 
+  --scratch   ONE piece becomes the outlet's scratch record instead: scratch/<outlet>.json,
+              its pictures under scratch/images/<outlet>/. Never pieces/, images/<slug>/ or the
+              index — so a test cannot replace a live figure or appear in any list. quire's
+              getScratch reads it and the site shows it at a noindexed /scratch/ (2026-09-11).
+
 TWO THINGS IT DOES NOT DO, both deliberate:
 
   It does not recompute the digest. The digest was computed by the exporter over the
@@ -105,6 +110,34 @@ def to_relative(src):
     return f'../{s}' if s.startswith('images/') else src
 
 
+def write_scratch(a, piece, slug):
+    """The outlet's scratch record: one per outlet, overwritten by every test, never listed.
+
+    Its pictures move with it, to scratch/images/<outlet>/: a test of a changed figure must not
+    overwrite the live piece's image at images/<slug>/, which a real page is serving."""
+    old, new = f'../images/{slug}/', f'../scratch/images/{a.outlet}/'
+    piece['body'] = piece['body'].replace(old, new)
+    if piece.get('hero'):
+        piece['hero']['src'] = str(piece['hero'].get('src', '')).replace(old, new)
+    if piece.get('images'):
+        piece['images'] = [{**i, 'src': str(i.get('src', '')).replace(old, new)} for i in piece['images']]
+    out_path = os.path.join(a.bundle, 'scratch', f'{a.outlet}.json')
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding='utf-8') as fh:
+        json.dump(piece, fh, indent=2, ensure_ascii=False)
+        fh.write('\n')
+    n = 0
+    frm = os.path.join(a.images, slug) if a.images else None
+    if frm and os.path.isdir(frm):
+        to = os.path.join(a.bundle, 'scratch', 'images', a.outlet)
+        if os.path.isdir(to):
+            shutil.rmtree(to)
+        shutil.copytree(frm, to)
+        n = len(os.listdir(to))
+    print(f"✓ {out_path} — {a.outlet}'s scratch ({slug}), {n} image(s); index.json untouched")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -114,6 +147,8 @@ def main():
                     help='the outlet these pieces are published to')
     ap.add_argument('--images', help='directory holding <slug>/ image folders')
     ap.add_argument('--kind', default='piece', choices=['piece', 'talk'])
+    ap.add_argument('--scratch', action='store_true',
+                    help="write the outlet's scratch record (scratch/<outlet>.json), never the index")
     a = ap.parse_args()
 
     src_dir = a.content
@@ -125,7 +160,10 @@ def main():
     if not files:
         die(1, f'{src_dir}: no .md files')
 
-    os.makedirs(os.path.join(a.bundle, 'pieces'), exist_ok=True)
+    if a.scratch and (len(files) != 1 or a.kind != 'piece'):
+        die(1, f'--scratch takes exactly one piece (found {len(files)} file(s), kind {a.kind})')
+    if not a.scratch:
+        os.makedirs(os.path.join(a.bundle, 'pieces'), exist_ok=True)
 
     index_path = os.path.join(a.bundle, 'index.json')
     index = {'spec': '2', 'generated_at': '', 'pieces': []}
@@ -175,6 +213,9 @@ def main():
             piece['hero'] = hero
         if meta.get('images'):
             piece['images'] = [{**i, 'src': to_relative(i.get('src'))} for i in meta['images']]
+
+        if a.scratch:
+            return write_scratch(a, piece, slug)
 
         out_path = (os.path.join(a.bundle, 'talks', slug, 'piece.json') if a.kind == 'talk'
                     else os.path.join(a.bundle, 'pieces', f'{slug}.json'))

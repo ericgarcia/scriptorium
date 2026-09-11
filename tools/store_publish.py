@@ -141,6 +141,34 @@ def remote_objects(s3, bucket):
     return out
 
 
+def index_losses(live, bundle):
+    """Slugs the live index lists that the bundle's index.json would drop.
+
+    Everything else this tool does is additive, but index.json is ONE object: uploading it
+    replaces the store's list outright. A fresh bundle directory starts its index empty and
+    lists only its own pieces, so publishing one essay from one would replace the live
+    index with a one-entry index — unpublishing every talk and every other outlet's piece
+    from every listing, with every object still sitting in the bucket. Found 2026-09-10,
+    before the first professional publish rather than after it.
+    """
+    have = {(p.get('slug'), p.get('kind', 'piece')) for p in (bundle or {}).get('pieces', [])}
+    return sorted(f"{s} ({k})" for s, k in
+                  {(p.get('slug'), p.get('kind', 'piece')) for p in (live or {}).get('pieces', [])} - have)
+
+
+def live_index(base_url):
+    """The store's current index.json, {} if the store has none yet."""
+    import urllib.request, urllib.error
+    url = base_url.rstrip('/') + f'/index.json?cb={os.urandom(4).hex()}'
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 404):
+            return {}
+        raise
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True, description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -192,6 +220,24 @@ def main():
             upload.append((key, path))
 
     stale = sorted(set(remote) - set(local))
+
+    # index.json replaces the live list outright; refuse a bundle whose index would drop
+    # entries that are live. --prune is the one flag that means "yes, remove things".
+    if 'index.json' in local and not a.prune:
+        if not store.get('base_url'):
+            die(1, f'{a.config}: store.base_url is required to check index.json before replacing it')
+        try:
+            live = live_index(store['base_url'])
+        except Exception as e:                                    # noqa: BLE001
+            die(1, f'cannot read the live index to check it — {e}')
+        with open(local['index.json'], encoding='utf-8') as fh:
+            lost = index_losses(live, json.load(fh))
+        if lost:
+            die(4, f"refusing: this bundle's index.json would UNPUBLISH {len(lost)} live "
+                   f"entr{'y' if len(lost) == 1 else 'ies'} — {', '.join(lost[:8])}"
+                   f"{' …' if len(lost) > 8 else ''}. Seed the bundle from the live index first "
+                   f"(curl {store['base_url'].rstrip('/')}/index.json -o {a.bundle}/index.json), "
+                   f"or pass --prune if removal is meant.")
 
     print(f"bundle    {a.bundle}")
     print(f"store     s3://{bucket}  ->  {store.get('base_url', '(no base_url)')}")

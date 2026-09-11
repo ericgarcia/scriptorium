@@ -1550,6 +1550,18 @@ def unit_store(tmp):
           store_publish.cache_control('talks/x/piece.json', cc) == 'TALKMUT')
     check('an unknown key falls back rather than caching forever',
           store_publish.cache_control('stray.txt', cc) == 'PIECES')
+    live = {'pieces': [{'slug': 'shared', 'kind': 'talk'}, {'slug': 'shared', 'kind': 'piece'},
+                       {'slug': 'other', 'kind': 'piece'}]}
+    check('a bundle index that would drop live entries is caught',
+          store_publish.index_losses(live, {'pieces': [{'slug': 'new', 'kind': 'piece'}]})
+          == ['other (piece)', 'shared (piece)', 'shared (talk)'],
+          'index.json replaces the live list outright; a fresh bundle would unpublish the store')
+    check('and it is keyed by kind: an essay does not stand in for its talk',
+          store_publish.index_losses(live, {'pieces': [{'slug': 'shared', 'kind': 'piece'},
+                                                        {'slug': 'other', 'kind': 'piece'}]})
+          == ['shared (talk)'])
+    check('a bundle seeded from the live index loses nothing',
+          store_publish.index_losses(live, {'pieces': live['pieces'] + [{'slug': 'new'}]}) == [])
     check('content types are pinned for the formats a bundle carries',
           store_publish.content_type('a/b.webp') == 'image/webp'
           and store_publish.content_type('a/b.js').startswith('text/javascript')

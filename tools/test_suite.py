@@ -2099,6 +2099,40 @@ def unit_captions(tmp):
           '.webp "The \\"chart\\".")' in md, (r.stderr[-200:] or md[-300:]))
 
 
+def unit_linkedin_post(tmp):
+    """The announcing post is the author's approved text, kept beside the piece (2026-09-11)."""
+    print("\n-- linkedin: the announcing post ------------------------------------")
+    piece = os.path.join(tmp, 'li-post-piece')
+    os.makedirs(piece, exist_ok=True)
+    with open(os.path.join(piece, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('*scaffold*\n\n---\n\nOpening paragraph.\n\nClosing paragraph.\n')
+    with open(os.path.join(piece, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write('title: A Piece\nsubtitle: Its subtitle\noutlets:\n  - muffinlabs\n  - linkedin\n'
+                'blog_url: https://www.muffinlabs.ai/blog/a-piece\n'
+                'verified:\n  date: 2026-09-10\n  by: test\n  covers: the fixture\n')
+    ocfg = os.path.join(tmp, 'li-post-outlets.yaml')
+    with open(ocfg, 'w', encoding='utf-8') as f:
+        f.write('outlets:\n  muffinlabs:\n    reader_base: https://www.muffinlabs.ai/blog/\n'
+                '    manifest_url_key: blog_url\n  linkedin:\n    reader_base: https://www.linkedin.com/pulse/\n'
+                '    manifest_url_key: linkedin_url\n    derive: false\n')
+    tool = os.path.join(HERE, 'md_to_linkedin.py')
+    out = os.path.join(tmp, 'li-post-out')
+    text = 'First paragraph of the announcement.\n\nSecond, ending in a colon:'
+    with open(os.path.join(piece, 'linkedin-post.md'), 'w', encoding='utf-8') as f:
+        f.write(text + '\n')
+    r = subprocess.run([sys.executable, tool, piece, '--outlets', ocfg, '--out', out, '--no-fetch'],
+                       capture_output=True, text=True)
+    art = json.load(open(os.path.join(out, 'article.json'))) if r.returncode == 0 else {}
+    check('linkedin: the approved announcing post is carried into article.json',
+          art.get('announce') == text, (r.stdout + r.stderr)[-300:])
+    with open(os.path.join(piece, 'linkedin-post.md'), 'w', encoding='utf-8') as f:
+        f.write('x' * 3001)
+    r = subprocess.run([sys.executable, tool, piece, '--outlets', ocfg, '--out', out, '--no-fetch', '--check'],
+                       capture_output=True, text=True)
+    check('linkedin: an announcing post over 3,000 characters is refused',
+          r.returncode == 1 and 'linkedin-post.md is 3,001 characters' in r.stderr, r.stderr[-300:])
+
+
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
     here is a refusal: every case is a way the copy could go up wrong or go up first."""
@@ -2979,6 +3013,7 @@ def main():
         unit_publications(tmp)
         unit_substack_tags(tmp)
         unit_linkedin(tmp)
+        unit_linkedin_post(tmp)
         unit_captions(tmp)
         corpus_integrity()
         corpus_headers()

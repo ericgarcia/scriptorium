@@ -205,11 +205,21 @@ def main():
         refusals.append(f'{len(files)} image(s) in the draft but {len(images)} figure slot(s) '
                         'rendered — a figure would go missing')
 
+    # The announcing post: drafted by the agent from the piece's own claims, approved by the
+    # author, and kept beside the piece so the text that went out is on record (Eric, 2026-09-11).
+    post_path = os.path.join(piece, 'linkedin-post.md')
+    announce = open(post_path, encoding='utf-8').read().strip() if os.path.exists(post_path) else ''
+    if len(announce) > 3000:
+        refusals.append(f'linkedin-post.md is {len(announce):,} characters; a LinkedIn post takes 3,000')
+
     title = manifest.get('title') or os.path.basename(piece)
     print(f"piece      {piece}")
     print(f"title      {title}")
     print(f"canonical  {canonical or '—'}   [{where}]")
     print(f"body       {len(body)} block(s), {len(notes)} note(s), {len(images)} figure(s)")
+    print(f"announce   {len(announce):,} characters (linkedin-post.md)" if announce else
+          "announce   none yet: draft two or three from the piece's claims; the author approves one; "
+          "save it as linkedin-post.md")
 
     if refusals:
         print(f"\nREFUSED — {len(refusals)} reason(s):", file=sys.stderr)
@@ -236,7 +246,7 @@ def main():
     for img in images:
         img['file'] = os.path.join(piece, img.pop('path'))
     with open(os.path.join(out, 'article.json'), 'w', encoding='utf-8') as fh:
-        json.dump({'title': title, 'canonical': canonical, 'images': images},
+        json.dump({'title': title, 'canonical': canonical, 'images': images, 'announce': announce},
                   fh, indent=2, ensure_ascii=False)
         fh.write('\n')
     # One carry payload per figure. The bytes and the alt text travel together, so the

@@ -1,6 +1,6 @@
 ---
 name: linkedin-article
-description: Compose a finished, already-published piece as a LinkedIn Article DRAFT for the author to publish — the syndication copy, with an "Originally published at" line in place of rel=canonical and endnotes in place of footnotes. Use when the user says "put X on LinkedIn", "syndicate X to LinkedIn", "LinkedIn article for X", or a piece whose publish.yaml names `linkedin` has gone live on its canonical outlet. Composes and STOPS: the author reviews, writes the announcing post, and clicks Publish. Never posts, never engages, never publishes.
+description: Compose a finished, already-published piece as a LinkedIn Article DRAFT for the author to publish — the syndication copy, with an "Originally published at" line in place of rel=canonical and endnotes in place of footnotes. Use when the user says "put X on LinkedIn", "syndicate X to LinkedIn", "LinkedIn article for X", or a piece whose publish.yaml names `linkedin` has gone live on its canonical outlet. Composes the Article, drafts the announcing post, and — on the author's approval of that exact text — types it and clicks Publish (Eric, 2026-09-11). Never engages: no reactions, comments, messages, connections or reposts, and no post but an Article's own announcement.
 ---
 
 # LinkedIn Article
@@ -24,10 +24,12 @@ wider scope than editing a headline, and it is the author's call, not the tool's
 
 Where it is allowed, keep what makes it defensible:
 
-- **One Article, at human pace, and a human publishes.** No loops, no batches.
-- **Nothing social.** Never a reaction, comment, connection, message or repost — and never
-  the announcing Post either: the publish dialog asks for one, and the author writes it.
-- **Draft only.** Close the editor with the Article saved as a draft; LinkedIn autosaves.
+- **One Article, at human pace, and the author decides.** No loops, no batches. The Article goes
+  out only on the author's approval of the announcing post's exact text, per Article.
+- **Nothing social.** Never a reaction, comment, connection, message or repost, and no post but
+  the Article's own announcement.
+- **Draft first.** The Article is composed and left as a draft (LinkedIn autosaves) until the
+  announcement is approved.
 
 ## Preflight — the converter refuses, and that is the point
 
@@ -108,13 +110,20 @@ author's sessions, so they sign in there themselves.
      after 45 s. Then reload and read back both the attribute and the visible text.
 6. **The onboarding modal** ("Say hello to a smoother editing and publishing experience") opens
    on first use and closes on its own. Nothing needs clicking.
-7. **Stop.** The draft autosaves ("Draft - saved"). Say what was composed and where; the author
-   reviews it, writes the announcing post in the publish dialog, and clicks Publish.
+7. **Draft the announcing post.** Two or three options, each built only from claims the piece
+   makes — the dialog's box reads *Tell your network what your article is about* — and put them to
+   the author. The approved text goes in `pieces/<slug>/linkedin-post.md`; `md_to_linkedin` carries it
+   into `article.json` as `announce` and refuses one over 3,000 characters.
+8. **Publish, on that approval — one guarded script.** Click **Next** in the editor; the dialog holds
+   the author line with the audience (*Post to Anyone*), a contenteditable box
+   (`[aria-label="Text editor for creating content"]`), a schedule button and **Publish**. Then:
+   refuse unless the box is empty; `execCommand('insertText')` each paragraph with two
+   `insertParagraph`s between (a blank line survives only that way, as with typing); read the box
+   back and **refuse unless it equals the approved text**; refuse unless the audience is what the
+   author saw; click **Publish**. Success lands on `/pulse/<slug>-<author>-<id>/?published=t` —
+   strip the query and record it (below). Measured 2026-09-11 on love-is-not-a-metric-space.
 
-**The agent cannot delete a LinkedIn draft**: permanent deletion is the author's. A test draft
-stays until they remove it or it is overwritten by the real compose.
-
-## After the author publishes
+## After it publishes
 
 - Record the Article's URL in `publish.yaml` under the outlet's `manifest_url_key`
   (`linkedin_url` on this desk). **It cannot be derived** — LinkedIn appends an id — so an

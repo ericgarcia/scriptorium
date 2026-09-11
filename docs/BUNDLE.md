@@ -29,6 +29,7 @@ have to happen in between, and every one of them is a leak if it doesn't:
   bundle.json               # spec version, generator, what's inside
   content/<slug>.md         # YAML front matter + markdown body
   images/<slug>/<name>.webp # derived, web-sized
+  talks/<slug>/piece.json   # a talk's RECORD, filed by kind beside its deck — see Talks
   talks/<slug>/deck.html    # a talk's slides, standalone — see Talks
   talks/<slug>/notes.json   # per-slide speaker notes
   talks/<slug>/deck-stage.js
@@ -129,6 +130,17 @@ The bundle carries it and does not look inside. What a destination needs to *dri
 **`slide_count` is the deck's own count**, copied from `notes.json` so a destination can
 render a position indicator before the deck has loaded. If the two ever disagree, the
 deck is right and the bundle is stale.
+
+### Filed by kind (2026-09-10)
+
+A talk's record lives at `talks/<slug>/piece.json`, beside its deck — **not** at
+`pieces/<slug>.json`. A talk is still not a second content type: same schema, same renderer, same
+digest, same allowlist, same outlets. Only where it is *filed* changed, and the reason is the
+slug. With every record in `pieces/`, one slug named one thing across the whole store — every
+kind, every site — so *Love Is Not a Metric Space* could not exist as both a talk and its
+companion essay, though the sites already served them at `/talks/…` and `/blog/…`. Sites read a
+talk with quire's `store.getTalk` (0.8.0), which falls back to the old location only for a record
+that is a talk, so the move is safe in either order and an essay is never served as a talk.
 
 ### One thing this spec deliberately does not settle
 

@@ -1546,10 +1546,27 @@ def unit_store(tmp):
           and got['talks/x/deck.html'] == 'TALKMUT'
           and got['talks/x/notes.json'] == 'TALKMUT', str(got))
     check('content json is short-lived', got['index.json'] == 'IDX' and got['pieces/x.json'] == 'PIECES')
+    # A talk's record is content JSON like any piece, so it takes the pieces policy —
+    # short-lived, not the year-long rule for deck assets (3d26086's reasoning, kept).
     check("a talk's record is rewritten in place, so it is not cached for a year",
-          store_publish.cache_control('talks/x/piece.json', cc) == 'TALKMUT')
+          store_publish.cache_control('talks/x/piece.json', cc) == 'PIECES')
     check('an unknown key falls back rather than caching forever',
           store_publish.cache_control('stray.txt', cc) == 'PIECES')
+    check("a talk's record is content json, short-lived — not the year-long talk asset rule",
+          store_publish.cache_control('talks/x/piece.json', cc) == 'PIECES'
+          and store_publish.cache_control('talks/x/assets/piece.json', cc) == 'TALK',
+          'filed at talks/<slug>/piece.json, a typo fix must reach readers in a minute')
+    live = {'pieces': [{'slug': s} for s in ('talk', 'essay-a', 'essay-b')]}
+    check('a bundle index that drops live pieces is caught',
+          store_publish.index_losses(live, {'pieces': [{'slug': 'new'}]}) == ['essay-a', 'essay-b', 'talk'],
+          'index.json replaces the live list outright; a fresh bundle would unpublish the store')
+    check('a bundle seeded from the live index loses nothing',
+          store_publish.index_losses(live, {'pieces': live['pieces'] + [{'slug': 'new'}]}) == [])
+    check('an empty store loses nothing', store_publish.index_losses({}, {'pieces': []}) == [])
+    check('a talk dropped while its same-slug essay stays is caught, and named with its kind',
+          store_publish.index_losses(
+              {'pieces': [{'slug': 'x', 'kind': 'piece'}, {'slug': 'x', 'kind': 'talk'}]},
+              {'pieces': [{'slug': 'x', 'kind': 'piece'}]}) == ['x (talk)'])
     check('content types are pinned for the formats a bundle carries',
           store_publish.content_type('a/b.webp') == 'image/webp'
           and store_publish.content_type('a/b.js').startswith('text/javascript')
@@ -1573,6 +1590,12 @@ def unit_store(tmp):
         json.dump({'spec': '2', 'generated_at': '', 'pieces': [
             {'slug': 'elsewhere', 'title': 'Elsewhere', 'published_at': '2026-01-01',
              'digest': 'sha256:dead', 'outlets': ['alignmentfellowship'], 'kind': 'piece'}]}, f)
+    # A bundle dir reused from before talks were filed by kind still holds the talk's record
+    # at pieces/<slug>.json. Left there, it would be uploaded over whatever essay now owns
+    # that key.
+    os.makedirs(os.path.join(bundle, 'pieces'), exist_ok=True)
+    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), 'w', encoding='utf-8') as f:
+        json.dump({'slug': 'a-talk', 'talk': {'deck': 'x', 'notes': 'y', 'slide_count': 1}}, f)
 
     r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
                        capture_output=True, text=True)
@@ -1580,9 +1603,11 @@ def unit_store(tmp):
     if r.returncode != 0:
         return
 
-    check("a talk's record is filed beside its deck, not in pieces/",
-          os.path.exists(os.path.join(bundle, 'talks', 'a-talk', 'piece.json'))
-          and not os.path.exists(os.path.join(bundle, 'pieces', 'a-talk.json')))
+    check("a talk's record is filed by kind, beside its deck",
+          os.path.exists(os.path.join(bundle, 'talks', 'a-talk', 'piece.json')),
+          'talks/<slug>/piece.json — so a talk and an essay can share a slug')
+    check("and a stale old-layout record is removed, so it cannot overwrite an essay",
+          not os.path.exists(os.path.join(bundle, 'pieces', 'a-talk.json')))
     with open(os.path.join(bundle, 'talks', 'a-talk', 'piece.json'), encoding='utf-8') as f:
         piece = json.load(f)
     check('the piece carries a talk block with relative paths',

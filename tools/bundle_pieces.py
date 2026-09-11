@@ -60,6 +60,15 @@ def split_front_matter(text, path):
     return yaml.safe_load(head) or {}, body.lstrip('\n')
 
 
+def recorded_publication(path):
+    """The publication an already-written record in the bundle names, if any."""
+    try:
+        with open(path, encoding='utf-8') as fh:
+            return json.load(fh).get('publication')
+    except (OSError, ValueError):
+        return None
+
+
 def check_tags(value, path):
     """Front matter `tags:` -> the list, or die. [{tag, label}], as md_to_site writes it."""
     ok = isinstance(value, list) and all(
@@ -155,6 +164,8 @@ def main():
             piece['syndicated'] = meta['syndicated']
         if meta.get('tags'):
             piece['tags'] = check_tags(meta['tags'], path)
+        if meta.get('publication'):
+            piece['publication'] = str(meta['publication'])
         if meta.get('hero'):
             hero = dict(meta['hero'])
             hero['src'] = to_relative(hero.get('src'))
@@ -164,6 +175,14 @@ def main():
 
         out_path = (os.path.join(a.bundle, 'talks', slug, 'piece.json') if a.kind == 'talk'
                     else os.path.join(a.bundle, 'pieces', f'{slug}.json'))
+        # The store keys a record by slug and kind, across EVERY publication it serves. A slug
+        # one publication already holds must not be taken by another's piece: the record would
+        # be overwritten and the first publication's site would serve the second's words.
+        theirs = (by_key.get((slug, a.kind)) or {}).get('publication') or recorded_publication(out_path)
+        if theirs and piece.get('publication') and theirs != piece['publication']:
+            die(9, f"{path}: {slug!r} ({a.kind}) already belongs to {theirs} in this bundle, and this "
+                   f"piece is {piece['publication']}'s. Two publications cannot share a slug in one "
+                   f"store — set site_slug in one manifest.")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, 'w', encoding='utf-8') as fh:
             json.dump(piece, fh, indent=2, ensure_ascii=False)
@@ -188,6 +207,8 @@ def main():
         }
         if meta.get('subtitle'):
             entry['subtitle'] = meta['subtitle']
+        if piece.get('publication'):
+            entry['publication'] = piece['publication']
         if piece.get('tags'):
             # In the index too: a tag page is a listing, and a listing must not have to
             # fetch every piece to find out which ones belong on it.

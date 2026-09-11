@@ -30,8 +30,10 @@ USAGE
     --quality N            WebP quality (default 82)
     --image-store NAME     repo (default) | s3 — recorded in bundle.json
     --outlet NAME          export only pieces whose publish.yaml `outlets:` names NAME
-    --tags FILE            the tag vocabulary (default: publishing/tags.yaml in the
-                           instance). A piece's `tags:` ship with their labels.
+    --tags FILE            force ONE tag vocabulary for every piece. By default each
+                           piece's tags are checked against its publication's vocabulary
+                           (publications.py), or publishing/tags.yaml on a desk with no
+                           publication registry. A piece's `tags:` ship with their labels.
     --include-unpublished  export pieces with no `published_at` (held back by default)
     --force                export even pieces that opted into nothing
     --apply                write. Dry run by default.
@@ -39,7 +41,8 @@ USAGE
 EXIT
   0 ok    1 usage    3 nothing opted in    4 a draft is missing its `---`
   5 an image could not be resolved
-  8 a piece carries a tag the vocabulary does not define (or there is no vocabulary)
+  8 a piece carries a tag its vocabulary does not define (or there is no vocabulary)
+  9 a piece names no publication, or declares an outlet another publication owns
 """
 import sys, os, re, json, argparse, hashlib, datetime
 
@@ -49,6 +52,7 @@ sys.path.insert(0, HERE)
 import yaml                                                          # noqa: E402
 from md_to_substack import clean_footnote, render_reader             # noqa: E402
 import tags as tagvocab                                              # noqa: E402
+import publications as pb                                            # noqa: E402
 
 try:
     from PIL import Image
@@ -267,7 +271,7 @@ def renames_for(man, source_slug, slug):
     return out
 
 
-def bundle_tags(slug, man, vocab):
+def bundle_tags(slug, man, vocabs, publication):
     """`tags:` -> [{tag, label}], in vocabulary order.
 
     The label travels with the tag so a destination can render a tag page from the bundle
@@ -278,8 +282,14 @@ def bundle_tags(slug, man, vocab):
     names, problem = tagvocab.tags_of(man)
     if problem:
         die(8, f"{slug}: publish.yaml {problem}")
+    try:
+        vocab, vproblems = vocabs.get(publication)
+    except tagvocab.Refused as e:
+        die(8, f"{slug}: {e}")
+    if vproblems:
+        die(8, f"{slug}: its tag vocabulary is malformed:\n  " + "\n  ".join(vproblems))
     if vocab is None:
-        die(8, f"{slug} carries tags but no tag vocabulary was found. Pass --tags <file>.")
+        die(8, f"{slug} carries tags but there is no vocabulary at {vocabs.path(publication)}.")
     unknown = [t for t in names if t not in vocab]
     if unknown:
         die(8, f"{slug}: not in the tag vocabulary: {', '.join(unknown)}. Run tags.py check.")
@@ -303,7 +313,15 @@ def export_piece(piece_dir, bundle, opts):
     body, stripped = strip_internal(body)
     body, images, hero = resolve_images(piece_dir, slug, body, bundle, opts)
 
+    # The publication a piece belongs to travels with it, so the store can refuse to let one
+    # publication's piece overwrite another's at the same slug (bundle_pieces, store_publish).
+    publication, pprobs = pb.of_piece(man, opts.pubs)
+    if pprobs:
+        die(9, f"{source_slug}: publish.yaml {'; '.join(pprobs)}")
+
     fm = {'slug': slug, 'title': man.get('title') or slug}
+    if publication:
+        fm['publication'] = publication
     if source_slug != slug:
         # What the desk calls it. Keeps a bundle traceable back to the piece it came
         # from, and lets the site emit a redirect from any URL it published before.
@@ -312,7 +330,7 @@ def export_piece(piece_dir, bundle, opts):
         if man.get(k):
             fm[k] = man[k]
     if man.get('tags'):
-        fm['tags'] = bundle_tags(slug, man, opts.vocab)
+        fm['tags'] = bundle_tags(slug, man, opts.vocabs, publication)
     if opts.canonical_base:
         fm['canonical'] = f"{opts.canonical_base.rstrip('/')}/{slug}"
     if opts.syndicated and man.get('public_url'):
@@ -353,12 +371,13 @@ def main():
     ap.add_argument('--apply', action='store_true')
     o = ap.parse_args()
 
-    vfile = o.tags or tagvocab.vocab_path(tagvocab.instance_root())
-    if o.tags and not os.path.exists(vfile):
-        die(8, f"--tags {vfile}: no such file")
-    o.vocab, vproblems = tagvocab.load_vocab(vfile)
-    if vproblems:
-        die(8, "the tag vocabulary is malformed:\n  " + "\n  ".join(vproblems))
+    root = pb.instance_root()
+    o.pubs, reg_problems = pb.load(root)
+    if reg_problems:
+        die(9, "the publication registry is malformed:\n  " + "\n  ".join(reg_problems))
+    if o.tags and not os.path.exists(o.tags):
+        die(8, f"--tags {o.tags}: no such file")
+    o.vocabs = tagvocab.Vocabularies(root, o.tags, o.pubs)
 
     def opted_in(piece):
         m = load_manifest(piece)

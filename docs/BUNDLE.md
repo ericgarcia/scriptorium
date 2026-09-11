@@ -84,12 +84,27 @@ piece is *about*, where a collection names where it sits in a reading order. `ta
 stable and URL-safe, so a destination can serve `/…/tags/<tag>`; `label` is what it
 shows. The label travels in the bundle so a tag page renders from the bundle alone.
 
-Tags come from a **controlled vocabulary** on the desk (`tools/tags.py`), and the
-exporter **refuses** a piece carrying a tag the vocabulary does not define — so every
-`tag` in a bundle means one thing, with one label, everywhere it appears. The store's
+Tags come from the **controlled vocabulary of the piece's publication** (`tools/tags.py`,
+`PUBLICATIONS.md`), and the exporter **refuses** a piece carrying a tag that vocabulary does
+not define — so a `tag` means one thing, with one label, across its publication. Two
+publications may use the same id for different things: a destination reads tags through its
+outlet, and every outlet belongs to one publication. The store's
 `index.json` entry carries the same list, because a tag page is a listing and a listing
 should not have to fetch every piece to learn which ones belong on it. A destination
 that predates tags ignores the field.
+
+### Publication
+
+```yaml
+publication: being-good
+```
+
+Optional (2026-09-11): which publication the piece belongs to, on a desk that has more than
+one (`PUBLICATIONS.md`). The store is shared by every publication's sites and keys a record by
+slug, so this is what lets the tools refuse one publication's piece overwriting another's —
+`bundle_pieces.py` exits 9 and `store_publish.py` exits 7 rather than let a record cross. The
+index entry carries it too. A destination still filters by outlet; it never needs this field to
+show the right pieces.
 
 ## Images
 

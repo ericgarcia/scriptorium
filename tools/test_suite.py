@@ -39,6 +39,9 @@ WHAT IT COVERS — every case here is a bug that actually happened (2026-09-01):
   unit    tags: the textual `tags:` writer keeps every comment and refuses any write that
           would change another key; an undefined tag stops at the exporter
   corpus  every tag a piece carries is in the desk's vocabulary
+  unit    publications: the registry, a piece's one publication, a vocabulary per publication,
+          and the store refusing one publication's piece over another's slug
+  corpus  with a registry, every manifest names its publication and owns its outlets
 """
 import os, re, sys, json, shutil, subprocess, tempfile, datetime, hashlib
 
@@ -2044,6 +2047,146 @@ def unit_tags(tmp):
           r.stderr[-200:])
 
 
+
+# ---------------------------------------------------------------- unit: publications
+def unit_publications(tmp):
+    """Two publications on one desk, kept apart (2026-09-11).
+
+    A desk grew a second publication — a professional line beside a devotional one — and the
+    only thing that said which piece was whose was a comment. Tags were about to be a single
+    vocabulary for both, and the shared content store keys a record by slug alone, so one
+    publication's piece could overwrite the other's and its site would serve the wrong words.
+    These cases pin the registry, the per-piece assignment, per-publication vocabularies, and
+    the two store guards."""
+    print("\n-- publications: registry, assignment, per-publication tags, store --")
+    import publications as pb
+    import tags as tg
+    import yaml as _y
+    root = os.path.join(tmp, 'pubdesk'); pdir = os.path.join(root, 'pieces')
+    os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    reg = os.path.join(root, 'publishing', 'publications.yaml')
+    check('pubs: no registry is a one-publication desk, and nothing is asked',
+          pb.load(root) == (None, []) and pb.of_piece({'title': 'x'}, None) == (None, []))
+
+    open(reg, 'w').write('publications:\n  a:\n    name: A\n    outlets: [site-a]\n'
+                         '  a:\n    name: A again\n')
+    _p, probs = pb.load(root)
+    check('pubs: a publication defined twice is caught (PyYAML would keep the second)',
+          any('defined twice' in x for x in probs), str(probs))
+    open(reg, 'w').write('publications:\n  a:\n    name: A\n    outlets: [site-a]\n'
+                         '  b:\n    name: B\n    outlets: [site-a, site-b]\n')
+    _p, probs = pb.load(root)
+    check('pubs: an outlet owned by two publications is caught',
+          any("'site-a' belongs to both a and b" in x for x in probs), str(probs))
+    open(reg, 'w').write('# registry\npublications:\n  a:\n    name: A\n    outlets: [site-a]\n'
+                         '    styles: [voice-a]\n  b:\n    name: B\n    outlets: [site-b]\n')
+    pubs, probs = pb.load(root)
+    check('pubs: a clean registry loads, each with its own vocabulary path',
+          not probs and pubs['b']['tags'].endswith(os.path.join('publishing', 'tags', 'b.yaml')), str(probs))
+
+    def piece(slug, text, draft=None):
+        d = os.path.join(pdir, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(text)
+        if draft:
+            open(os.path.join(d, 'draft.md'), 'w').write(draft)
+        return d
+    orig = ('# manifest\ntitle: One\nsubtitle: >-\n  A folded\n  subtitle.\n# why the outlets\n'
+            'outlets:\n  - site-a\npublished_at: 2026-09-01\n')
+    one = piece('one', orig, draft='# One\n*header*\n\n---\n\nBody.\n')
+    check('pubs: a piece with no publication is a problem once there is a registry',
+          pb.of_piece(pb.read_manifest(one), pubs)[1] != [])
+    rc = pb.main(['--root', root, 'assign', 'one', 'a'])
+    text = open(os.path.join(one, 'publish.yaml')).read()
+    check('pubs: assign writes one line, under the (folded) subtitle, and nothing else moves',
+          rc == 0 and text == orig.replace('  subtitle.\n', '  subtitle.\npublication: a\n'), repr(text))
+    check('pubs: assign will not silently move a piece to another publication',
+          pb.main(['--root', root, 'assign', 'one', 'b']) == 3)
+    pb.main(['--root', root, 'assign', 'one', 'b', '--move'])
+    check('pubs: an outlet the publication does not own is named as the problem',
+          any('site-a' in x and 'belong to a' in x for x in pb.of_piece(pb.read_manifest(one), pubs)[1]),
+          str(pb.of_piece(pb.read_manifest(one), pubs)))
+    pb.main(['--root', root, 'assign', 'one', 'a', '--move'])
+    leg = piece('legacy', 'title: L\npublication: a (The A Line)\n')
+    check('pubs: the older free-text form reads as unassigned, not as a publication',
+          pb.of_piece(pb.read_manifest(leg), pubs)[0] is None)
+    pb.main(['--root', root, 'assign', 'legacy', 'a'])
+    check('pubs: assign keeps the id and moves the old label into a comment',
+          open(os.path.join(leg, 'publish.yaml')).read() == 'title: L\npublication: a   # The A Line\n',
+          repr(open(os.path.join(leg, 'publish.yaml')).read()))
+    os.remove(os.path.join(leg, 'publish.yaml'))
+    check('pubs: assigning an unknown publication is refused', pb.main(['--root', root, 'assign', 'one', 'zzz']) == 3)
+    two = piece('two', 'title: Two\npublication: b\noutlets: [site-b]\npublished_at: 2026-09-01\n',
+                draft='# Two\n*header*\n\n---\n\nBody.\n')
+    lone = piece('lone', 'title: Lone\n')
+
+    # one vocabulary per publication; the same id may mean two things
+    run = lambda *x: tg.main(['--root', root, *x])
+    check('pubs: define asks which publication when there is more than one',
+          run('define', 'practice', '--label', 'P', '--about', 'x') == 3)
+    run('define', 'practice', '--label', 'Practice', '--about', 'The daily doing.', '--publication', 'a')
+    run('define', 'practice', '--label', 'Practice, professionally', '--about', 'Craft.', '--publication', 'b')
+    run('define', 'only-a', '--label', 'Only A', '--about', 'x', '--publication', 'a')
+    check('pubs: each piece takes tags from its own publication',
+          run('add', 'one', 'practice', 'only-a') == 0 and run('add', 'two', 'practice') == 0)
+    check("pubs: another publication's tag is refused", run('add', 'two', 'only-a') == 3
+          and _y.safe_load(open(os.path.join(two, 'publish.yaml')))['tags'] == ['practice'])
+    check('pubs: a piece with no publication cannot be tagged', run('add', 'lone', 'practice') == 3)
+    problems, notes = tg.check(root, None, pubs)
+    check('pubs: check passes with the same tag id in two vocabularies', not problems, str(problems))
+    open(os.path.join(lone, 'publish.yaml'), 'a').write('tags:\n  - practice\n')
+    problems, _n = tg.check(root, None, pubs)
+    check('pubs: check fails a tagged piece that names no publication',
+          any(x.startswith('lone:') for x in problems), str(problems))
+    os.remove(os.path.join(lone, 'publish.yaml'))
+
+    # out through the exporter: publication and per-publication labels travel
+    site = os.path.join(HERE, 'md_to_site.py')
+    b1 = os.path.join(tmp, 'pubbundle')
+    r = subprocess.run([sys.executable, site, b1, one, two, '--outlet', 'site-b', '--apply'],
+                       capture_output=True, text=True, cwd=root)
+    fm = open(os.path.join(b1, 'content', 'two.md')).read().split('---')[1] if r.returncode == 0 else ''
+    got = _y.safe_load(fm) or {}
+    check("pubs: the exporter records the publication and labels tags from ITS vocabulary",
+          got.get('publication') == 'b' and got.get('tags') == [{'tag': 'practice', 'label': 'Practice, professionally'}],
+          r.stderr[-300:] or fm)
+    stray = piece('stray', 'title: S\npublication: a\noutlets: [site-b]\npublished_at: 2026-09-01\n',
+                  draft='# S\n\n---\n\nBody.\n')
+    r = subprocess.run([sys.executable, site, os.path.join(tmp, 'pb2'), stray, '--outlet', 'site-b'],
+                       capture_output=True, text=True, cwd=root)
+    check("pubs: the exporter refuses a piece declaring another publication's outlet (exit 9)",
+          r.returncode == 9 and 'site-b' in r.stderr, r.stderr[-200:])
+
+    # the store: two publications cannot share a slug
+    ca, cb = os.path.join(tmp, 'pca'), os.path.join(tmp, 'pcb')
+    for d, pub in ((ca, 'a'), (cb, 'b')):
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'same.md'), 'w').write(
+            f'---\nslug: same\ntitle: Same\npublished_at: 2026-09-01\ndigest: sha256:00\npublication: {pub}\n---\n\nBody\n')
+    store = os.path.join(tmp, 'pubstore')
+    bp = os.path.join(HERE, 'bundle_pieces.py')
+    r1 = subprocess.run([sys.executable, bp, ca, store, '--outlet', 'site-a'], capture_output=True, text=True)
+    r2 = subprocess.run([sys.executable, bp, cb, store, '--outlet', 'site-b'], capture_output=True, text=True)
+    ix = json.load(open(os.path.join(store, 'index.json'))) if r1.returncode == 0 else {}
+    check("pubs: the bundler refuses one publication's piece over another's slug (exit 9)",
+          r1.returncode == 0 and r2.returncode == 9
+          and [p.get('publication') for p in ix.get('pieces', [])] == ['a']
+          and json.load(open(os.path.join(store, 'pieces', 'same.json')))['publication'] == 'a',
+          (r1.stderr + r2.stderr)[-300:])
+    try:
+        import store_publish as sp
+    except (ImportError, SystemExit):
+        skip('pubs: store_publish refuses a record passing between publications', 'boto3 not installed')
+    else:
+        live = {'pieces': [{'slug': 'same', 'kind': 'piece', 'publication': 'a'},
+                           {'slug': 'old', 'kind': 'piece'}]}
+        bundle = {'pieces': [{'slug': 'same', 'kind': 'piece', 'publication': 'b'},
+                             {'slug': 'same', 'kind': 'talk', 'publication': 'b'},
+                             {'slug': 'old', 'kind': 'piece', 'publication': 'b'}]}
+        check('pubs: store_publish refuses a record passing between publications, and nothing else',
+              sp.publication_conflicts(live, bundle) == ['same (piece): live as a, this bundle says b'],
+              str(sp.publication_conflicts(live, bundle)))
+
+
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
     print("\n-- corpus: every piece renders cleanly ---------------------------")
@@ -2133,18 +2276,34 @@ def corpus_manifests():
 
 
 
+def corpus_publications():
+    """Once the desk has a publication registry, every manifest names one of its publications."""
+    print("\n-- corpus: every piece names its publication --------------------------")
+    import publications as pb
+    root = os.path.dirname(PIECES)
+    pubs, probs = pb.load(root)
+    if pubs is None:
+        skip('corpus publications', 'no publication registry — a one-publication desk')
+        return
+    problems, _notes, counts = pb.check(root, pubs, os.path.join(root, 'publishing', 'outlets.yaml'))
+    problems = probs + problems
+    check('corpus publications: ' + ', '.join(f'{p} {n}' for p, n in counts.items())
+          + ' — every manifest names one, and owns its outlets', not problems, '; '.join(problems[:5]))
+
+
 def corpus_tags():
-    """Every tag on every piece is in the desk's vocabulary — the same check as `tags.py check`."""
-    print("\n-- corpus: tags are all in the vocabulary ---------------------------")
+    """Every tag on every piece is in its publication's vocabulary — `tags.py check`."""
+    print("\n-- corpus: tags are all in their vocabulary --------------------------")
+    import publications as pb
     import tags as tg
     root = os.path.dirname(PIECES)
-    vocab = tg.vocab_path(root)
-    rows = tg.corpus(root)
-    if not os.path.exists(vocab) and not any(r['tags'] for r in rows):
-        skip('corpus tags', f'no vocabulary at {vocab} and no piece carries a tag')
+    pubs, _probs = pb.load(root)
+    rows = tg.corpus(root, pubs)
+    if not any(r['tags'] for r in rows):
+        skip('corpus tags', 'no piece carries a tag yet')
         return
-    problems, _notes = tg.check(root, vocab)
-    check(f"corpus tags: {sum(1 for r in rows if r['tags'])} tagged piece(s), all in the vocabulary",
+    problems, _notes = tg.check(root, None, pubs)
+    check(f"corpus tags: {sum(1 for r in rows if r['tags'])} tagged piece(s), all in their vocabulary",
           not problems, '; '.join(problems[:5]))
 
 
@@ -2375,10 +2534,12 @@ def main():
         unit_deck(tmp)
         unit_store(tmp)
         unit_tags(tmp)
+        unit_publications(tmp)
         unit_linkedin(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()
+        corpus_publications()
         corpus_tags()
         corpus_baselines()
         engine_suite(tmp)

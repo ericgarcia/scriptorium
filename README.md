@@ -167,10 +167,14 @@ tools/new-desk ~/code/writing-desk
   constitution.
 - `skills/whats-on-the-desk` — cross-piece triage: what's in flight, what's the
   next move.
-- `skills/tags` — tag pieces from a controlled vocabulary, suggest tags for a
-  piece, work the untagged backlog, and find pieces by tag. `tools/tags.py`
-  holds the vocabulary and edits `publish.yaml` as text, so the comments in a
-  manifest survive; an undefined tag is refused rather than invented.
+- `skills/tags` — tag pieces from their publication's controlled vocabulary,
+  suggest tags for a piece, work the untagged backlog, and find pieces by tag.
+  `tools/tags.py` edits `publish.yaml` as text, so the comments in a manifest
+  survive; an undefined tag is refused rather than invented.
+- `docs/PUBLICATIONS.md` — a desk with more than one publication: the registry,
+  a piece's one publication, what is kept apart per publication (outlets, voices,
+  tags, slugs in the content store) and what is shared. `tools/publications.py`
+  checks it. A one-publication desk needs none of it.
 
 Book-scale skills (for a long-form `books/<name>/` manuscript — novel, memoir):
 

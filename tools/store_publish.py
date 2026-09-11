@@ -156,6 +156,21 @@ def index_losses(live, bundle):
                   {(p.get('slug'), p.get('kind', 'piece')) for p in (live or {}).get('pieces', [])} - have)
 
 
+def publication_conflicts(live, bundle):
+    """(slug, kind) records the live index files under one publication and the bundle under
+    another. The store is shared by every publication's sites and keys a record by slug, so
+    this is one publication's piece about to overwrite another's — refused, never merged.
+    A record with no `publication` predates publications and cannot conflict."""
+    was = {(p.get('slug'), p.get('kind', 'piece')): p.get('publication')
+           for p in (live or {}).get('pieces', [])}
+    out = []
+    for p in (bundle or {}).get('pieces', []):
+        k = (p.get('slug'), p.get('kind', 'piece'))
+        if was.get(k) and p.get('publication') and was[k] != p['publication']:
+            out.append(f"{k[0]} ({k[1]}): live as {was[k]}, this bundle says {p['publication']}")
+    return sorted(out)
+
+
 def live_index(base_url):
     """The store's current index.json, {} if the store has none yet."""
     import urllib.request, urllib.error
@@ -223,6 +238,7 @@ def main():
 
     # index.json replaces the live list outright; refuse a bundle whose index would drop
     # entries that are live. --prune is the one flag that means "yes, remove things".
+    live = None
     if 'index.json' in local and not a.prune:
         if not store.get('base_url'):
             die(1, f'{a.config}: store.base_url is required to check index.json before replacing it')
@@ -238,6 +254,21 @@ def main():
                    f"{' …' if len(lost) > 8 else ''}. Seed the bundle from the live index first "
                    f"(curl {store['base_url'].rstrip('/')}/index.json -o {a.bundle}/index.json), "
                    f"or pass --prune if removal is meant.")
+
+    # Checked with --prune too: removing things is a choice, overwriting another
+    # publication's piece never is.
+    if 'index.json' in local and store.get('base_url'):
+        if live is None:
+            try:
+                live = live_index(store['base_url'])
+            except Exception as e:                                # noqa: BLE001
+                die(1, f'cannot read the live index to check it — {e}')
+        with open(local['index.json'], encoding='utf-8') as fh:
+            clash = publication_conflicts(live, json.load(fh))
+        if clash:
+            die(7, f"refusing: {len(clash)} record(s) would pass from one publication to another — "
+                   f"{'; '.join(clash[:5])}. Two publications cannot share a slug in the store; "
+                   f"set site_slug in one manifest.")
 
     print(f"bundle    {a.bundle}")
     print(f"store     s3://{bucket}  ->  {store.get('base_url', '(no base_url)')}")

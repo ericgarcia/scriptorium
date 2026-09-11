@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""publications.py — which publication each piece belongs to, and what a publication owns.
+
+A desk can carry more than one publication: two audiences, two bylines, two sets of voices,
+two places a reader subscribes. Without a name for that, membership lives in four places at
+once — the outlets a piece declares, a "Book:" line in its README, the prefix of its style,
+and which notes file about Substack applies — and anything that has to be kept APART per
+publication (a tag vocabulary, a slug in a shared content store) has nothing to key on.
+
+So a publication is a thing the desk names, in one registry, and each piece names its one.
+
+    # publishing/publications.yaml (instance; override with --registry or $DESK_PUBLICATIONS)
+    publications:
+      being-good:                     # the id: lowercase, hyphenated, never shown to a reader
+        name: Being Good              # what a reader subscribes to
+        byline: E.L. Muffin
+        outlets: [substack, alignmentfellowship]   # every outlet belongs to ONE publication
+        books: [being-good]           # the books whose pieces it publishes
+        styles: [being-good-essay, being-good-journal]   # the voices it speaks in
+        # tags: publishing/tags/being-good.yaml    # its tag vocabulary; this is the default
+
+    # pieces/<slug>/publish.yaml
+    publication: being-good
+
+A DESK WITH ONE PUBLICATION NEEDS NO REGISTRY. Without the file every tool behaves as it
+always did — one tag vocabulary at publishing/tags.yaml, and no piece is asked to name a
+publication. The registry is what a desk adds the day a second publication arrives.
+
+WHAT `check` HOLDS, once the registry exists:
+  * every outlet belongs to at most one publication. A site reads the store by outlet, so an
+    outlet shared by two publications is a site showing both.
+  * every manifest names a publication the registry defines.
+  * every outlet a piece declares belongs to that publication.
+  * (notes, not failures) a README whose style or book is not one its publication lists, and
+    an outlet in outlets.yaml that no publication owns.
+
+USAGE
+    publications.py list
+    publications.py show <piece>
+    publications.py assign <piece> <publication>     # writes `publication:` into publish.yaml
+    publications.py check [--outlets publishing/outlets.yaml]
+
+EXIT  0 ok | 1 check found problems | 2 nothing to check, or usage | 3 refused
+
+This module is also the base the other tools stand on: where the instance is, how a piece is
+resolved, and how a manifest is written without losing its comments.
+"""
+import os, re, sys, argparse, tempfile
+
+import yaml
+
+DEFAULT_REGISTRY = os.path.join('publishing', 'publications.yaml')
+ID = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+
+class Refused(Exception):
+    """A write that was not safe to make, or a request that cannot be answered. Nothing written."""
+
+
+# ------------------------------------------------------------------ the instance
+def instance_root(start=None):
+    cur = os.path.abspath(start or os.environ.get('DESK_INSTANCE') or os.getcwd())
+    while True:
+        if os.path.isdir(os.path.join(cur, 'pieces')):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return os.path.abspath(start or os.getcwd())
+        cur = parent
+
+
+def pieces(root):
+    """-> [(slug, dir)] for every directory under pieces/."""
+    pdir = os.path.join(root, 'pieces')
+    if not os.path.isdir(pdir):
+        return []
+    return [(s, os.path.join(pdir, s)) for s in sorted(os.listdir(pdir))
+            if os.path.isdir(os.path.join(pdir, s)) and not s.startswith('.')]
+
+
+def piece_dir(root, ref):
+    """A slug or a path -> the piece directory. Refuses one that does not exist."""
+    cand = ref if os.sep in ref.rstrip(os.sep) or os.path.isdir(ref) else os.path.join(root, 'pieces', ref)
+    cand = os.path.normpath(cand)
+    if not os.path.isdir(cand):
+        raise Refused(f'no such piece: {ref}')
+    return cand
+
+
+def manifest_path(pdir):
+    return os.path.join(pdir, 'publish.yaml')
+
+
+def read_manifest(pdir):
+    p = manifest_path(pdir)
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding='utf-8') as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def write_atomic(path, text):
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix='.desk-', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def verified_write(path, old, new, expect):
+    """Write `new` over `old` only if every key reads back as `expect(before)` says it should.
+
+    The one discipline every manifest writer on the desk shares: publish.yaml is heavily
+    commented, so it is edited as text, and a textual edit is proven by parsing both sides."""
+    try:
+        before, after = yaml.safe_load(old) or {}, yaml.safe_load(new) or {}
+    except yaml.YAMLError as e:
+        raise Refused(f'{path}: the edit would not parse ({e}); nothing written')
+    if after != expect(dict(before)):
+        raise Refused(f'{path}: the edit would change more than it should; nothing written. '
+                      f'Edit it by hand.')
+    write_atomic(path, new)
+
+
+# ------------------------------------------------------------------ the registry
+class _UniqueKeys(yaml.SafeLoader):
+    """PyYAML lets a repeated mapping key silently replace the first. In a registry keyed by
+    publication id that would make a duplicate invisible, so here it is an error."""
+
+
+def _construct_mapping(loader, node, deep=False):
+    seen = set()
+    for k, _v in node.value:
+        key = loader.construct_object(k, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(None, None, f'{key!r} is defined twice', k.start_mark)
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+
+_UniqueKeys.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping)
+
+
+def registry_path(root, explicit=None):
+    return explicit or os.environ.get('DESK_PUBLICATIONS') or os.path.join(root, DEFAULT_REGISTRY)
+
+
+def load(root, explicit=None):
+    """-> (publications, problems). publications is None when the desk has no registry — a
+    one-publication desk — and otherwise id -> {name, byline, outlets, books, styles, tags}."""
+    path = registry_path(root, explicit)
+    if not os.path.exists(path):
+        if explicit:
+            return {}, [f'{path}: no such registry']
+        return None, []
+    try:
+        with open(path, encoding='utf-8') as fh:
+            doc = yaml.load(fh, Loader=_UniqueKeys) or {}
+    except yaml.YAMLError as e:
+        return {}, [f'{path}: {e}'.replace('\n', ' ')]
+    raw = doc.get('publications') if isinstance(doc, dict) else None
+    if not isinstance(raw, dict) or not raw:
+        return {}, [f'{path}: needs a top-level `publications:` mapping']
+    pubs, problems, owner = {}, [], {}
+    for pid, e in raw.items():
+        if not isinstance(pid, str) or not ID.match(pid):
+            problems.append(f'publication id {pid!r} must be lowercase words joined by hyphens'); continue
+        if not isinstance(e, dict) or not str(e.get('name') or '').strip():
+            problems.append(f'{pid}: needs a name'); continue
+        entry = {'name': str(e['name']).strip(), 'byline': str(e.get('byline') or '').strip()}
+        for field in ('outlets', 'books', 'styles'):
+            v = e.get(field) or []
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                problems.append(f'{pid}: {field} must be a list of names'); v = []
+            entry[field] = list(v)
+        for o in entry['outlets']:
+            if o in owner:
+                problems.append(f'outlet {o!r} belongs to both {owner[o]} and {pid} — a site reads '
+                                f'by outlet, so it would show both publications')
+            owner.setdefault(o, pid)
+        t = e.get('tags')
+        entry['tags'] = os.path.join(root, t) if isinstance(t, str) and t.strip() else \
+            os.path.join(root, 'publishing', 'tags', f'{pid}.yaml')
+        pubs[pid] = entry
+    return pubs, problems
+
+
+def outlet_owner(pubs, outlet):
+    return next((p for p, e in (pubs or {}).items() if outlet in e['outlets']), None)
+
+
+def of_piece(man, pubs):
+    """-> (publication id or None, problems). No registry: (None, []) — nothing is asked."""
+    if pubs is None or man is None:
+        return None, []
+    pid = man.get('publication')
+    if not pid:
+        return None, ['names no publication (publication: in publish.yaml)']
+    if pid not in pubs:
+        return None, [f'names publication {pid!r}, which the registry does not define']
+    outlets = man.get('outlets') if isinstance(man.get('outlets'), list) else []
+    stray = [o for o in outlets if o not in pubs[pid]['outlets']]
+    if stray:
+        return pid, [f"declares outlet(s) {', '.join(stray)}, which belong to "
+                     f"{', '.join(sorted({outlet_owner(pubs, o) or 'no publication' for o in stray}))}, "
+                     f"not {pid}"]
+    return pid, []
+
+
+def readme_refs(pdir):
+    """(style, book) named by the piece README's first styles/… and books/… links, if any."""
+    try:
+        text = open(os.path.join(pdir, 'README.md'), encoding='utf-8').read()
+    except OSError:
+        return None, None
+    s = re.search(r'styles/([a-z0-9][a-z0-9-]*)/', text)
+    b = re.search(r'books/([a-z0-9][a-z0-9-]*)/', text)
+    return (s.group(1) if s else None), (b.group(1) if b else None)
+
+
+def check(root, pubs, outlets_file=None):
+    """-> (problems, notes, counts). A problem fails the check; a note is worth knowing."""
+    problems, notes, counts = [], [], {p: 0 for p in pubs}
+    for slug, d in pieces(root):
+        try:
+            man = read_manifest(d)
+        except yaml.YAMLError:
+            problems.append(f'{slug}: publish.yaml does not parse'); continue
+        if man is None:
+            continue
+        pid, probs = of_piece(man, pubs)
+        problems += [f'{slug}: {p}' for p in probs]
+        if not pid:
+            continue
+        counts[pid] += 1
+        style, book = readme_refs(d)
+        if style and pubs[pid]['styles'] and style not in pubs[pid]['styles']:
+            notes.append(f"{slug}: README's style {style!r} is not one {pid} lists")
+        if book and pubs[pid]['books'] and book not in pubs[pid]['books']:
+            notes.append(f"{slug}: README's book {book!r} is not one {pid} lists")
+    if outlets_file and os.path.exists(outlets_file):
+        with open(outlets_file, encoding='utf-8') as fh:
+            defined = set(((yaml.safe_load(fh) or {}).get('outlets') or {}).keys())
+        for o in sorted(defined):
+            if not outlet_owner(pubs, o):
+                notes.append(f'outlet {o!r} is defined in outlets.yaml but no publication owns it')
+        for p, e in pubs.items():
+            for o in e['outlets']:
+                if o not in defined:
+                    problems.append(f'{p}: outlet {o!r} is not defined in {os.path.basename(outlets_file)}')
+    return problems, notes, counts
+
+
+# ------------------------------------------------------------------ writing `publication:`
+def set_scalar(pdir, key, value, comment=None):
+    """Set a top-level `key: value` in publish.yaml as text. A new key goes right under the
+    title and subtitle, where a reader of the manifest looks first. An existing line keeps its
+    comment; `comment` is used when it has none. Returns True if changed."""
+    path = manifest_path(pdir)
+    if not os.path.exists(path):
+        raise Refused(f'{os.path.basename(pdir)} has no publish.yaml; create it first '
+                      f'(templates/piece/publish.yaml)')
+    old = open(path, encoding='utf-8').read()
+    lines = old.splitlines(keepends=True)
+    keyre = re.compile(rf'^{re.escape(key)}[ \t]*:(?P<rest>.*)$')
+    at = next((i for i, l in enumerate(lines) if keyre.match(l.rstrip('\n'))), None)
+    if at is not None:
+        rest = keyre.match(lines[at].rstrip('\n')).group('rest')
+        _v, sep, existing = rest.partition('#')
+        if at + 1 < len(lines) and lines[at + 1][:1] in (' ', '\t') and lines[at + 1].strip():
+            raise Refused(f'{path}: `{key}:` spans lines; edit it by hand')
+        note = f'#{existing.rstrip()}' if sep else (f'# {comment}' if comment else '')
+        lines[at] = f'{key}: {value}' + (f'   {note}' if note else '') + '\n'
+    else:
+        anchor = None
+        for want in ('subtitle', 'title'):
+            anchor = next((i for i, l in enumerate(lines) if re.match(rf'^{want}[ \t]*:', l)), None)
+            if anchor is not None:
+                break
+        if anchor is None:
+            anchor = next((i - 1 for i, l in enumerate(lines) if l.strip() and not l.startswith('#')), -1)
+        else:
+            while anchor + 1 < len(lines) and lines[anchor + 1][:1] in (' ', '\t') and lines[anchor + 1].strip():
+                anchor += 1                                  # a folded title/subtitle's continuation
+        if lines and not lines[-1].endswith('\n'):
+            lines[-1] += '\n'
+        lines.insert(anchor + 1, f'{key}: {value}\n')
+    new = ''.join(lines)
+    if new == old:
+        return False
+    verified_write(path, old, new, lambda b: {**b, key: value})
+    return True
+
+
+# ------------------------------------------------------------------ the CLI
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog='publications.py', description=__doc__.split('\n')[0])
+    ap.add_argument('--root')
+    ap.add_argument('--registry')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    sub.add_parser('list')
+    p = sub.add_parser('show'); p.add_argument('piece')
+    p = sub.add_parser('assign'); p.add_argument('piece'); p.add_argument('publication')
+    p.add_argument('--move', action='store_true',
+                   help='re-assign a piece that already names a different publication')
+    p = sub.add_parser('check'); p.add_argument('--outlets')
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:
+        return 2 if e.code else 0
+    root = instance_root(a.root)
+    pubs, problems = load(root, a.registry)
+    try:
+        if pubs is None:
+            if a.cmd == 'check':
+                print('no publication registry: a one-publication desk, nothing to check')
+                return 2
+            raise Refused(f'no registry at {os.path.relpath(registry_path(root), root)} — this desk '
+                          f'has one publication, and pieces need not name it')
+        if problems:
+            if a.cmd != 'check':
+                raise Refused('fix the registry first:\n  ' + '\n  '.join(problems))
+        return _dispatch(a, root, pubs, problems)
+    except Refused as e:
+        print(f'refused: {e}', file=sys.stderr)
+        return 3
+
+
+def _dispatch(a, root, pubs, reg_problems):
+    if a.cmd == 'check':
+        outlets = a.outlets or os.path.join(root, 'publishing', 'outlets.yaml')
+        problems, notes, counts = check(root, pubs, outlets)
+        problems = reg_problems + problems
+        for n in notes:
+            print(f'  note  {n}')
+        for p in problems:
+            print(f'  FAIL  {p}')
+        print(', '.join(f'{p}: {n} piece(s)' for p, n in counts.items()) + ' — '
+              + (f'{len(problems)} problem(s)' if problems else 'every manifest names its publication'))
+        return 1 if problems else 0
+
+    if a.cmd == 'list':
+        _p, _n, counts = check(root, pubs)
+        for pid, e in pubs.items():
+            print(f"{pid:18} {e['name']}" + (f" — {e['byline']}" if e['byline'] else ''))
+            print(f"{'':18} outlets: {', '.join(e['outlets']) or '-'}   books: {', '.join(e['books']) or '-'}")
+            print(f"{'':18} styles: {', '.join(e['styles']) or '-'}   tags: {os.path.relpath(e['tags'], root)}"
+                  f"   pieces: {counts[pid]}")
+        return 0
+
+    d = piece_dir(root, a.piece)
+    slug = os.path.basename(d)
+    if a.cmd == 'show':
+        pid, probs = of_piece(read_manifest(d), pubs)
+        print(f"{slug}: {pid or '(none)'}" + ''.join(f'\n  {p}' for p in probs))
+        return 0
+
+    if a.publication not in pubs:
+        raise Refused(f"{a.publication!r} is not a publication: {', '.join(pubs)}")
+    current = (read_manifest(d) or {}).get('publication')
+    note = None
+    if current and current != a.publication:
+        # An older free-text form — `publication: elmuffin (E. L. Muffin)` — names the same
+        # publication with a label beside it. The id is kept; the label moves to a comment.
+        legacy = re.fullmatch(rf'{re.escape(a.publication)}\s*\((.+)\)\s*', str(current))
+        if legacy:
+            note = legacy.group(1).strip()
+        elif not a.move:
+            raise Refused(f'{slug} already names {current!r}. Moving a piece to another publication '
+                          f'moves its outlets and its slug in the store — pass --move if that is meant.')
+    changed = set_scalar(d, 'publication', a.publication, comment=note)
+    _pid, probs = of_piece(read_manifest(d), pubs)
+    print(f'{slug}: {a.publication}' + ('' if changed else '   (unchanged)'))
+    for p in probs:
+        print(f'  note  {p}', file=sys.stderr)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -38,6 +38,19 @@ A style is structured context that steers a draft — never model weights.
   `style.md` mid-draft. Accumulate corrections, then distill them deliberately —
   one change at a time — the way a rule is amended, not patched.
 
+## Publications
+
+- **A desk can carry more than one publication** — an audience, a byline, its voices, and the
+  outlets that reach it. They are registered in `publishing/publications.yaml`, and **every piece
+  names its one** in `publish.yaml` (`publication: <id>`; `tools/publications.py assign` writes
+  it). A piece never spans two: the same argument for two audiences is two pieces.
+- **Kept apart per publication:** outlets (each has one owner), styles, books, and **tags** — each
+  publication has its own vocabulary. The content store is shared, so a slug belongs to one
+  publication, and the tools refuse a crossing rather than overwrite.
+- `python3 framework/tools/publications.py check` — every manifest names a publication and owns
+  its outlets. **A one-publication desk needs no registry**; add it with the second publication.
+  See `docs/PUBLICATIONS.md`.
+
 ## Working alongside other sessions
 
 Several Claude sessions run against this desk at once — **six on 2026-09-02**. Most of the desk

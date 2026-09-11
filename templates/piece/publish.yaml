@@ -2,6 +2,8 @@
 # Read by the `publish` skill via framework/tools/md_to_substack.py.
 title: <post title>
 subtitle: <one-line subtitle>
+# publication: <id>      # on a desk with more than one publication: which one this piece
+#                        # belongs to (publishing/publications.yaml, docs/PUBLICATIONS.md)
 footnotes: native        # native | endnotes | none
 # substack_type: page   # a PAGE rather than a post: undated, not in the archive, never
 #                       # emails, needs no cover. Same composer and same transport — the
@@ -13,8 +15,9 @@ send_email: true         # A FIRST PUBLICATION SENDS THE EMAIL. It is the one no
                          # cause an email, it records the intent the publish skill checks the
                          # composer's own delivery control against.
 # cover: assets/hero.jpg  # optional hero image (path relative to the piece)
-# tags:                   # optional. Only tags defined in the desk's vocabulary
-#   - practice            # (publishing/tags.yaml). Set them with tags.py or the
+# tags:                   # optional. Only tags in this piece's publication's vocabulary
+#   - practice            # (publishing/tags/<publication>.yaml, or publishing/tags.yaml
+#                         # on a one-publication desk). Set them with tags.py or the
 #                         # `tags` skill, which will not invent a tag.
 
 # --- set these once the piece is live -----------------------------------------

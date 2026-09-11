@@ -83,13 +83,18 @@ const norm = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(
 {
   const liveA = BODY.map(curl);
   const victim = liveA.findIndex(t => t.length > 200);
-  liveA[victim] = liveA[victim].slice(0, 50) + 'ZQX ' + liveA[victim].slice(50);
-  const marksA = BODYMARKS.map((m, i) => (i === victim ? [] : m));
-  const a = run(liveA, FNS.map(curl), TITLE, SUBTITLE, marksA, FNMARKS);
-  check('A one changed block is patched',
-    !a.report.structural && a.report.applied.length > 0 && a.report.failed.length === 0
-    && a.report.applied.every(x => x.block === victim),
-    `staged=${a.report.stagedEdits} unchanged=${a.report.unchanged} failed=${a.report.failed.length}`);
+  // A new desk's first piece is one short block; without this guard node crashed on it and the
+  // suite reported a failure with no detail at all.
+  if (victim < 0) skip('A one changed block is patched', 'no body block of 200+ chars');
+  else {
+    liveA[victim] = liveA[victim].slice(0, 50) + 'ZQX ' + liveA[victim].slice(50);
+    const marksA = BODYMARKS.map((m, i) => (i === victim ? [] : m));
+    const a = run(liveA, FNS.map(curl), TITLE, SUBTITLE, marksA, FNMARKS);
+    check('A one changed block is patched',
+      !a.report.structural && a.report.applied.length > 0 && a.report.failed.length === 0
+      && a.report.applied.every(x => x.block === victim),
+      `staged=${a.report.stagedEdits} unchanged=${a.report.unchanged} failed=${a.report.failed.length}`);
+  }
 }
 
 // --- B: a permutation is refused, and stages nothing ------------------------
@@ -143,15 +148,18 @@ if (FNS.length < 2) {
 // a phantom edit on every sync forever — and chasing that phantom is what cost a footnote.
 {
   const idx = BODY.findIndex(t => t.includes('. '));
-  const liveE = BODY.map(curl);
-  liveE[idx] = liveE[idx].replace('. ', '.  ');            // inject a double space
-  // that block's own offsets shift by one, so it goes in unmarked; E is about the text pass
-  const marksE = BODYMARKS.map((m, i) => (i === idx ? [] : m));
-  const e = run(liveE, FNS.map(curl), TITLE, SUBTITLE, marksE, FNMARKS);
-  const textEdits = e.report.applied.length;
-  check('E whitespace-only difference is ignored',
-    !e.report.structural && textEdits === 0,
-    `textEdits=${textEdits} staged=${e.report.stagedEdits}`);
+  if (idx < 0) skip('E whitespace-only difference is ignored', 'no body block with a ". " to widen');
+  else {
+    const liveE = BODY.map(curl);
+    liveE[idx] = liveE[idx].replace('. ', '.  ');            // inject a double space
+    // that block's own offsets shift by one, so it goes in unmarked; E is about the text pass
+    const marksE = BODYMARKS.map((m, i) => (i === idx ? [] : m));
+    const e = run(liveE, FNS.map(curl), TITLE, SUBTITLE, marksE, FNMARKS);
+    const textEdits = e.report.applied.length;
+    check('E whitespace-only difference is ignored',
+      !e.report.structural && textEdits === 0,
+      `textEdits=${textEdits} staged=${e.report.stagedEdits}`);
+  }
 }
 
 // --- F: a formatting-only difference IS a difference ------------------------

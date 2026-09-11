@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs CI on exactly the commit being pushed, before it is pushed. See framework/tools/prepush.py.
+exec python3 "$(git rev-parse --show-toplevel)/framework/tools/prepush.py" hook "$@"

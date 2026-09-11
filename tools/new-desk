@@ -13,9 +13,10 @@
 #                       plain-english (copied to styles/my-voice).
 #
 # Creates the instance repo, mounts scriptorium as a submodule at framework/,
-# wires the shared skills, drops a starter style and a first piece, and makes the
-# initial commit. It does NOT create or push a GitHub repo — you do that when
-# you're ready (the script prints the commands).
+# wires the shared skills, drops a starter style and a first piece, adds CI (the
+# GitHub workflow and the pre-push check, from templates/desk), and makes the
+# initial commit — a desk whose first push is green. It does NOT create or push a
+# GitHub repo — you do that when you're ready (the script prints the commands).
 
 set -euo pipefail
 
@@ -71,16 +72,29 @@ done
 echo "==> copying behavior file"
 cp framework/CLAUDE.md ./CLAUDE.md
 
+echo "==> adding CI: the GitHub workflow and the pre-push check"
+# .github/workflows/tests.yml runs the suite on GitHub; .githooks/pre-push runs the same command on
+# each pushed commit before it leaves. core.hooksPath is switched on after the commit below.
+cp -R framework/templates/desk/. ./
+chmod +x .githooks/pre-push
+
 echo "==> bringing in starter style '$STARTER_STYLE' as styles/my-voice"
 [ -d "framework/styles/$STARTER_STYLE" ] || die "no such starter style: $STARTER_STYLE"
 mkdir -p styles
 cp -R "framework/styles/$STARTER_STYLE" styles/my-voice
 # Rename the copied constitution's header so it names the new style, not the source.
 sed -i.bak "1s|^# Style — .*|# Style — my-voice|" styles/my-voice/style.md && rm -f styles/my-voice/style.md.bak
+# Declare the seed, so voice_privacy reads the starter's own text as inherited, not as this private
+# voice leaking into the framework (it never infers that; it is told).
+printf '\nseeded_from: %s\n' "$STARTER_STYLE" >> styles/my-voice/config.yaml
 
 echo "==> creating first piece"
 mkdir -p pieces/first-piece
 cp -R framework/templates/piece/. pieces/first-piece/
+# A real title: the README's H1 and publish.yaml must name the piece the same way (check_refs).
+sed -i.bak -e 's|^title: <post title>|title: First piece|' \
+           -e 's|^subtitle: <one-line subtitle>|subtitle: A throwaway to test the loop|' \
+  pieces/first-piece/publish.yaml && rm -f pieces/first-piece/publish.yaml.bak
 cat > pieces/first-piece/README.md <<'EOF'
 # First piece
 
@@ -124,6 +138,11 @@ echo "==> initial commit"
 git add -A
 git commit -qm "Scaffold writing desk from scriptorium"
 
+echo "==> turning on the pre-push check"
+# Per-clone config, never committed: every OTHER clone runs `prepush.py install` once.
+git config core.hooksPath .githooks
+git -C framework config core.hooksPath .githooks
+
 cat <<EOF
 
 Done. Your desk is at:
@@ -132,6 +151,11 @@ Done. Your desk is at:
 Skills wired:   ${SKILLS[*]}
 Starter style:  styles/my-voice (from $STARTER_STYLE)
 First piece:    pieces/first-piece
+CI:             .github/workflows/tests.yml on GitHub, and a pre-push check that runs the
+                same command first (its venv is built on the first push; needs the network)
+
+In any other clone of this desk, turn the pre-push check on once:
+  python3 framework/tools/prepush.py install
 
 Next:
   cd $DEST

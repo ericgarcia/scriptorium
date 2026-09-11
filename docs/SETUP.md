@@ -18,19 +18,14 @@ against a **local** scriptorium checkout (before it's pushed anywhere), pass it:
 tools/new-desk ~/code/writing-desk --framework /Users/you/code/scriptorium
 ```
 
-Turn on the pre-push check before the first push, so that push is checked too:
-
-```bash
-cd ~/code/writing-desk
-python3 framework/tools/prepush.py install
-git add .githooks/pre-push && git commit -m "pre-push: run CI before every push"
-```
-
-From then on every `git push` runs `tools/ci_check.py` — the command CI runs — on an export of
-exactly the commit being pushed, in a venv holding only `framework/requirements-ci.txt`, and
-refuses the push if it is red. `install` writes the desk's `.githooks/pre-push` if it is missing
-and points `core.hooksPath` at it in the desk and in `framework/`. Run it once in every clone:
-git keeps hook settings per clone. Never `git push --no-verify`.
+The new desk comes with CI, from `framework/templates/desk/`: `.github/workflows/tests.yml` runs
+the suite against your pieces on every push to GitHub, and `.githooks/pre-push` runs the same
+command — `tools/ci_check.py` — on an export of exactly the commit being pushed, in a venv holding
+only `framework/requirements-ci.txt`, and refuses the push if it is red. `new-desk` switches the
+check on in the desk it creates (the first push builds the venv, so it needs the network once),
+and the scaffold passes it. Git keeps hook settings per clone, so in any other clone — or a desk
+made before `new-desk` did this — run `python3 framework/tools/prepush.py install`. Never
+`git push --no-verify`.
 
 Then create the private GitHub repo when you're ready:
 

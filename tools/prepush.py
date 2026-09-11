@@ -146,23 +146,20 @@ def hook():
     return 0
 
 
-DESK_HOOK = ('#!/bin/sh\n'
-             '# Runs CI on exactly the commit being pushed, before it is pushed. '
-             'See framework/tools/prepush.py.\n'
-             'exec python3 "$(git rev-parse --show-toplevel)/framework/tools/prepush.py" hook "$@"\n')
+# The one copy of a desk's hook; tools/new-desk copies the same file into every new desk.
+DESK_HOOK = os.path.join(FRAMEWORK, 'templates', 'desk', '.githooks', 'pre-push')
 
 
 def install():
     repos = [FRAMEWORK]
     parent = os.path.dirname(FRAMEWORK)
-    # A desk mounts this framework at <desk>/framework. tools/new-desk does not write the desk's
-    # hook, so install does: one command then turns the check on for any desk, new or old.
+    # A desk mounts this framework at <desk>/framework. tools/new-desk writes the desk's hook; a
+    # desk made before it did, or by hand, gets it here, so one command covers any desk.
     if os.path.basename(FRAMEWORK) == 'framework' and os.path.exists(os.path.join(parent, '.gitmodules')):
         hook = os.path.join(parent, '.githooks', 'pre-push')
         if not os.path.exists(hook):
             os.makedirs(os.path.dirname(hook), exist_ok=True)
-            with open(hook, 'w') as f:
-                f.write(DESK_HOOK)
+            shutil.copyfile(DESK_HOOK, hook)
             os.chmod(hook, 0o755)
             print(f'prepush: wrote {hook} — commit it, so every clone of the desk has it')
         repos.insert(0, parent)

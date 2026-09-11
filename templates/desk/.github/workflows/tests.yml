@@ -1,0 +1,44 @@
+name: desk
+
+# The instance suite: the framework's tests run against the REAL corpus in pieces/.
+# The framework repo runs the same suite against fixtures; this run is what catches a
+# piece that has drifted from its sealed baseline, a footnote that no longer resolves,
+# or a `†` editorial note left where the composer could carry it to a post.
+#
+# What this CANNOT do, by design: compare a draft to its LIVE Substack post. That needs
+# an authenticated browser session, and CI has no credentials and drives no browser.
+# Live drift is still found by a human running `substack_sync scan`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive        # the suite lives in framework/
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # The tools' packages, from the same file the pre-push hook builds its venv from.
+      - name: Install the CI requirements
+        run: python3 -m pip install -r framework/requirements-ci.txt
+
+      # Guard, suite (real corpus), and read-only check — one command, shared with the
+      # pre-push hook (framework/tools/prepush.py) so the two cannot drift.
+      - name: CI checks (guard, suite, read-only)
+        run: python3 framework/tools/ci_check.py

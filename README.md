@@ -165,8 +165,11 @@ See [docs/SETUP.md](docs/SETUP.md), or just run the scaffolding tool:
 tools/new-desk ~/code/writing-desk
 ```
 
-Then, in the new desk, turn on the pre-push check. Do it once in **every clone** too: git keeps
-hook settings per clone, not in the repo.
+The new desk comes with CI, from `templates/desk/`: `.github/workflows/tests.yml` runs the suite
+against your pieces on every push to GitHub, and a pre-push check runs the same command on each
+commit before it leaves. `new-desk` switches the check on in the desk it creates, and the scaffold
+passes it, so the first push is green. Git keeps hook settings per clone, not in the repo, so in
+**every other clone** — and in a desk made before `new-desk` did this — run once:
 
 ```bash
 python3 framework/tools/prepush.py install

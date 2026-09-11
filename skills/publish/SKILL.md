@@ -172,8 +172,10 @@ first.
    A piece's hero lives at `pieces/<name>/assets/hero.png` and is recorded in `publish.yaml` as
    `cover:` plus `cover_caption:`, with dimensions and a `sha256`. **`publish.yaml` must also state
    the image's provenance — photograph or generated** — because a photorealistic hero can imply a
-   real person, or re-attach a biographical reading a piece deliberately dropped; the caption and
-   alt text then have to avoid implying a photograph. (Precedent: the generated portrait in
+   real person, or re-attach a biographical reading a piece deliberately dropped. Provenance is the
+   manifest's record: neither caption nor alt may *claim* a photograph or a likeness, and
+   **the caption says what the image represents** — never a provenance note, never a disclaimer
+   ([`ALT-TEXT.md` → Captions](../../docs/ALT-TEXT.md); the header gate warns on either). (Precedent: the generated portrait in
    `metric-space`, disclosed in the manifest and in the footnote before its gate cleared.)
    **The cover is settable from the repo, and this skill sets it** (2026-09-10). The older claim
    here — *the converter does not set the featured image, attaching it is a composer-UI action* —

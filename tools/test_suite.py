@@ -380,6 +380,12 @@ def unit_companions(tmp):
     open(os.path.join(legacy, 'old-piece', 'substack-note.md'), 'w').write('old\n')
     check('companions: a legacy substack-note.md is refused', any('legacy' in p for _s, p in cp.check(legacy)))
 
+    h = mk('c-headingless', draft='*s*\n---\n\n![A dog on a quilt](assets/none.png)\n\n*A caption.*\n\nThe body.\n')
+    hp = ra.build(h, {})
+    check('review page: a headingless piece lifts its first-block image into the masthead as the hero',
+          '<figure class="hero">' in hp and 'Hero image slot' not in hp)
+    check('review page: the italic line under the hero is its caption, not a body paragraph',
+          '<span><em>A caption.</em></span>' in hp and '<p><em>A caption.</em></p>' not in hp)
     page = ra.build(a, {})
     check('review page: the Note renders beside the piece with its lines kept',
           'id="c-note"' in page and 'line one<br>line two' in page)

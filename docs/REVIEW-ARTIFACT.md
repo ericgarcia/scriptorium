@@ -52,6 +52,14 @@ live post. So the page shows it, labelled, in its own panel under each image. **
 called out in the flag colour rather than left blank**, because a missing alt looks like nothing
 at all. (Eric, 2026-09-10: *"our artifact preview render should show us the alt text somehow."*)
 
+**The hero is found even when the piece has no headings.** The hero is the first image in the
+lead — the prose before the first `##`. A piece with no `##` has no lead, so its hero is the
+**first block of the body**, and the page lifts it into the masthead the same way. It did not,
+and *For the Love of Dogs* showed an empty "Hero image slot" above its own hero (Eric,
+2026-09-11). **The italic line directly under the hero is its caption** — the `draft.md`
+convention — so it renders as the figcaption, not as a stray first paragraph; a `cover.caption`
+in the facts file still wins, and a finding anchored in that line moves with it.
+
 **Every image renders, hero and body alike.** Image blocks used to be skipped outright, so a
 piece's body images were simply absent from its review page — three pieces in this corpus carry
 six, five and two of them. An image the page *cannot* show is **named** (`image not shown — …`),

@@ -739,6 +739,25 @@ def build(piece_dir, facts):
             print('  ' + e, file=sys.stderr)
         sys.exit(3)
 
+    # A piece with no `##` heading has no lead, so its hero is the FIRST BLOCK OF THE BODY. It
+    # used to render there, under an empty "Hero image slot" in the masthead — For the Love of
+    # Dogs, 2026-09-11 (Eric: "does not have the hero in the right place"). Lift it up like any
+    # lead hero. And the italic line directly under a hero is its caption (the draft.md
+    # convention), so it becomes the figcaption, not a stray first paragraph.
+    hero_list = lead_h
+    if hero_h is None and mv_h and mv_h[0] and mv_h[0][0]['kind'] == 'img':
+        hero_h, hero_list = mv_h[0][0], mv_h[0]
+    hero_cap = None
+    if hero_h is not None:
+        i = next(k for k, h in enumerate(hero_list) if h is hero_h)
+        nxt = hero_list[i + 1] if i + 1 < len(hero_list) else None
+        if (nxt and nxt['kind'] != 'img' and not nxt['q']
+                and re.fullmatch(r'\*[^*].*\*', nxt['text'].strip(), re.S)):
+            hero_cap = nxt
+            hero_list.remove(nxt)
+        if hero_list is not lead_h:
+            hero_list.remove(hero_h)
+
     def card(i):
         f = findings[i - 1]
         sev = f.get('severity', 'open')
@@ -812,11 +831,14 @@ def build(piece_dir, facts):
 
     cover = facts.get('cover') or {}
     if hero_h:
+        caption = cover.get('caption') or (demark(inline(hero_cap['text'], num, notes=False))
+                                           if hero_cap else '')
         figure = (f'<figure class="hero">{embed(hero_h["src"])}<figcaption>'
-                  f'<span>{cover.get("caption","")}</span>'
+                  f'<span>{caption}</span>'
                   f'<em>{cover.get("provenance","provenance not recorded")}</em>'
                   f'</figcaption>{alt_block(hero_h)}</figure>'
-                  + ''.join(card(i) for i in hero_h['cards']))
+                  + ''.join(card(i) for i in hero_h['cards'])
+                  + ''.join(card(i) for i in (hero_cap['cards'] if hero_cap else [])))
     else:
         figure = ('<div class="slot">Hero image slot &mdash; the draft references no image</div>')
 

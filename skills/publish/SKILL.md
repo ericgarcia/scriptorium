@@ -1038,6 +1038,29 @@ All of it sits above the first `---`, which the converter discards, so it can ne
 a reader. It is checked by the suite (`corpus_headers`) precisely because invisible things
 rot unnoticed.
 
+**Then correct every sentence that still calls it a draft.** A book index
+(`books/<name>/writings.md`), a sibling README's seams list, a dashboard fragment — anything
+written by hand while the piece was unpublished now says something false, and publishing
+changes none of it for you. Five pieces in three days went on being described as unpublished
+after they were live (*In Vain*, *The Mask Comes Off Last*, *Rising After Falls*, *What Was
+Already There*, *Not Made of Things That Appear*), every time because the manifest updated
+itself and the prose did not. Link the piece wherever the house rule says live pieces link,
+drop the "unpublished", and run:
+
+```
+python3 framework/tools/check_status.py --outlets publishing/outlets.yaml
+python3 framework/tools/check_refs.py
+```
+
+**The suite runs both (`corpus_prose`), so CI and the pre-push hook refuse the push.** The
+publishing commit is the one that has to carry the correction — which is the point: the only
+session that knows a piece just went live is the one that published it.
+
+**And a published piece must declare its `outlets:`.** *Not Made of Things That Appear* went live
+on Substack with none, so `md_to_site` exported it nowhere and `outlet_audit` — which checks only
+the outlets a piece declares — could not see it was missing from the site. The suite now refuses a
+manifest with a `public_url` and no `outlets:`.
+
 ## Confirm it reached readers (`substack_verify`)
 
 "Saved" is not "shipped," and a baseline is a local file — a piece can match its

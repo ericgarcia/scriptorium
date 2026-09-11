@@ -2203,6 +2203,68 @@ def unit_linkedin_post(tmp):
           r.returncode == 1 and 'linkedin-post.md is 3,001 characters' in r.stderr, r.stderr[-300:])
 
 
+def unit_prose(tmp):
+    """check_status and check_refs: prose that goes on describing a piece the way it used to be.
+    Every case is one that happened on this desk in September 2026."""
+    print("\n-- prose: what the prose claims agrees with the manifests ---------------")
+    import check_status as cs
+    import check_refs as cr
+    root = os.path.join(tmp, 'prose')
+
+    def w(rel, text):
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+
+    w('publishing/outlets.yaml', "outlets:\n  substack:\n    manifest_url_key: public_url\n")
+    w('pieces/live-one/publish.yaml',
+      "title: Live One\nsubtitle: A Subtitle\npublic_url: https://pub.test/p/live-one\n")
+    w('pieces/live-one/README.md', "# Live One\n")
+    w('pieces/draft-one/publish.yaml', "title: Draft One\n")
+    w('pieces/draft-one/README.md', "# Draft One\n")
+    # a retitle that reached the manifest and nothing else
+    w('pieces/retitled/publish.yaml', "title: New Name\npublic_url: https://pub.test/p/new-name\n")
+    w('pieces/retitled/README.md', "# Old Name\n")
+    lines = [
+        "# Index", "", "Live pieces link to their reader URL.", "",
+        "- *Live One* (`live-one`) — the founding distinction; unpublished.",          # 5
+        "- [*Live One: A Subtitle*](https://site.test/live-one/)",                       # 6
+        "  (`live-one`) — cited with its subtitle, which is the same piece.",
+        "- [*Old Name*](https://site.test/new-name/)",                                   # 8
+        "  (`retitled`) — a stale title, wrapped the way the index wraps.",
+        "- [`draft-one`](../../pieces/draft-one/README.md) is a path, not a title claim.",
+        "- *Draft One* (`draft-one`) — unpublished. **The live posts are re-synced:** `live-one`.",  # 11
+        "", "## 2026-09-01 a dated heading", "",
+        "- *Live One* (`live-one`) — unpublished. History, not drift.",                  # 15
+    ]
+    w('books/b/writings.md', "\n".join(lines) + "\n")
+
+    f = cs.check([os.path.join(root, 'books')], os.path.join(root, 'pieces'),
+                 os.path.join(root, 'publishing', 'outlets.yaml'), None) or []
+    stale = [(ln, k, s) for _p, ln, k, s, _w in f if k == 'unpublished' and s == 'live-one']
+    check("check_status: a live piece still called unpublished is reported (In Vain, 2026-09-09)",
+          [ln for ln, _k, _s in stale] == [5], str(f))
+    check("check_status: the same words under a dated heading are history, not drift",
+          not any(ln >= 13 for ln, _k, _s in stale), str(stale))
+    check("check_status: 'unpublished' in one sentence is not pinned on a live piece named in the next",
+          not any(ln == 11 for ln, _k, _s in stale), str(stale))
+
+    found, _n, _k = cr.problems(root)
+    by = {s: (what, where) for s, what, where in found}
+    check("check_refs: a stale title in a book index, wrapped as the index wraps, is reported "
+          "(The Door and the Room, 2026-09-11)",
+          'retitled' in by and any(t_ == 'Old Name' and f_.endswith('writings.md')
+                                   for s, _w, where in found if s == 'retitled' for t_, f_, _l in where),
+          str(found))
+    check("check_refs: a README heading that disagrees with publish.yaml's title is reported",
+          any(s == 'retitled' and 'README H1' in what for s, what, _w in found), str(found))
+    check("check_refs: 'Title: Subtitle' is the same piece, not a stale title",
+          'live-one' not in by, str(by.get('live-one')))
+    check("check_refs: `slug` as link text is a path, not a title claim",
+          'draft-one' not in by, str(by.get('draft-one')))
+
+
 def unit_linkedin(tmp):
     """LinkedIn is the last outlet a piece reaches and a copy of it, so almost everything
     here is a refusal: every case is a way the copy could go up wrong or go up first."""
@@ -2226,6 +2288,31 @@ def unit_linkedin(tmp):
     check('a recorded LinkedIn URL is used as recorded',
           outlet_audit.slug_of({'linkedin_url': 'https://www.linkedin.com/pulse/x-y-1/'},
                                'x', li) == 'https://www.linkedin.com/pulse/x-y-1/')
+
+    # --- the audit: an Article prints footnote refs as literal [n] -------------------
+    # The --content check dropped native superscripts but not these, so the three footnoted
+    # paragraphs of love-is-not-a-metric-space read as stale on a correct copy (2026-09-11).
+    fp = os.path.join(tmp, 'li-audit-piece')
+    os.makedirs(fp, exist_ok=True)
+    with open(os.path.join(fp, 'publish.yaml'), 'w', encoding='utf-8') as f:
+        f.write('title: T\nsubtitle: S\n')
+    noted = 'This is Sam. Thirty-four, who climbs and reads and gets up early every day.'
+    prose = 'Table [2] in the appendix gives the full count for every one of the cohorts.'
+    with open(os.path.join(fp, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('scaffold\n---\n' + noted.replace('Sam.', 'Sam.[^sam]') + '\n\n'
+                + prose + '\n\n[^sam]: Not his name.\n')
+    page = (f'<p>{noted.replace("Sam.", "Sam.[1]")}</p><p>{prose}</p>'
+            '<h2>Notes</h2><p>[1] Not his name.</p>')
+    r = outlet_audit.content_drift(fp, page, footnote_marker='bracket')
+    check('an Article\'s inline [1] after a word is not drift on an outlet that prints them',
+          r is not None and not r['missing'], str(r))
+    r = outlet_audit.content_drift(fp, page)
+    check('the same [1] is drift on an outlet that does not declare footnote_marker',
+          r is not None and [w[:11] for w in r['missing']] == ['This is Sam'], str(r))
+    r = outlet_audit.content_drift(fp, page.replace('Table [2] in', 'Table in'),
+                                   footnote_marker='bracket')
+    check('a bracketed number in prose still counts where markers are dropped',
+          r is not None and [w[:5] for w in r['missing']] == ['Table'], str(r))
 
     # --- the converter ---------------------------------------------------------------
     piece = os.path.join(tmp, 'li-piece')
@@ -2833,6 +2920,39 @@ def corpus_voice_privacy():
           ' | '.join(lines[:3]))
 
 
+def corpus_prose():
+    """What the prose claims about a piece agrees with its manifest: check_status, check_refs,
+    and — wherever an outlet registry exists — the rule that a published piece says where it goes."""
+    print("\n-- corpus: prose agrees with the manifests -----------------------------")
+    import check_status as cs
+    import check_refs as cr
+    import yaml
+    root = os.path.dirname(PIECES)
+    found, n, _k = cr.problems(root)
+    check(f"every cross-reference names its piece by its current title ({n} claim(s))",
+          not found, '; '.join(f"{s}: {w} at {where[0][1]}:{where[0][2]}" for s, w, where in found[:5]))
+    outlets = os.path.join(root, 'publishing', 'outlets.yaml')
+    if not os.path.exists(outlets):
+        skip('prose vs manifests, and outlets declared', 'no publishing/outlets.yaml in this corpus')
+        return
+    f = cs.check([root], PIECES, outlets, None) or []
+    check(f"no prose calls a live piece unpublished, or links a draft as live",
+          not f, '; '.join(f"{os.path.relpath(p, root)}:{ln} {k} `{s}`" for p, ln, k, s, _w in f[:5]))
+    # A piece that declares no outlet is exported nowhere, and outlet_audit checks only the
+    # outlets a piece declares — so a published piece with none is invisible to both. That is
+    # how Not Made of Things That Appear sat live on Substack and missing from the site.
+    missing = []
+    for d in sorted(os.listdir(PIECES)):
+        mp = os.path.join(PIECES, d, 'publish.yaml')
+        if not os.path.exists(mp):
+            continue
+        with open(mp, encoding='utf-8') as fh:
+            m = yaml.safe_load(fh) or {}
+        if m.get('public_url') and not m.get('outlets') and m.get('site') is not True:
+            missing.append(d)
+    check("every published piece declares its outlets", not missing, ', '.join(missing))
+
+
 def corpus_tags():
     """Every tag on every piece is in its publication's vocabulary — `tags.py check`."""
     print("\n-- corpus: tags are all in their vocabulary --------------------------")
@@ -3110,6 +3230,7 @@ def main():
         unit_linkedin(tmp)
         unit_linkedin_post(tmp)
         unit_captions(tmp)
+        unit_prose(tmp)
         corpus_integrity()
         corpus_headers()
         corpus_manifests()
@@ -3119,6 +3240,7 @@ def main():
         corpus_tags()
         corpus_baselines()
         corpus_commonmark()
+        corpus_prose()
         engine_suite(tmp)
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed, {len(SKIP)} skipped")
     for name, detail in FAIL:

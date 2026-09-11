@@ -85,17 +85,24 @@ landed on shared singletons**, so those are the things with rules.
   README's H1 to say which side is right. **`log/` and `corrections.md` are exempt** — they are
   append-only records of what was true when written, and an old title there is history, not rot.
 - **The manifest is the witness; the prose is written by hand.** `publish.yaml` is kept
-  current by the sync tools against the live post — a doc calling a piece unpublished is
-  therefore a claim about the past, and four times in one week it was wrong (*In Vain*,
-  *The Mask Comes Off Last*, *Rising After Falls*, all still described as drafts after they
-  went live). `python3 framework/tools/check_status.py --outlets publishing/outlets.yaml`
-  reports prose that contradicts a manifest, and `--prefer <outlet>` finds links still
-  pointing at an old home. **Exempt, on the same grounds as `check_refs.py`:** `log/`,
-  `corrections.md`, anything under a dated heading, any line marking its own supersession,
-  and the generated `DASHBOARD.md`. **It cannot see a stale DECISION** — the charter went on
-  calling the Fellowship's domain "open, and Eric's call" after the site shipped, and no
-  file records that a decision was made, so nothing disagrees. That one still needs a human
-  re-reading.
+  current by the sync tools against the live post, so a doc calling a piece unpublished is a
+  claim about the past — and five pieces in three days went on being described as drafts after
+  they were live (*In Vain*, *The Mask Comes Off Last*, *Rising After Falls*, *What Was Already
+  There*, *Not Made of Things That Appear*). `check_status.py --outlets publishing/outlets.yaml`
+  reports prose that contradicts a manifest. `check_refs.py` reports a piece named by a title it
+  no longer has — in book indexes too, in their `*Title* (`slug`)` form — and a README H1 that
+  disagrees with its manifest's title; a retitle that reached one file and not the other is how
+  *The Door and the Room* outlived its piece by four days. **Both are gated: the suite runs them
+  (`corpus_prose`), so CI and the pre-push hook refuse a push that leaves the corpus disagreeing
+  with itself** — which puts the correction in the publishing or retitling commit, the only one
+  that knows. The same check refuses a published piece with no `outlets:`: that hole is how *Not
+  Made of Things That Appear* sat live on Substack, exported nowhere, invisible to
+  `outlet_audit`. `rename_piece.py` runs both after a move and exits 3 if they disagree about
+  the piece. **Exempt:** `log/`, `corrections.md`, anything under a dated heading, any line
+  marking its own supersession; `check_status` also skips the generated `DASHBOARD.md`.
+  **Neither can see a stale DECISION** — the charter went on calling the Fellowship's domain
+  "open, and Eric's call" after the site shipped, and no file records that a decision was
+  made, so nothing disagrees. That one still needs a human re-reading.
 - **Never hard-code a localhost port.** Use `framework/tools/session_port.py`, which derives one
   from the session and **fails loudly** when it is taken. A fixed port plus a swallowed bind error
   once served one session's code to another session's browser. And **identify fetched bytes at the

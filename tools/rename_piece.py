@@ -23,6 +23,13 @@ WHAT IT WILL NOT DO
     keeps the site's redirect alive after the directory stops differing from the title-slug.
     See `md_to_site.renames_for`: without it, a rename DELETES the redirect for a URL that is
     already published and in a submitted sitemap, and no audit can see it.
+
+AFTER IT MOVES
+  It runs check_refs and check_status and exits 3 if either now finds something wrong about
+  this piece. A slug move is half of what goes stale: the sweep that left *The Door and the
+  Room* printed in the founding index moved every `slug` reference correctly and never looked
+  at the title beside it. Exit 3 means the directory moved and the corpus still disagrees with
+  itself about the piece — the rename is done, the cleanup is not.
 """
 import argparse, os, re, subprocess, sys, glob
 
@@ -213,6 +220,28 @@ def main():
     print(f"  remaining non-URL, non-log mentions of {o.old!r}: {len(stale)}")
     for l in stale[:12]:
         print('      ' + l[:150])
+
+    # A slug move is only half of what goes stale -- see AFTER IT MOVES in the docstring.
+    sys.path.insert(0, HERE)
+    import check_refs, check_status
+    refs, _n, _p = check_refs.problems(ROOT)
+    outlets = os.path.join(ROOT, 'publishing', 'outlets.yaml')
+    status = ((check_status.check([ROOT], os.path.join(ROOT, 'pieces'), outlets, None) or [])
+              if os.path.exists(outlets) else [])
+    mine_refs = [r for r in refs if r[0] in (new, o.old)]
+    mine_status = [f for f in status if f[3] in (new, o.old)]
+    print(f"  check_refs:   {len(mine_refs)} disagreement(s) about this piece ({len(refs)} in the corpus)")
+    print(f"  check_status: {len(mine_status)} prose claim(s) about it contradict its manifest "
+          f"({len(status)} in the corpus)")
+    for _slug, what, where in mine_refs:
+        for title, f, ln in where[:6]:
+            print(f"      {f}:{ln}  {title!r} — {what}")
+    for path, ln, kind, _s, why in mine_status[:6]:
+        print(f"      {os.path.relpath(path, ROOT)}:{ln}  {kind} — {why}")
+    if mine_refs or mine_status:
+        print("  renamed, but what the corpus says about this piece is still wrong -- fix what is "
+              "listed before pushing; the suite refuses the push otherwise")
+        return 3
     return 0
 
 

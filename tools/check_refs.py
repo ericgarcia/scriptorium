@@ -14,9 +14,18 @@ caught was that somebody happened to re-read the file.
 
 METHOD, and the choice here is the useful part.  There is no need for history.  A stale title
 shows up as a DISAGREEMENT: the same slug labelled with two different titles in two places.  So
-this compares the corpus against ITSELF, and uses each piece's README H1 only to say which side
-of a disagreement is right.  That needs no record of past titles, which is good, because the
+this compares the corpus against ITSELF, and uses each piece's publish.yaml title — or its README H1 where
+there is none — only to say which side of a disagreement is right.  That needs no record of past titles, which is good, because the
 desk does not keep one and should not have to.
+
+WHY IT READS BOOK INDEXES AND THE MANIFEST (2026-09-11).  *The Door and the Room* went on naming
+a piece in the founding-writings index for four days after it was retitled *None but He and I*,
+and this checker called the corpus consistent throughout. It read no index files, and it did not
+know the index's own form, `*Title* (`slug`)`, usually wrapped over two lines — the most common
+way the desk names a piece, and invisible to it. Both are read now. And the README H1 stopped
+being the only witness: publish.yaml's `title` is kept against the live post, so it is truth
+where it exists, and a heading that disagrees with its manifest is reported on its own — the
+retitle that reached one file and not the other. A heading of "Title — Subtitle" agrees.
 
 WHAT IS DELIBERATELY NOT CHECKED, because a checker that cries about correct files gets
 switched off:
@@ -41,6 +50,15 @@ SUPERSESSION = re.compile(
 # `## slug *(title **X**)*` / `*(working title **X**)*` — the dashboard's own labelling
 HEAD_LABEL = re.compile(r'^##\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s*\*\((?:working\s+)?title\s+'
                         r'(?:\*\*(?P<b>[^*]+)\*\*|"(?P<q>[^"]+)")\s*\)\*', re.M)
+# The house's index form: an emphasized title immediately followed by the slug in backticks,
+# optionally linked, and in writings.md wrapped onto the next line --
+#   - [*The Mask Comes Off Last*](https://…/the-mask-comes-off-last/)
+#     (`the-mask-comes-off-last`) — …
+#   - *None but He and I* (`none-but-he-and-i`) — …
+# Matched over the whole file, not line by line, because the wrap is the usual case.
+INDEX_LABEL = re.compile(
+    r'(?<![\w*])(?P<em>\*{1,3})(?P<t>[^*`\n]{2,120}?)(?P=em)'
+    r'(?:\]\([^)\s]*\))?[ \t]*(?:\n[ \t]*)?\(\s*`(?P<slug>[A-Za-z0-9][A-Za-z0-9._-]*)`')
 # a markdown link whose target is a piece directory
 PIECE_LINK = re.compile(r'\[([^\]]{2,120})\]\(([^)]*?pieces/|\.\./)([A-Za-z0-9][A-Za-z0-9._-]*)/'
                         r'(?:README\.md)?\)')
@@ -94,16 +112,83 @@ def h1_title(path):
     return None
 
 
+def norm(s):
+    """Compare titles as a reader would: curly and straight quotes alike, whitespace collapsed."""
+    s = s.replace('\u2019', "'").replace('\u2018', "'").replace('\u201c', '"').replace('\u201d', '"')
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def manifest_field(path, key):
+    """A top-level scalar from publish.yaml, read without a YAML dependency: a title is one line,
+    and this checker runs in bare CI images."""
+    try:
+        with open(path) as fh:
+            src = fh.read()
+    except OSError:
+        return None
+    m = re.search(r'^%s:[ \t]*(.*?)[ \t]*$' % re.escape(key), src, re.M)
+    if not m:
+        return None
+    v = re.sub(r'\s+#.*$', '', m.group(1)).strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in '\'"':
+        v = v[1:-1]
+    return None if v in ('', '>', '>-', '|', '|-') else v
+
+
 def truth(root):
-    """slug -> title, from each piece's README H1."""
+    """slug -> title. publish.yaml's `title` where there is one — the manifest is the witness,
+    kept against the live post by the sync tools — and the README H1 otherwise."""
     out = {}
     pdir = os.path.join(root, 'pieces')
     if not os.path.isdir(pdir):
         return out
     for slug in sorted(os.listdir(pdir)):
+        t = manifest_field(os.path.join(pdir, slug, 'publish.yaml'), 'title')
+        if not t:
+            rd = os.path.join(pdir, slug, 'README.md')
+            t = h1_title(rd) if os.path.isfile(rd) else None
+        if t:
+            out[slug] = t
+    return out
+
+
+def subtitles(root):
+    """slug -> subtitle, where publish.yaml has one."""
+    out = {}
+    pdir = os.path.join(root, 'pieces')
+    if os.path.isdir(pdir):
+        for slug in os.listdir(pdir):
+            s = manifest_field(os.path.join(pdir, slug, 'publish.yaml'), 'subtitle')
+            if s:
+                out[slug] = s
+    return out
+
+
+def cited_forms(title, sub):
+    """Every way a correct citation can print this piece's name: the title alone, or with its
+    subtitle after a colon or a dash — *They/Them: The Pronoun as Iconoclasm* is not stale."""
+    forms = {norm(title)}
+    if sub:
+        forms |= {norm(f'{title}: {sub}'), norm(f'{title} \u2014 {sub}'), norm(f'{title} - {sub}')}
+    return forms
+
+
+def heading_disagreements(root):
+    """(slug, h1, title) where a README H1 and publish.yaml name two different things — a
+    retitle that reached one file and not the other. "Title — Subtitle" agrees."""
+    out = []
+    pdir = os.path.join(root, 'pieces')
+    if not os.path.isdir(pdir):
+        return out
+    for slug in sorted(os.listdir(pdir)):
+        man = os.path.join(pdir, slug, 'publish.yaml')
         rd = os.path.join(pdir, slug, 'README.md')
-        if os.path.isfile(rd):
-            out[slug] = h1_title(rd)
+        title = manifest_field(man, 'title')
+        h1 = h1_title(rd) if os.path.isfile(rd) else None
+        if not title or not h1:
+            continue
+        if norm(h1) not in cited_forms(title, manifest_field(man, 'subtitle')):
+            out.append((slug, h1, title))
     return out
 
 
@@ -116,7 +201,7 @@ def scan_files(root):
         for fn in filenames:
             if fn in SKIP_FILES:
                 continue
-            if fn in SCAN_NAMES or (fn.endswith('.md') and '/DASHBOARD.d/' in p):
+            if fn in SCAN_NAMES or (fn.endswith('.md') and ('/DASHBOARD.d/' in p or '/books/' in p)):
                 yield os.path.join(dirpath, fn)
 
 
@@ -148,49 +233,66 @@ def collect(root):
                         unknown.append((slug, rel, i))
                     continue
                 text = unemphasize(text)
+                if text.startswith('`') and text.endswith('`'):
+                    continue          # [`false-light`](…) — the slug as link text is a path
                 if re.fullmatch(r'[\w./-]+', text) or text.lower() in ('readme', 'piece', 'here'):
                     continue          # a path or a generic word, not a title claim
                 if text[:1].islower():
                     continue          # 'the companion essay' — a descriptor, not a name
                 claims.setdefault(slug, set()).add((text, rel, i))
+        whole = '\n'.join(lines)
+        for m in INDEX_LABEL.finditer(whole):
+            slug, title = m.group('slug'), m.group('t').strip()
+            if slug not in known or not title[:1].isupper():
+                continue          # emphasis on a phrase that happens to precede a slug, not a name
+            first = whole.count('\n', 0, m.start()) + 1
+            last = whole.count('\n', 0, m.end()) + 1
+            if any(SUPERSESSION.search(lines[k - 1]) for k in range(first, last + 1)):
+                continue
+            claims.setdefault(slug, set()).add((title, rel, first))
     return claims, unknown
+
+
+def problems(root):
+    """([(slug, what, [(title, file, line), ...]), ...], claims_checked, pieces_with_claims).
+    An empty list means consistent. Split out of main() so the suite and rename_piece can ask."""
+    real, subs = truth(root), subtitles(root)
+    claims, unknown = collect(root)
+    out = []
+    for slug in sorted(claims):
+        current = real.get(slug)
+        if not current:
+            continue
+        ok = cited_forms(current, subs.get(slug))
+        wrong = [(t_, f, ln) for t_, f, ln in sorted(claims[slug]) if norm(t_) not in ok]
+        if wrong:
+            out.append((slug, 'titled %r' % current, wrong))
+    for slug, h1, title in heading_disagreements(root):
+        out.append((slug, 'README H1 %r but publish.yaml title %r' % (h1, title),
+                    [(h1, os.path.join('pieces', slug, 'README.md'), 1)]))
+    for slug, f, ln in unknown:
+        out.append((slug, 'referenced but no such piece', [('', f, ln)]))
+    return out, sum(len(v) for v in claims.values()), len(claims)
 
 
 def main(argv):
     root = instance_root(argv[1] if len(argv) > 1 else None)
-    real = truth(root)
-    if not real:
+    if not truth(root):
         sys.stderr.write('check_refs: no pieces/ found under %s\n' % root)
         return 2
-    claims, unknown = collect(root)
-
-    problems = 0
-    for slug in sorted(claims):
-        titles = {t for t, _f, _l in claims[slug]}
-        current = real.get(slug)
-        wrong = sorted(t for t in titles if current and t != current)
-        if not wrong:
-            continue
-        problems += 1
-        print('%s — README says %r' % (slug, current))
-        for t in wrong:
-            for title, f, ln in sorted(claims[slug]):
-                if title == t:
-                    print('    %-14r %s:%d' % (t, f, ln))
-    for slug, f, ln in unknown:
-        problems += 1
-        print('%s — referenced but no such piece   %s:%d' % (slug, f, ln))
-
-    checked = sum(len(v) for v in claims.values())
-    if problems:
+    found, checked, pieces = problems(root)
+    for slug, what, where in found:
+        print('%s — %s' % (slug, what))
+        for title, f, ln in where:
+            print(('    %-14r %s:%d' % (title, f, ln)) if title else ('    %s:%d' % (f, ln)))
+    if found:
         print('\nchecked %d title claim(s) across %d piece(s): %d disagreement(s)'
-              % (checked, len(claims), problems))
-        print('The README H1 is truth. Fix the reference, not the README — and if the README is '
-              'the stale one, fix it there and re-run.')
+              % (checked, pieces, len(found)))
+        print("publish.yaml's title is truth where it exists, the README H1 otherwise. Fix the "
+              "reference — and if the manifest or the heading is the stale one, fix that and re-run.")
         return 1
-    print('checked %d title claim(s) across %d piece(s): all consistent' % (checked, len(claims)))
+    print('checked %d title claim(s) across %d piece(s): all consistent' % (checked, pieces))
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))

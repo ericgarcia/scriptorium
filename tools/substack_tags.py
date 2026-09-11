@@ -64,6 +64,7 @@ EXIT  0 ok | 1 --verify found a difference | 3 refused
 import os, re, sys, json, hashlib, argparse, urllib.request
 
 import publications as pb
+import substack_account as sa
 import tags as tg
 
 POST_ID = re.compile(r'/publish/post/(\d+)')
@@ -100,7 +101,7 @@ def plan(pdir, clear=False):
         raise pb.Refused(f'{slug}: no post_url (…/publish/post/<id>) in publish.yaml — compose the '
                          f'post first; a tag needs a post to go on')
     ordered = tg.ordered(names, vocab or {})
-    return {'slug': slug, 'post': int(m.group(1)),
+    return {'slug': slug, 'post': int(m.group(1)), 'dir': pdir,
             'host': re.match(r'(https?://[^/]+)', man['post_url']).group(1),
             'labels': [vocab[t]['label'] for t in ordered if vocab[t]['substack']],
             'skipped': [t for t in ordered if not vocab[t]['substack']],
@@ -181,11 +182,29 @@ JSON.stringify(result);
 '''
 
 
+def account(plans):
+    """-> (guard JS, outlet, handle): the ONE account every planned post belongs to. The snippet
+    checks the page is signed in as it before any call (substack_account.py). Raises pb.Refused."""
+    found = {}
+    for p in plans:
+        try:
+            guard, name, want = sa.guard_for_piece(p['dir'])
+        except sa.NoAccount as e:
+            raise pb.Refused(str(e))
+        found.setdefault(want, (guard, name, want))
+    if len(found) != 1:
+        raise pb.Refused(f"these posts belong to {len(found)} accounts ({', '.join('@' + w for w in found)}): "
+                         f"run each publication's pieces separately, in its own browser")
+    return next(iter(found.values()))
+
+
 def snippet(plans, dry=False):
     if isinstance(plans, dict):
         plans = [plans]
     pj = plan_json(plans, dry)
-    return (SNIPPET.replace('__PLAN__', pj).replace('__N__', str(len(plans)))
+    guard = sa.prelude(account(plans)[0])
+    return (SNIPPET.replace('const PLAN = __PLAN__;', guard + 'const PLAN = __PLAN__;')
+                   .replace('__PLAN__', pj).replace('__N__', str(len(plans)))
                    .replace('__DRYNOTE__', ' — DRY RUN, writes nothing' if dry else '')
                    .replace('__SHA__', hashlib.sha256(pj.encode('utf-8')).hexdigest()))
 
@@ -241,6 +260,9 @@ def main(argv=None):
             print(f"{p['slug']}: post {p['post']} = {', '.join(p['labels']) or '(no tags)'}"
                   + (f"   (not sent: {', '.join(p['skipped'])})" if p['skipped'] else '')
                   + ('   [LIVE]' if p['live'] else ''), file=sys.stderr)
+        _g, outlet, want = account(plans)
+        print(f"account guard: the snippet throws unless the page is signed in as @{want} ({outlet})",
+              file=sys.stderr)
         print(f"{'DRY RUN — ' if a.dry_run else ''}plan sha256 "
               f"{hashlib.sha256(plan_json(plans, a.dry_run).encode()).hexdigest()}", file=sys.stderr)
         return 0

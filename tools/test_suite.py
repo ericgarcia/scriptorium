@@ -2247,7 +2247,10 @@ def unit_captions(tmp):
 
     tool = os.path.join(HERE, 'substack_captions.py')
     out = os.path.join(tmp, 'caps.js')
-    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True)
+    cap_env = {**os.environ, 'DESK_OUTLETS': os.path.join(tmp, 'cap-outlets.yaml')}
+    with open(cap_env['DESK_OUTLETS'], 'w', encoding='utf-8') as f:
+        f.write('outlets:\n  sub:\n    reader_base: https://cap.substack.com/p/\n    account_handle: capper\n')
+    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True, env=cap_env)
     js = open(out).read() if r.returncode == 0 and os.path.exists(out) else ''
     check('captions: substack_captions writes a snippet carrying the desk captions in order',
           r.returncode == 0 and json.dumps(['What the hero means.', 'The chart.']) in js,
@@ -2255,7 +2258,7 @@ def unit_captions(tmp):
     check('captions: the snippet refuses on an image-count mismatch rather than guessing',
           'matched by position' in js)
     write('')
-    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, tool, d, '--out', out], capture_output=True, text=True, env=cap_env)
     check('captions: substack_captions refuses a piece with no captions (exit 2)', r.returncode == 2,
           (r.stdout + r.stderr)[-200:])
 
@@ -2495,6 +2498,193 @@ def unit_substack_account(tmp):
           sa.set_primary(cfg2, 'ml')[0] == 0 and sa.set_primary(cfg2, 'site')[0] == 1)
     check("substack_account: the snippet is same-origin (a cross-origin fetch fails in the pane)",
           "fetch('/api/v1/user/profile/self'" in sa.SNIPPET and 'substack.com/api' not in sa.SNIPPET)
+
+GUARD_RUNNER = r"""
+// Run one generated snippet with a TRIPWIRE for a document: the first read of document, window or
+// any DOM constructor throws, and every fetch is recorded. Signed in as argv[3] (none: HTTP argv[4]).
+const fs = require('fs');
+const [file, handle, status] = process.argv.slice(2);
+const src = fs.readFileSync(file, 'utf8');
+const touched = [], calls = [];
+const trip = what => new Proxy({}, { get: (_t, k) => {
+  if (k === 'then') return undefined;
+  touched.push(what + '.' + String(k)); throw new Error('tripwire: ' + what + '.' + String(k)); } });
+globalThis.location = { origin: 'https://bg.substack.com', href: 'https://bg.substack.com/publish/post/42',
+                        pathname: '/publish/post/42' };
+for (const g of ['document', 'window', 'DataTransfer', 'ClipboardEvent', 'DOMParser']) globalThis[g] = trip(g);
+globalThis.fetch = async (path, o) => {
+  calls.push(((o && o.method) || 'GET') + ' ' + path);
+  if (path === '/api/v1/user/profile/self')
+    return handle ? { status: 200, json: async () => ({ handle }) } : { status: Number(status) || 401, json: async () => ({}) };
+  return { ok: false, status: 599, json: async () => ({}), text: async () => '' };
+};
+(async () => {
+  let out = null, error = null;
+  try { out = await eval(src); } catch (e) { error = String((e && e.message) || e); }
+  console.log(JSON.stringify({ out: typeof out === 'string' ? out : null, error, touched, calls }));
+})();
+"""
+
+
+def unit_account_guard(tmp):
+    """Every generated Substack snippet checks the signed-in account ITSELF, in the same eval as its
+    work (2026-09-11). `substack_account.py check` confirms the account once, but the pane's cookie
+    store is shared by every tab and session: another session can switch its login between that
+    check and the write, and the write lands under the wrong byline with no error. Each generator's
+    output is run against a tripwire document: signed in as someone else, or signed out, it must
+    return the guard's refusal having read nothing of the page and called nothing but the profile."""
+    print("\n-- account guard: every Substack snippet checks who is signed in ------")
+    import substack_account as sa
+    import substack_tags as st
+    import pane_carry
+    import md_to_clipboard
+    root = os.path.join(tmp, 'guarddesk')
+    pub = os.path.join(root, 'publishing')
+    os.makedirs(pub, exist_ok=True)
+    with open(os.path.join(pub, 'outlets.yaml'), 'w', encoding='utf-8') as f:
+        f.write("substack_primary: bg\noutlets:\n"
+                "  bg:\n    reader_base: https://bg.substack.com/p/\n    account_handle: '@ElMuffin'\n"
+                "    notes_handle: notes-only\n"
+                "  ml:\n    reader_base: https://ml.substack.com/p/\n    account_handle: ericgarciaphd\n"
+                "    chrome_browser: x\n"
+                "  noacct:\n    reader_base: https://na.substack.com/p/\n    notes_handle: na\n    chrome_browser: y\n"
+                "  site:\n    reader_base: https://site.test/w/\n")
+    with open(os.path.join(pub, 'tags.yaml'), 'w', encoding='utf-8') as f:
+        f.write('tags:\n  - tag: idolatry\n    label: Idolatry\n    about: a\n')
+
+    def piece(slug, manifest):
+        d = os.path.join(root, 'pieces', slug)
+        os.makedirs(os.path.join(d, 'assets'), exist_ok=True)
+        with open(os.path.join(d, 'assets', 'hero.png'), 'wb') as f:
+            f.write(_tiny_png())
+        with open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8') as f:
+            f.write('*scaffold*\n\n---\n\n![A hero](assets/hero.png)\n\nOpening paragraph with a note.[^1]\n\n'
+                    'Closing *paragraph* here.\n\n[^1]: The note.\n')
+        with open(os.path.join(d, 'publish.yaml'), 'w', encoding='utf-8') as f:
+            f.write('title: P\nsubtitle: S\ncover: assets/hero.png\ncover_caption: The hero.\n'
+                    'cover_provenance: generated\ntags:\n  - idolatry\n' + manifest)
+        return d
+    p = piece('p', 'post_url: https://bg.substack.com/publish/post/42\noutlets:\n  - bg\n  - site\n')
+    q = piece('q', 'post_url: https://ml.substack.com/publish/post/43\noutlets:\n  - ml\n')
+    legacy = piece('legacy', 'post_url: https://ml.substack.com/publish/post/44\n')
+    offsub = piece('offsub', 'outlets:\n  - site\n')
+    torn = piece('torn', 'post_url: https://ml.substack.com/publish/post/45\noutlets:\n  - bg\n')
+    unsure = piece('unsure', '')
+    na = piece('na', 'outlets:\n  - noacct\n')
+
+    def settles(d):
+        try:
+            return sa.outlet_for_piece(d)[0]
+        except sa.NoAccount as e:
+            return 'refused: ' + str(e)
+    check('guard: a piece writes to the Substack outlet its outlets: names',
+          settles(p) == 'bg' and settles(q) == 'ml', f'{settles(p)} / {settles(q)}')
+    check('guard: a manifest with no outlets: is settled by its post_url host', settles(legacy) == 'ml',
+          settles(legacy))
+    check('guard: no Substack outlet, a post_url on another outlet, or nothing to go on is refused',
+          all(settles(x).startswith('refused') for x in (offsub, torn, unsure)),
+          ' | '.join(settles(x) for x in (offsub, torn, unsure)))
+    check('guard: an outlet with only a notes_handle authorises nothing', settles(na).startswith('refused'),
+          settles(na))
+    g, _name, want = sa.guard_for_piece(p)
+    check('guard: it insists on account_handle, normalised — never notes_handle',
+          want == 'elmuffin' and sa.guard_handle(g) == 'elmuffin' and 'notes-only' not in g, g[:120])
+    check("guard: the check snippet's own same-origin fetch (a cross-origin fetch fails in the pane)",
+          "fetch('/api/v1/user/profile/self', { credentials: 'include' })" in g and 'substack.com/api' not in g)
+
+    plan = os.path.join(tmp, 'guard-plan.json')
+    live = os.path.join(tmp, 'guard-live.json')
+    with open(plan, 'w', encoding='utf-8') as f:
+        json.dump({'rows': [{'state': 'push', 'markState': 'unchanged', 'kind': 'body',
+                             'liveIdx': 0, 'draftIdx': 0}],
+                   'title': {'state': 'unchanged'}, 'subtitle': {'state': 'unchanged'}}, f)
+    with open(live, 'w', encoding='utf-8') as f:
+        json.dump({'body': ['x', 'y', 'z'], 'fns': ['n']}, f)
+    out = lambda k: os.path.join(tmp, f'guard-{k}.js')
+    T = lambda n: os.path.join(HERE, n)
+    gens = [('md_to_substack', [T('md_to_substack.py'), p, out('compose')], 'compose'),
+            ('substack_repatch', [T('substack_repatch.py'), p, out('repatch')], 'repatch'),
+            ('substack_repatch --structural', [T('substack_repatch.py'), '--structural', p, out('structural')], 'structural'),
+            ('substack_sync scan', [T('substack_sync.py'), 'scan', p, out('scan')], 'scan'),
+            ('substack_sync fetch', [T('substack_sync.py'), 'fetch', p, plan, out('fetch')], 'fetch'),
+            ('substack_sync push', [T('substack_sync.py'), 'push', p, plan, live, out('push')], 'push'),
+            ('substack_sync images', [T('substack_sync.py'), 'images', p, out('images')], 'images'),
+            ('substack_cover', [T('substack_cover.py'), p, '--post', '42', '--out', out('cover')], 'cover'),
+            ('substack_captions', [T('substack_captions.py'), p, '--out', out('captions')], 'captions')]
+    snippets = {}
+    for label, args, key in gens:
+        r = subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=root)
+        js = open(out(key), encoding='utf-8').read() if os.path.exists(out(key)) else ''
+        snippets[label] = out(key)
+        check(f'guard: {label} opens with the guard for @elmuffin, as one expression',
+              r.returncode == 0 and sa.guard_handle(js) == 'elmuffin' and js.startswith('(async () => {')
+              and js.index(sa.GUARD_MARK) < 80, (r.stdout + r.stderr)[-300:])
+    with open(out('clipboard-fn'), 'w', encoding='utf-8') as f:
+        f.write(md_to_clipboard.footnote_snippet(p, [['1', 'The note.']]))
+    snippets['md_to_clipboard --fn-out'] = out('clipboard-fn')
+    check('guard: md_to_clipboard --fn-out opens with the guard too',
+          sa.guard_handle(open(out('clipboard-fn'), encoding='utf-8').read()) == 'elmuffin')
+
+    r = subprocess.run([sys.executable, T('substack_repatch.py'), q, out('q')], capture_output=True, text=True)
+    check("guard: each piece's snippet names ITS outlet's account",
+          r.returncode == 0 and sa.guard_handle(open(out('q'), encoding='utf-8').read()) == 'ericgarciaphd',
+          (r.stdout + r.stderr)[-200:])
+    r = subprocess.run([sys.executable, T('substack_repatch.py'), offsub, out('offsub')], capture_output=True, text=True)
+    check('guard: a piece whose account cannot be settled gets no snippet at all (exit 9)',
+          r.returncode == sa.NO_ACCOUNT_EXIT and not os.path.exists(out('offsub')), (r.stdout + r.stderr)[-200:])
+    check('guard: substack_account guard names the outlet and account (exit 9 when it cannot)',
+          sa.main(['guard', p]) == 0 and sa.main(['guard', offsub]) == sa.NO_ACCOUNT_EXIT)
+
+    check('guard: substack_tags carries the guard for its posts',
+          sa.guard_handle(st.snippet([st.plan(p)])) == 'elmuffin')
+    try:
+        st.snippet([st.plan(p), st.plan(q)])
+        mixed = 'no refusal'
+    except st.pb.Refused as e:
+        mixed = str(e)
+    check('guard: substack_tags refuses one run over two accounts', '2 accounts' in mixed, mixed)
+
+    compose = open(snippets['md_to_substack'], encoding='utf-8').read()
+    fb = compose[compose.find('window.__sbInsertFootnotes = async () => {'):]
+    check("guard: md_to_substack's footnote pass (call B, its own eval) checks the account again first",
+          'window.__sbInsertFootnotes = async () => {' in compose
+          and 0 < fb.find('await __deskAccount()') < fb.find('document.querySelector'))
+
+    bare = os.path.join(tmp, 'guard-carry', 'bare.js')
+    os.makedirs(os.path.dirname(bare), exist_ok=True)
+    with open(bare, 'w', encoding='utf-8') as f:
+        f.write("(() => document.querySelector('.ProseMirror').editor)()")
+    check('guard: pane_carry refuses a Substack snippet that carries no guard, and serves nothing',
+          pane_carry.main(['pane_carry.py', bare]) == 2
+          and not os.path.exists(os.path.join(os.path.dirname(bare), 'carry.html')))
+
+    if not shutil.which('node'):
+        skip('guard: the snippets against a tripwire document', 'node not installed')
+        return
+    runner = os.path.join(tmp, 'guard-run.js')
+    with open(runner, 'w', encoding='utf-8') as f:
+        f.write(GUARD_RUNNER)
+
+    def run(path, *who):
+        r = subprocess.run(['node', runner, path, *who], capture_output=True, text=True, timeout=60)
+        try:
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return {'crash': r.stderr[-300:]}
+    PROFILE = ['GET /api/v1/user/profile/self']
+    for label, path in snippets.items():
+        bad = {}
+        for who in (['someone-else'], ['', '401'], ['', '404']):
+            res = run(path, *who)
+            ref = json.loads(res['out']) if res.get('out') else {}
+            if not (ref.get('accountGuard') is True and res['touched'] == [] and res['calls'] == PROFILE
+                    and res['error'] is None):
+                bad[who[0] or 'HTTP ' + who[1]] = res
+        ok = run(path, 'ElMuffin')
+        passed = ok.get('calls', [])[:1] == PROFILE and (ok.get('touched') or ok.get('calls', [])[1:])
+        check(f'guard: {label} — another account or none stops before the page; the right one gets through',
+              not bad and bool(passed), json.dumps(bad or ok)[:300])
+
 
 def unit_automode(tmp):
     """automode.py: the pane re-sync's standing rule, built from the desk's Substack outlets and
@@ -3073,6 +3263,8 @@ def unit_substack_tags(tmp):
     import substack_tags as st
     root = os.path.join(tmp, 'stdesk'); d = os.path.join(root, 'pieces', 'p')
     os.makedirs(d, exist_ok=True); os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    open(os.path.join(root, 'publishing', 'outlets.yaml'), 'w').write(
+        'outlets:\n  sub:\n    reader_base: https://x.substack.com/p/\n    account_handle: tagger\n')
     open(os.path.join(root, 'publishing', 'tags.yaml'), 'w').write(
         'tags:\n  - tag: idolatry\n    label: Idolatry\n    about: a\n'
         '  - tag: discernment\n    label: Discernment\n    about: b\n'
@@ -3103,6 +3295,8 @@ process.on('exit', () => console.error('CALLS ' + JSON.stringify(calls)));
 globalThis.location = { pathname: process.env.PATHNAME || '/publish/home' };
 globalThis.fetch = async (path, o) => {
   const m = (o && o.method) || 'GET'; calls.push(m + ' ' + path);
+  if (path === '/api/v1/user/profile/self')
+    return { status: 200, json: async () => ({ handle: process.env.SIGNED_IN || 'tagger' }) };
   const ok = (b) => ({ ok: true, status: 200, text: async () => JSON.stringify(b) });
   if (m === 'GET' && path === '/api/v1/publication/post-tag') return ok(pubTags);
   if (m === 'POST' && path === '/api/v1/publication/post-tag') {
@@ -3162,6 +3356,13 @@ globalThis.fetch = async (path, o) => {
     r, _o, writes = run([st.snippet(both)], env={'PATHNAME': '/publish/post/42'})
     check('stags: the snippet refuses to run in the editor holding a listed post',
           r.returncode != 0 and 'refusing' in r.stderr and writes == [], r.stderr[-200:])
+    import substack_account as sa
+    r, _o, writes = run([st.snippet(both)], env={'SIGNED_IN': 'someone-else'})
+    calls = json.loads((re.findall(r'CALLS (\[.*\])', r.stderr) or ['[]'])[-1])
+    check("stags: the snippet carries its posts' account guard, and another account is refused "
+          "before any tag call",
+          sa.guard_handle(st.snippet(both)) == 'tagger' and r.returncode != 0 and 'accountGuard' in r.stderr
+          and calls == ['GET /api/v1/user/profile/self'], r.stderr[-300:])
 
 # ---------------------------------------------------------------- corpus
 def corpus_integrity():
@@ -3493,19 +3694,28 @@ def engine_suite(tmp):
     if subprocess.run(['node', '--version'], capture_output=True).returncode != 0:
         skip('engine suite', 'node not available')
         return
-    # SCAN_JS carries no per-piece content, so it is generated once and run against every
-    # piece's document below.
-    scan_js = os.path.join(tmp, 'scan.js')
-    subprocess.run([sys.executable, os.path.join(HERE, 'substack_sync.py'),
-                    'scan', os.path.join(PIECES, os.listdir(PIECES)[0]), scan_js],
-                   capture_output=True, text=True)
-    failures, ran, skipped, scan_ok = [], 0, 0, 0
+    # Every snippet carries its piece's account guard, so a generator needs outlets.yaml to say
+    # whose post a piece is. The fixtures have no desk around them: give them one Substack outlet
+    # on their post_url host. A piece that is on no Substack outlet has no post to patch.
+    import substack_account as sa
+    env = dict(os.environ)
+    if CORPUS_KIND == 'fixture' and not env.get('DESK_OUTLETS'):
+        env['DESK_OUTLETS'] = os.path.join(tmp, 'fixture-outlets.yaml')
+        with open(env['DESK_OUTLETS'], 'w', encoding='utf-8') as fh:
+            fh.write('outlets:\n  fixture:\n    platform: substack\n'
+                     '    reader_base: https://example.invalid/p/\n    account_handle: fixture\n')
+    failures, ran, skipped, scan_ok, off_substack = [], 0, 0, 0, 0
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'draft.md')):
             continue
+        try:
+            sa.outlet_for_piece(d, env.get('DESK_OUTLETS'))
+        except sa.NoAccount:
+            off_substack += 1
+            continue
         js = os.path.join(tmp, f'{p}.js')
-        gen = subprocess.run([sys.executable, repatch, d, js], capture_output=True, text=True)
+        gen = subprocess.run([sys.executable, repatch, d, js], capture_output=True, text=True, env=env)
         if gen.returncode != 0:
             failures.append(f'{p}: generator refused ({gen.stdout.strip().splitlines()[:1]})')
             continue
@@ -3518,7 +3728,8 @@ def engine_suite(tmp):
         # the structural engine, against the same piece: S1–S9, with a document model that
         # moves whole blocks, anchors and marks (see test_substack_structural.js)
         sjs = os.path.join(tmp, f'{p}.structural.js')
-        sgen = subprocess.run([sys.executable, repatch, '--structural', d, sjs], capture_output=True, text=True)
+        sgen = subprocess.run([sys.executable, repatch, '--structural', d, sjs], capture_output=True, text=True,
+                              env=env)
         if sgen.returncode != 0:
             failures.append(f'{p}: structural generator refused ({sgen.stdout.strip().splitlines()[:1]})')
             continue
@@ -3532,8 +3743,14 @@ def engine_suite(tmp):
         # computes a mark signature in the browser; mark_sig() computes one in Python. They
         # are the same string derived on two sides of a wire, and a hash of two strings that
         # can disagree is not a baseline. Run the real scan snippet against this piece's own
-        # document and require both domains to match digest for digest.
-        if os.path.isfile(scan_js):
+        # document and require both domains to match digest for digest. The scan is generated per
+        # piece: its content is the same everywhere, but its guard names the piece's account.
+        scan_js = os.path.join(tmp, f'{p}.scan.js')
+        subprocess.run([sys.executable, os.path.join(HERE, 'substack_sync.py'), 'scan', d, scan_js],
+                       capture_output=True, text=True, env=env)
+        if not os.path.isfile(scan_js):
+            failures.append(f'{p} [scan]: the scan generator wrote nothing')
+        else:
             cr = subprocess.run(['node', scanner, scan_js, sjs], capture_output=True, text=True)
             if cr.returncode != 0:
                 failures.append(f'{p} [scan]: runner failed ({cr.stderr.strip()[:120]})')
@@ -3555,8 +3772,10 @@ def engine_suite(tmp):
                                     f'signatures (first body row {bad})')
                 else:
                     scan_ok += 1
-    check(f'JS patcher suite passes for all {ran} pieces', not failures,
-          ' | '.join(failures[:3]))
+    check(f'JS patcher suite passes for all {ran} pieces', ran > 0 and not failures,
+          ' | '.join(failures[:3]) or 'no piece ran')
+    if off_substack:
+        print(f"        ({off_substack} piece(s) on no Substack outlet: no post to patch)")
     check(f'the browser and Python agree on text AND mark digests for all {scan_ok} pieces',
           scan_ok == ran, f'{scan_ok}/{ran}')
     if skipped:
@@ -3636,6 +3855,7 @@ def main():
         unit_captions(tmp)
         unit_prose(tmp)
         unit_substack_account(tmp)
+        unit_account_guard(tmp)
         unit_automode(tmp)
         corpus_integrity()
         corpus_headers()

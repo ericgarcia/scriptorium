@@ -34,6 +34,7 @@ import functools, http.server, os, socketserver, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import session_port
+import substack_account
 
 CARRY = """<!doctype html><meta charset="utf-8"><title>desk carry</title><body>carrying…</body>
 <script>
@@ -71,6 +72,17 @@ def main(argv):
     if not os.path.isfile(snippet):
         sys.stderr.write('pane_carry: no such file: %s\n' % snippet)
         return 2
+    # A Substack snippet must carry its own account guard (substack_account.py): the pane's login
+    # is shared by every session and can change between any check and this run. One without it —
+    # stale, or hand-made — is not carried.
+    with open(snippet, encoding='utf-8', errors='replace') as fh:
+        payload = fh.read()
+    handle = substack_account.guard_handle(payload)
+    if substack_account.drives_substack(payload) and not handle:
+        sys.stderr.write(
+            'pane_carry: refusing %s: it drives a Substack editor or API but carries no account\n'
+            'guard. Regenerate it with the framework tool that made it; never hand-make one.\n' % snippet)
+        return 2
     directory = os.path.dirname(snippet)
     with open(os.path.join(directory, 'carry.html'), 'w') as fh:
         fh.write(CARRY)
@@ -91,6 +103,9 @@ def main(argv):
     print('carry URL : http://127.0.0.1:%d/carry.html?f=%s' % (port, name))
     print('sha256    : %s' % session_port.expected_sha256(snippet))
     print('bytes     : %d' % os.path.getsize(snippet))
+    if handle:
+        print('account   : @%s — the snippet stops before touching anything unless the page is\n'
+              '            signed in as that account' % handle)
     print('\nnavigate the pane to the carry URL, then to the post editor, then verify the sha256')
     print('IN THE PAGE before executing. Ctrl-C here when the snippet has run.', flush=True)
     srv.serve_forever()

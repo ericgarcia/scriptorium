@@ -88,6 +88,7 @@ from md_to_substack import (CANONICAL_SRC, render_reader, read_manifest, flatten
                             render_block, render_footnote_block, strip_to_reader,
                             render_marks, mark_sig, mark_keys)
 from substack_repatch import JS_HELPERS
+import substack_account as sa
 
 BASELINE = 'sync-baseline.json'
 
@@ -369,7 +370,8 @@ FETCH_JS = """(() => {
 # ---------------------------------------------------------------- commands
 
 def cmd_scan(piece_dir, out_js):
-    open(out_js, 'w').write(SCAN_JS.replace('%HELPERS%', JS_HELPERS))
+    js = sa.guarded(piece_dir, SCAN_JS.replace('%HELPERS%', JS_HELPERS), 'substack_sync scan')
+    open(out_js, 'w').write(js)
     d = draft_state(piece_dir)
     print(f"wrote {out_js}")
     print(f"draft: body={len(d['body'])} fns={len(d['fns'])}  post_url~{d['post_url'] or '(none)'}")
@@ -497,6 +499,7 @@ def cmd_fetch(piece_dir, plan_json, out_js):
     fidx = sorted({r['liveIdx'] for r in need if r['kind'] == 'footnote'})
     js = (FETCH_JS.replace('%HELPERS%', JS_HELPERS)
                   .replace('%BODY_IDX%', json.dumps(bidx)).replace('%FN_IDX%', json.dumps(fidx)))
+    js = sa.guarded(piece_dir, js, 'substack_sync fetch')
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} — fetches {len(bidx)} body + {len(fidx)} footnote block(s) of live text")
 
@@ -727,6 +730,7 @@ def cmd_push(piece_dir, plan_json, live_json, out_js):
                  .replace('%SUBTITLE%', json.dumps(d['subtitle']))
                  .replace('%SET_TITLE%', 'true' if set_title else 'false')
                  .replace('%SET_SUB%', 'true' if set_sub else 'false'))
+    js = sa.guarded(piece_dir, js, 'substack_sync push')
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} ({len(js)} bytes) — {len(patch)} block(s)"
           + (", title" if set_title else "") + (", subtitle" if set_sub else ""))
@@ -826,7 +830,7 @@ def cmd_images(piece_dir, out_js):
     a NameError — which meant the gate could not be run at all, on the very day the gate was
     added to stop a recompose destroying a live image.
     """
-    open(out_js, 'w').write(IMAGES_JS)
+    open(out_js, 'w').write(sa.guarded(piece_dir, IMAGES_JS, 'substack_sync images'))
     draft = open(os.path.join(piece_dir, 'draft.md')).read()
     refs = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', draft)
     print(f"wrote {out_js}")

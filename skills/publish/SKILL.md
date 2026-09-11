@@ -88,6 +88,20 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   Substack's, or another HTTP status: run it again on the right page, and do not send the author to
   sign in. Pass the snippet's answer as-is; never type a handle in.
 
+  **Every snippet then checks again, itself.** `check` is one moment, and another session can
+  switch the pane's login right after it. So every generated Substack script (`md_to_substack`,
+  `substack_repatch` and `--structural`, `substack_sync` scan/fetch/push/images, `substack_cover`,
+  `substack_captions`, `substack_tags`, `md_to_clipboard --fn-out`) opens with the **account
+  guard**: in the same eval, before it reads or writes anything, it runs the same profile fetch and
+  returns `{"refused": "account: …", "accountGuard": true}` unless the page is signed in as the
+  piece's outlet's `account_handle` (`substack_tags` throws instead). **Treat that like exit 5:**
+  stop, and never switch the login. A generator that cannot settle the piece's outlet from its
+  `outlets:` writes nothing (exit 9); `substack_account.py guard pieces/<slug>` names the account
+  a piece's snippets insist on. `pane_carry.py` refuses a Substack snippet with no guard, so
+  regenerate one; never hand-make it. Each snippet is **one promise-valued expression**:
+  `javascript_tool` returns its value, and the `<script>` carrier assigns it to a global you
+  `await` in the next call.
+
   **Reaching the Chrome browser:** `list_connected_browsers`, then `select_browser` the one named
   *exactly* as `chrome_browser` says (`route` prints the steps). If it isn't listed, `switch_browser`
   and give it exactly that name at the Connect prompt. Never pick one by guessing from the list, and
@@ -757,7 +771,8 @@ when the pasteboard is unavailable. Verify with step 6 either way, without excep
 3. **Call A — body:** run the whole snippet via the browser's JS eval (sets Title + Subtitle,
    pastes the body as one synthetic ProseMirror paste; images inlined as `data:` URIs →
    Substack uploads them to its CDN).
-4. **Call B — footnotes:** `window.__sbInsertFootnotes()`; `missing` must be empty.
+4. **Call B — footnotes:** `await window.__sbInsertFootnotes()`; `missing` must be empty. It is
+   its own eval, so it runs the account guard again before touching the document.
 5-7. As above.
 
 ## Getting a snippet into the page — the `window.name` carrier (pane transport)

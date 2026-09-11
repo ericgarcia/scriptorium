@@ -54,6 +54,20 @@ USAGE
   refuses one read on a page that is neither the outlet's own nor Substack's, and treats only a
   401/403 as signed out — a 404 or 5xx says nothing about who is signed in.
 
+  THE GUARD IN EVERY SNIPPET.  `check` confirms the account ONCE. But the pane's cookie store is
+  shared by every tab and every session, so another session can switch the pane's login between
+  that check and the write — and the write lands under the wrong byline, with no error. So every
+  generated script that reads or writes a Substack editor or its API opens with `guard_js`: the
+  same same-origin profile fetch as the snippet, run IN THE SAME EVAL as the work, which returns
+  `{"refused": "account: …", "accountGuard": true, …}` before the document is touched unless the
+  signed-in handle is the outlet's `account_handle`. `guard_for_piece` settles which Substack
+  outlet a piece writes to (its publish.yaml `outlets:`, via outlets.yaml); a generator that
+  cannot settle it writes nothing (exit 9). `wrap` makes a snippet one promise-valued
+  expression, so the javascript_tool REPL, a `<script>` that assigns it to a global, and a test
+  harness's `await eval(...)` all get its return value.
+
+    substack_account.py guard <piece-dir>        # the outlet and account a piece's snippets insist on
+
   FINDING THE CHROME BROWSER.  `chrome_browser` is the name the browser was given at Claude in
   Chrome's Connect prompt — until someone names it, list_connected_browsers shows "Browser 1/2/3".
   So: list_connected_browsers; select_browser the one named EXACTLY as outlets.yaml says; if it is
@@ -71,6 +85,8 @@ EXIT
   7  the answer settles nothing — not the snippet's JSON, read on a page that is neither the
      outlet's nor Substack's, or an HTTP status other than 401/403. Run the snippet again on the
      right page; do NOT send the author off to sign in
+  9  (guard, and every snippet generator) the piece's Substack account cannot be settled — no
+     outlets.yaml, no Substack outlet in its `outlets:`, two of them, or no account_handle
 """
 import argparse
 import json
@@ -243,6 +259,166 @@ def verdict(doc, name, result, surface):
     return 0, f"ok: {where} is signed in as @{got}, the account {name} publishes as"
 
 
+# ------------------------------------------------------------------ the guard in every snippet
+GUARD_MARK = '/* desk-account-guard v1 */'
+NO_ACCOUNT_EXIT = 9
+
+
+class NoAccount(Exception):
+    """A piece's Substack account cannot be settled, so no snippet may be generated for it."""
+
+
+def guard_js(spec, outlet=None):
+    """A JS async function (an expression) resolving to null when this page is signed in as the
+    outlet's `account_handle`, else to an abort object. The fetch is SNIPPET's, relative on
+    purpose: a cross-origin fetch fails in the pane. Anything but a 200 carrying that handle —
+    signed out, someone else, a 404, a throw — aborts: a guard that is unsure does not let the
+    write through."""
+    want = expected(spec)
+    if not want:
+        raise NoAccount(f"{outlet or 'this outlet'} names no account_handle — refusing rather than "
+                        f"assuming who may write there. Add one to outlets.yaml.")
+    return (GUARD_MARK + " (async () => {\n"
+            f"  const WANT = {json.dumps(want)}, OUTLET = {json.dumps(outlet or '')};\n"
+            "  const origin = typeof location !== 'undefined' ? location.origin : '';\n"
+            "  const stop = (why, extra) => Object.assign({ refused: 'account: ' + why + ' - nothing "
+            "was read or written; do not switch this browser to another login', accountGuard: true, "
+            "outlet: OUTLET, want: WANT, origin }, extra || {});\n"
+            "  let r;\n"
+            "  try { r = await fetch('/api/v1/user/profile/self', { credentials: 'include' }); }\n"
+            "  catch (e) { return stop('the profile check could not run (' + e + ')'); }\n"
+            "  if (r.status !== 200) return stop('this page is not signed in as @' + WANT + ' (HTTP ' "
+            "+ r.status + ')', { status: r.status });\n"
+            "  let j = null;\n"
+            "  try { j = await r.json(); } catch (e) { return stop('the profile answer is not JSON'); }\n"
+            "  const got = String((j && j.handle) || '').trim().replace(/^@/, '').toLowerCase();\n"
+            "  if (got !== WANT) return stop('signed in as @' + (got || '?') + ', and ' + OUTLET + "
+            "' publishes as @' + WANT, { got });\n"
+            "  return null;\n"
+            "})")
+
+
+def wrap(js, guard):
+    """`js` (one expression: a sync IIFE, an async one, or `await (async …)()`) behind `guard`, as
+    ONE promise-valued expression with no top-level await. The guard runs first, in the same eval;
+    on a refusal it returns the abort as a JSON string, the shape every snippet here returns, and
+    `js` is never evaluated. Inside `js`, `__deskAccount` is the guard, for a function the snippet
+    leaves behind to call later (md_to_substack's footnote pass)."""
+    body = js.strip().rstrip(';').rstrip()
+    return ("(async () => {\n"
+            f"  const __deskAccount = {guard};\n"
+            "  const __deskStop = await __deskAccount();\n"
+            "  if (__deskStop) return JSON.stringify(__deskStop);\n"
+            f"  return (\n{body}\n  );\n"
+            "})()\n")
+
+
+def prelude(guard):
+    """The guard as STATEMENTS, for a snippet that is a top-level-await script rather than one
+    expression (substack_tags): it throws, the way that script refuses everything else."""
+    return (f"const __deskAccount = {guard};\n"
+            "{ const __deskStop = await __deskAccount(); "
+            "if (__deskStop) throw new Error(JSON.stringify(__deskStop)); }\n")
+
+
+def guard_handle(text):
+    """The handle a generated snippet's guard insists on, or None if it carries no guard."""
+    m = re.search(re.escape(GUARD_MARK) + r' \(async \(\) => \{\s*const WANT = ("[^"\\]*")', text or '')
+    return json.loads(m.group(1)) if m else None
+
+
+def drives_substack(text):
+    """Does this snippet read or write a Substack editor or its API? (pane_carry's test.)"""
+    return bool(re.search(r"\.ProseMirror|['\"]/api/v1/", text or ''))
+
+
+def outlets_path_for(piece_dir, outlets_path=None):
+    """Explicit path, else $DESK_OUTLETS, else <the instance holding the piece>/publishing/outlets.yaml
+    (the nearest ancestor with a pieces/ directory, as publications.instance_root finds it)."""
+    if outlets_path:
+        return outlets_path
+    if os.environ.get('DESK_OUTLETS'):
+        return os.environ['DESK_OUTLETS']
+    cur = os.path.abspath(piece_dir)
+    while True:
+        if os.path.isdir(os.path.join(cur, 'pieces')):
+            return os.path.join(cur, 'publishing', 'outlets.yaml')
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def _host(url):
+    return urlparse(str(url or '')).hostname or ''
+
+
+def outlet_for_piece(piece_dir, outlets_path=None):
+    """-> (outlet name, spec) of the ONE Substack outlet a piece writes to. Raises NoAccount.
+
+    Its publish.yaml `outlets:` list names it. A manifest with no list (it predates outlets) is
+    settled by the host of its `post_url`, or by the desk having a single Substack outlet. A
+    `post_url` on ANOTHER Substack outlet's host than the one declared is refused: the manifest
+    disagrees with itself about whose post this is."""
+    slug = os.path.basename(os.path.normpath(piece_dir))
+    path = outlets_path_for(piece_dir, outlets_path)
+    if not path or not os.path.isfile(path):
+        raise NoAccount(f"{slug}: no publishing/outlets.yaml found (looked for {path or 'an instance root'}), "
+                        f"so nothing says which Substack account may write this post")
+    doc = load(path)
+    mpath = os.path.join(piece_dir, 'publish.yaml')
+    man = {}
+    if os.path.isfile(mpath):
+        with open(mpath, encoding='utf-8') as fh:
+            man = yaml.safe_load(fh) or {}
+    subs = substack_outlets(doc)
+    post_host = _host(man.get('post_url'))
+    by_host = [n for n in subs if post_host and _host(doc['outlets'][n].get('reader_base')) == post_host]
+    declared = man.get('outlets')
+    if isinstance(declared, list):
+        mine = [o for o in declared if o in subs]
+        if len(mine) > 1:
+            mine = [o for o in mine if o in by_host] or mine
+        if not mine:
+            raise NoAccount(f"{slug}: its outlets: ({', '.join(map(str, declared)) or 'none'}) name no "
+                            f"Substack outlet")
+        if len(mine) > 1:
+            raise NoAccount(f"{slug}: its outlets: name {len(mine)} Substack outlets ({', '.join(mine)}) "
+                            f"and its post_url does not say which this post is")
+        name = mine[0]
+        if by_host and name not in by_host:
+            raise NoAccount(f"{slug}: outlets: says {name}, but its post_url is on {post_host}, "
+                            f"which is {by_host[0]}'s — the manifest disagrees with itself")
+    elif len(by_host) == 1:
+        name = by_host[0]
+    elif len(subs) == 1:
+        name = subs[0]
+    else:
+        raise NoAccount(f"{slug}: no outlets: list, and neither its post_url nor the desk settles "
+                        f"which of {len(subs)} Substack outlets it is")
+    spec = doc['outlets'][name] or {}
+    if not expected(spec):
+        raise NoAccount(f"{slug} goes to {name}, which names no account_handle — add one to outlets.yaml")
+    return name, spec
+
+
+def guard_for_piece(piece_dir, outlets_path=None):
+    """-> (guard JS, outlet name, handle) for a piece. Raises NoAccount."""
+    name, spec = outlet_for_piece(piece_dir, outlets_path)
+    return guard_js(spec, name), name, expected(spec)
+
+
+def guarded(piece_dir, js, tool='snippet'):
+    """For a generator: `js` wrapped behind the piece's guard, or exit 9 having written nothing."""
+    try:
+        guard, name, want = guard_for_piece(piece_dir)
+    except NoAccount as e:
+        print(f"{tool}: refusing to write a snippet: {e}", file=sys.stderr)
+        sys.exit(NO_ACCOUNT_EXIT)
+    print(f"account guard: the snippet stops unless the page is signed in as @{want} ({name})")
+    return wrap(js, guard)
+
+
 def _atomic_write(path, text):
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=d, prefix='.outlets-', suffix='.yaml')
@@ -317,6 +493,7 @@ def main(argv=None):
     p = sub.add_parser('route'); p.add_argument('outlet')
     p = sub.add_parser('primary'); p.add_argument('outlet', nargs='?')
     sub.add_parser('snippet')
+    p = sub.add_parser('guard'); p.add_argument('piece')
     p = sub.add_parser('check'); p.add_argument('outlet')
     p.add_argument('--surface', choices=('pane', 'chrome'), required=True,
                    help='where the snippet ran; checking in the wrong browser is exit 4')
@@ -327,6 +504,16 @@ def main(argv=None):
 
     if o.cmd == 'snippet':
         print(SNIPPET)
+        return 0
+    if o.cmd == 'guard':
+        explicit = o.outlets if o.outlets != ap.get_default('outlets') else None
+        try:
+            name, spec = outlet_for_piece(o.piece, explicit)
+        except NoAccount as e:
+            print(str(e), file=sys.stderr)
+            return NO_ACCOUNT_EXIT
+        print(f"{os.path.basename(os.path.normpath(o.piece))}: {name}, @{expected(spec)} — every "
+              f"snippet generated for it stops unless the page is signed in as that account")
         return 0
     if o.cmd == 'primary' and o.outlet:
         code, msg = set_primary(o.outlets, o.outlet)

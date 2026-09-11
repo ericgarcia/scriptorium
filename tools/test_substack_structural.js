@@ -46,8 +46,9 @@ if (!snippetPath) { console.error('usage: node test_substack_structural.js <stru
 const src = fs.readFileSync(snippetPath, 'utf8');
 const TARGET = JSON.parse(src.match(/\/\*T\*\/([\s\S]*?)\/\*T\*\//)[1]);
 
-const { curl, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install } =
+const { curl, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle } =
   require('./test_editor_stub.js');
+const HANDLE = guardHandle(src);   // signed in as the account the snippet's guard insists on
 
 // ---------------------------------------------------------------- build a live doc from the target
 // anchors are placed where the draft's [[FN]] markers sit; text is curled the way Substack does
@@ -68,10 +69,10 @@ function liveFromTarget(t, opts = {}) {
   return tops;
 }
 
-async function run(tops, source, fields) {
+async function run(tops, source, fields, handle = HANDLE) {
   const { editor, dispatches } = makeEditor(tops);
   install(editor, fields || { 'textarea[placeholder="Title"]': { value: TARGET.title },
-                              'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } });
+                              'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle } }, { handle });
   const report = JSON.parse(await eval(source || src));
   return { report, dispatches: dispatches(), tops };
 }
@@ -88,6 +89,15 @@ const wantAnchors = TARGET.body.reduce((n, b) => n + b.anchors.length, 0);
 const plainIdx = (pred = () => true) => TARGET.body.findIndex((b, i) => !b.anchors.length && !/<a /.test(b.html) && b.text.length > 40 && pred(b, i));
 
 (async () => {
+  // --- S0 signed in as someone else, or signed out -> refused before the document is read ---
+  { const body = TARGET.body.slice(); body.splice(1, 0, { text: 'An extra paragraph nobody wrote.', html: '<p>An extra paragraph nobody wrote.</p>', anchors: [], hrBefore: false });
+    const r = await run(liveFromTarget(TARGET, { body }), null, null, 'someone-else');
+    const out = await run(liveFromTarget(TARGET, { body }), null, null, null);
+    check('S0 the wrong account, or none, is refused before any edit',
+          HANDLE && r.report.accountGuard === true && r.report.got === 'someone-else' && r.dispatches === 0 && !('applied' in r.report)
+          && out.report.accountGuard === true && out.report.status === 401 && out.dispatches === 0,
+          `guard=@${HANDLE} ` + JSON.stringify(r.report).slice(0, 160) + ' / ' + JSON.stringify(out.report).slice(0, 120)); }
+
   // --- S1 identical -> ok, nothing dispatched ---
   { const r = await run(liveFromTarget(TARGET));
     check('S1 identical doc is a no-op', r.report.ok && r.report.applied.length === 0 && r.dispatches === 0, summary(r)); }

@@ -33,7 +33,7 @@
  * patcher reading `raw` off the wrong object, which would have thrown on every insertion.
  */
 const fs = require('fs');
-const { curl, parseInline, topFromRuns, runsOf, makeEditor, install } = require('./test_editor_stub.js');
+const { curl, parseInline, topFromRuns, runsOf, makeEditor, install, guardHandle } = require('./test_editor_stub.js');
 
 const snippetPath = process.argv[2];
 if (!snippetPath) {
@@ -59,14 +59,17 @@ const liveTop = (name, text, runs) => {
   return top;
 };
 
-function run(bodyTexts, fnTexts, title, subtitle, bodyMarks, fnMarks) {
+// Signed in as the account the snippet's guard insists on, unless a case says otherwise.
+const HANDLE = guardHandle(src);
+
+async function run(bodyTexts, fnTexts, title, subtitle, bodyMarks, fnMarks, handle = HANDLE) {
   const tops = [];
   bodyTexts.forEach((t, i) => tops.push(liveTop('paragraph', t, (bodyMarks || BODYMARKS)[i])));
   fnTexts.forEach((t, i) => tops.push(liveTop('footnote', t, (fnMarks || FNMARKS)[i])));
   const { editor, dispatches, tops: live } = makeEditor(tops);
   install(editor, { 'textarea[placeholder="Title"]': { value: title },
-                    'textarea[placeholder="Add a subtitle…"]': { value: subtitle } });
-  return { report: JSON.parse(eval(src)), dispatches: dispatches(), tops: live };
+                    'textarea[placeholder="Add a subtitle…"]': { value: subtitle } }, { handle });
+  return { report: JSON.parse(await eval(src)), dispatches: dispatches(), tops: live };
 }
 
 let failures = 0;
@@ -76,6 +79,20 @@ const check = (name, ok, detail) => {
 };
 const skip = (name, why) => console.log(`skip  ${name}   (${why})`);
 const norm = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim();
+
+(async () => {
+// --- 0: signed in as someone else -> refused before the document is read ------
+// The pane's login is shared by every session and can change between `check` and this eval;
+// the snippet's own guard is what stops a write landing under the wrong byline.
+{
+  const liveA = BODY.map(curl);
+  if (liveA.length) liveA[0] = 'ZQX ' + liveA[0];
+  const z = await run(liveA, FNS.map(curl), 'A title nobody set', SUBTITLE, BODYMARKS, FNMARKS, 'someone-else');
+  check('0 the wrong account is refused before anything is staged',
+    HANDLE && z.report.accountGuard === true && z.report.got === 'someone-else' && z.dispatches === 0
+    && !('applied' in z.report),
+    `guard=@${HANDLE} report=${JSON.stringify(z.report).slice(0, 160)} dispatches=${z.dispatches}`);
+}
 
 // --- A: a single real edit is applied, and only there -----------------------
 // The changed block's own marks are dropped from the live copy along with the text change,
@@ -89,7 +106,7 @@ const norm = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(
   else {
     liveA[victim] = liveA[victim].slice(0, 50) + 'ZQX ' + liveA[victim].slice(50);
     const marksA = BODYMARKS.map((m, i) => (i === victim ? [] : m));
-    const a = run(liveA, FNS.map(curl), TITLE, SUBTITLE, marksA, FNMARKS);
+    const a = await run(liveA, FNS.map(curl), TITLE, SUBTITLE, marksA, FNMARKS);
     check('A one changed block is patched',
       !a.report.structural && a.report.applied.length > 0 && a.report.failed.length === 0
       && a.report.applied.every(x => x.block === victim),
@@ -104,7 +121,7 @@ const norm = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(
 if (FNS.length < 2) {
   skip('B reordered footnotes refuse', `needs >=2 footnotes, piece has ${FNS.length}`);
 } else {
-  const b = run(BODY.map(curl), FNS.map(curl).slice().reverse(), TITLE, SUBTITLE,
+  const b = await run(BODY.map(curl), FNS.map(curl).slice().reverse(), TITLE, SUBTITLE,
                 BODYMARKS, FNMARKS.slice().reverse());
   check('B reordered footnotes refuse',
     b.report.structural && b.report.reordered.length > 0 && b.dispatches === 0,
@@ -113,7 +130,7 @@ if (FNS.length < 2) {
 
 // --- C: curly-vs-straight quotes are not a content difference ---------------
 {
-  const c = run(BODY.map(curl), FNS.map(curl), TITLE, SUBTITLE);
+  const c = await run(BODY.map(curl), FNS.map(curl), TITLE, SUBTITLE);
   check('C typography-only diff is a no-op',
     !c.report.structural && c.report.stagedEdits === 0 && c.dispatches === 0,
     `unchanged=${c.report.unchanged}/${BODY.length + FNS.length} marksUnchanged=${c.report.marks.unchanged} review=${JSON.stringify(c.report.marks.review).slice(0, 120)}`);
@@ -130,12 +147,12 @@ if (FNS.length < 2) {
   const tops = [{ name: 'paragraph', kids: parseInline('abc[[FN1]]def') }];
   const { editor, tops: live } = makeEditor(tops);
   install(editor, { 'textarea[placeholder="Title"]': { value: TITLE },
-                    'textarea[placeholder="Add a subtitle…"]': { value: SUBTITLE } });
+                    'textarea[placeholder="Add a subtitle…"]': { value: SUBTITLE } }, { handle: HANDLE });
   // change the character immediately AFTER the anchor: reader offset 3, 'd' -> 'X'
   const patched = src
     .replace(/BODY = \[[\s\S]*?\], FNS = \[[\s\S]*?\];/, 'BODY = ["abcXef"], FNS = [];')
     .replace(/BODYMARKS = \[[\s\S]*?\], FNMARKS = \[[\s\S]*?\];/, 'BODYMARKS = [[]], FNMARKS = [];');
-  const report = JSON.parse(eval(patched));
+  const report = JSON.parse(await eval(patched));
   const survived = live[0].kids.filter(k => k.anchor).length;
   check('D boundary edit spares an inline anchor',
     report.applied.length > 0 && survived === 1 && live[0].kids.filter(k => !k.anchor).map(k => k.text).join('') === 'abcXef',
@@ -154,7 +171,7 @@ if (FNS.length < 2) {
     liveE[idx] = liveE[idx].replace('. ', '.  ');            // inject a double space
     // that block's own offsets shift by one, so it goes in unmarked; E is about the text pass
     const marksE = BODYMARKS.map((m, i) => (i === idx ? [] : m));
-    const e = run(liveE, FNS.map(curl), TITLE, SUBTITLE, marksE, FNMARKS);
+    const e = await run(liveE, FNS.map(curl), TITLE, SUBTITLE, marksE, FNMARKS);
     const textEdits = e.report.applied.length;
     check('E whitespace-only difference is ignored',
       !e.report.structural && textEdits === 0,
@@ -172,7 +189,7 @@ if (FNS.length < 2) {
   else {
     const want = BODYMARKS[k].filter(r => r.kind !== 'link');
     const marksF = BODYMARKS.map((m, i) => (i === k ? m.filter(r => r.kind === 'link') : m));
-    const f = run(BODY.map(curl), FNS.map(curl), TITLE, SUBTITLE, marksF, FNMARKS);
+    const f = await run(BODY.map(curl), FNS.map(curl), TITLE, SUBTITLE, marksF, FNMARKS);
     const block = f.tops[k];
     const gotKeys = runsOf(block).map(r => r.kind + ' ' + norm(r.text));
     const wantKeys = want.map(r => r.kind + ' ' + norm(r.text));
@@ -204,7 +221,7 @@ if (FNS.length < 2) {
     for (const k of at) typo = typo.slice(0, k) + (typo[k] === 'q' ? 'x' : 'q') + typo.slice(k + 1);
     const liveB = BODY.map(curl), liveF = FNS.map(curl);
     (useFn ? liveF : liveB)[idx] = curl(typo);
-    const g = run(liveB, liveF, TITLE, SUBTITLE, BODYMARKS, FNMARKS);
+    const g = await run(liveB, liveF, TITLE, SUBTITLE, BODYMARKS, FNMARKS);
     const node = g.tops[(useFn ? BODY.length : 0) + idx];
     const got = node.kids.filter(k => !k.anchor).map(k => k.text).join('');
     check('G two scattered edits are patched, not suspect',
@@ -229,10 +246,11 @@ if (!FNS.length) {
   const other = pool.reduce((best, t) => (best === null || Math.abs(t.length - FNS[i].length) < Math.abs(best.length - FNS[i].length) ? t : best), null);
   const liveF = FNS.map(curl); liveF[i] = curl(other);
   const marksH = FNMARKS.map((m, k) => (k === i ? [] : m));
-  const h = run(BODY.map(curl), liveF, TITLE, SUBTITLE, BODYMARKS, marksH);
+  const h = await run(BODY.map(curl), liveF, TITLE, SUBTITLE, BODYMARKS, marksH);
   check('H a misaligned footnote is refused as suspect',
     h.report.structural && (h.report.suspect || []).some(s => s.kind === 'footnote' && s.idx === i) && h.dispatches === 0,
     `footnote ${i} vs body text of ${other.length} chars suspect=${JSON.stringify((h.report.suspect || []).map(s => [s.idx, s.similarity]))} dispatches=${h.dispatches}`);
 }
 
 process.exit(failures ? 1 : 0);
+})().catch(e => { console.log('FAIL  runner crashed   ' + (e.stack || e)); process.exit(1); });

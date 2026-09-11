@@ -18,7 +18,7 @@
  * computations over the same piece rather than one echoed back.
  */
 const fs = require('fs');
-const { curl, parseTops, parseInline, topFromRuns, makeEditor, install } = require('./test_editor_stub.js');
+const { curl, parseTops, parseInline, topFromRuns, makeEditor, install, guardHandle } = require('./test_editor_stub.js');
 
 const [scanPath, targetPath] = process.argv.slice(2);
 if (!scanPath || !targetPath) {
@@ -47,10 +47,9 @@ for (const f of TARGET.fns) {
   install(editor, {
     'textarea[placeholder="Title"]': { value: TARGET.title },
     'textarea[placeholder="Add a subtitle…"]': { value: TARGET.subtitle },
-  });
-  global.location = { href: 'https://example.invalid/publish/post/0' };
-  // The snippet is `await (async () => {...})()`: top-level await, which a browser console
-  // accepts and `eval` does not. Strip the leading await and await the promise here — the
-  // shipped snippet is not changed, only how this harness enters it.
-  console.log(await eval(scanSrc.replace(/^await\s+/, '')));
+  }, { handle: guardHandle(scanSrc) });
+  global.location = { origin: 'https://example.invalid', href: 'https://example.invalid/publish/post/0' };
+  // The shipped snippet is one promise-valued expression (substack_account.wrap: the account
+  // guard, then the scan), so it is evaluated as-is and its promise awaited.
+  console.log(await eval(scanSrc));
 })().catch(e => { console.error('runner crashed: ' + (e.stack || e)); process.exit(1); });

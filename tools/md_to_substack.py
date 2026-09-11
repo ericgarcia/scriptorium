@@ -15,7 +15,9 @@ Usage:  python3 md_to_substack.py <piece-dir> [out.js]
 
 The caller runs the emitted JS in two steps against a fresh, logged-in composer:
   A) run the whole snippet         -> title/subtitle set, body pasted
-  B) run window.__sbInsertFootnotes()  -> markers become native footnotes
+  B) run await window.__sbInsertFootnotes()  -> markers become native footnotes
+Both steps first check the page is signed in as the piece's Substack account
+(substack_account.py, the guard) and return {"refused": "account: …"} untouched if not.
 (The two-step split is required: ProseMirror applies the paste asynchronously,
 so the markers aren't in the doc model until the next tick / next call.)
 
@@ -872,11 +874,13 @@ def main():
               "subtitle; a caption belongs in publish.yaml, not draft.md). There is no override.")
         sys.exit(6)
     html, footnotes, stripped, residual, unverified, fn_issues = convert(piece_dir)
-    js = (JS_TEMPLATE
-          .replace('%TITLE%', json.dumps(man.get('title', '')))
-          .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
-          .replace('%BODY%', json.dumps(html))
-          .replace('%FOOTNOTES%', json.dumps(footnotes)))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import substack_account as sa
+    js = sa.guarded(piece_dir, JS_TEMPLATE
+                    .replace('%TITLE%', json.dumps(man.get('title', '')))
+                    .replace('%SUBTITLE%', json.dumps(man.get('subtitle', '')))
+                    .replace('%BODY%', json.dumps(html))
+                    .replace('%FOOTNOTES%', json.dumps(footnotes)), 'md_to_substack')
     print(f"paragraphs~{html.count('<p>')}  headings~{html.count('<h2>')+html.count('<h3>')}  "
           f"dividers~{html.count('<hr>')}  images~{html.count('<img')}  footnotes~{len(footnotes)}  "
           f"editorial-notes-stripped~{stripped}")
@@ -932,7 +936,11 @@ JS_TEMPLATE = """(() => {
   const dt = new DataTransfer(); dt.setData('text/html', %BODY%);
   pm.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   window.__sbFN = %FOOTNOTES%;
-  window.__sbInsertFootnotes = () => {
+  window.__sbInsertFootnotes = async () => {
+    // Call B is its own eval, and the pane's login can change between A and B: the account
+    // guard (substack_account.wrap) runs again here, before the document is touched.
+    const stop = await __deskAccount();
+    if (stop) return JSON.stringify(stop);
     const ed = document.querySelector('.ProseMirror').editor;
     const findToken = (doc, t) => { let f = null; doc.descendants((node, pos) => { if (f) return false; if (node.isText) { const i = node.text.indexOf(t); if (i >= 0) { f = { from: pos + i, to: pos + i + t.length }; return false; } } return true; }); return f; };
     let done = 0; const missing = [];
@@ -945,7 +953,7 @@ JS_TEMPLATE = """(() => {
     }
     return JSON.stringify({ inserted: done, missing });
   };
-  return 'body pasted (' + document.querySelectorAll('.ProseMirror > *').length + ' blocks pre-async); next: window.__sbInsertFootnotes()';
+  return 'body pasted (' + document.querySelectorAll('.ProseMirror > *').length + ' blocks pre-async); next: await window.__sbInsertFootnotes()';
 })()
 """
 

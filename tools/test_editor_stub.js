@@ -161,11 +161,26 @@ function makeEditor(tops) {
   return { editor, tops, dispatches: () => dispatches };
 }
 
-// install the browser globals an engine snippet expects, and return a runner
-function install(editor, fields) {
+// install the browser globals an engine snippet expects, and return a runner. Every generated
+// snippet opens with an account guard (substack_account.py) that fetches the signed-in profile
+// before touching the document: `handle` is who this stub is signed in as (null: signed out),
+// and any other fetch is a test bug, so it throws.
+function install(editor, fields, { handle = null } = {}) {
   global.document = { querySelector: sel => (sel === '.ProseMirror' ? { editor } : (fields[sel] || null)) };
   global.DOMParser = class { parseFromString(html) { return { body: { children: parseTops(html).map(tp => ({ textContent: topText(tp) })) } }; } };
   if (!global.crypto || !global.crypto.subtle) global.crypto = require('crypto').webcrypto;
+  if (!global.location) global.location = { origin: 'https://example.invalid', href: 'https://example.invalid/publish/post/0', pathname: '/publish/post/0' };
+  global.fetch = async path => {
+    if (path !== '/api/v1/user/profile/self') throw new Error('stub: no network for ' + path);
+    return handle ? { status: 200, json: async () => ({ handle, name: 'stub' }) }
+                  : { status: 401, json: async () => ({}) };
+  };
+}
+
+// The handle a snippet's account guard insists on (substack_account.guard_handle, in JS).
+function guardHandle(src) {
+  const m = src.match(/desk-account-guard v1 \*\/ \(async \(\) => \{\s*const WANT = ("[^"\\]*")/);
+  return m ? JSON.parse(m[1]) : null;
 }
 
 // The marked runs of a top node, the way the engines define one: coalesced across
@@ -198,4 +213,4 @@ function runsOf(top, { links = false } = {}) {
   return out;
 }
 
-module.exports = { curl, decode, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install };
+module.exports = { curl, decode, parseInline, parseTops, topText, topFromRuns, runsOf, makeEditor, install, guardHandle };

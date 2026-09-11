@@ -114,6 +114,14 @@ FN_TEMPLATE = """(() => {
 })()"""
 
 
+def footnote_snippet(piece_dir, footnotes):
+    """The --fn-out snippet behind the piece's account guard (substack_account.py): it writes into
+    the editor, so it checks who is signed in first, in the same eval. Exits 9 if it cannot say."""
+    import substack_account as sa
+    return sa.guarded(piece_dir, FN_TEMPLATE.replace('%FOOTNOTES%', json.dumps(footnotes)),
+                      'md_to_clipboard --fn-out')
+
+
 def _sha(s: str) -> str:
     return hashlib.sha256(s.encode('utf-8')).hexdigest()[:16]
 
@@ -457,8 +465,9 @@ def main():
                  % (fn_issues['undefined'], fn_issues['duplicated']))
 
     if fn_out:
+        js = footnote_snippet(piece_dir, footnotes)   # exits 9, before the pasteboard is touched
         with open(fn_out, 'w') as f:
-            f.write(FN_TEMPLATE.replace('%FOOTNOTES%', json.dumps(footnotes)))
+            f.write(js)
         print('footnote snippet: %s (%d notes)' % (fn_out, len(footnotes)))
     if fn_b64:
         b = base64.b64encode(json.dumps(footnotes, ensure_ascii=False).encode('utf-8')).decode()

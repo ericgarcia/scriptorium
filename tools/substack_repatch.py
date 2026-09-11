@@ -72,6 +72,7 @@ import sys, os, json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from md_to_substack import render_reader, read_manifest, flatten_quotes, render_marks
+import substack_account as sa
 
 
 def main():
@@ -114,7 +115,8 @@ def main():
               "that post_url in publish.yaml so future runs are unambiguous.")
 
     if structural:
-        js = build_structural(piece_dir, man, body, fns, body_marks, fn_marks)
+        js = sa.guarded(piece_dir, build_structural(piece_dir, man, body, fns, body_marks, fn_marks),
+                        'substack_repatch --structural')
         open(out_js, 'w').write(js)
         print(f"wrote {out_js} ({len(js)} bytes) — STRUCTURAL engine: run once in the live editor; "
               f"read `refused` and `ok` in the report; nothing is applied on a refusal")
@@ -128,6 +130,7 @@ def main():
           .replace('%FNS%', json.dumps(fns))
           .replace('%BODYMARKS%', json.dumps(jsonable(body_marks)))
           .replace('%FNMARKS%', json.dumps(jsonable(fn_marks))))
+    js = sa.guarded(piece_dir, js, 'substack_repatch')
     open(out_js, 'w').write(js)
     print(f"wrote {out_js} ({len(js)} bytes)")
 

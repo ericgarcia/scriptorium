@@ -74,6 +74,12 @@ next completed `seal`; nothing needs re-sealing on purpose.
   (see the `publish` skill, *Confirm the ACCOUNT*). A push from the wrong browser or account edits a
   post its session does not own, or fails halfway. Exit 5 or 4 is a stop, not a prompt to sign in
   again; exit 7 means run the snippet again on the right page.
+- **Every snippet re-checks the account itself.** The pane's login is shared and can change after
+  `check`, so each `scan`/`fetch`/`push`/`images` and `substack_repatch` snippet opens with the
+  account guard. It returns `{"refused": "account: …", "accountGuard": true}` before reading or
+  writing the post unless the page is signed in as the piece's `account_handle`. That is a stop,
+  the same as exit 5. A piece whose outlet cannot be settled from `outlets:` gets no snippet
+  (exit 9); see `substack_account.py guard pieces/<name>`.
 - The browser is open and **logged in** on that post's editor. Automation cannot enter
   credentials.
 - The piece has a **baseline** (`<piece>/sync-baseline.json`). If it does not, seed one

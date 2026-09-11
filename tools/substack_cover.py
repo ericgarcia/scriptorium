@@ -210,6 +210,8 @@ def main():
 })()""" % (json.dumps(post_id or ''), json.dumps(alt), json.dumps(caption),
                    'false' if cover_only else 'true', data_uri, json.dumps(reuse_url))
 
+    import substack_account as sa
+    snippet = sa.guarded(piece, snippet, 'substack_cover')
     open(out_js, 'w', encoding='utf-8').write(snippet)
     if reuse_url:
         print(f"{os.path.basename(src)}  reused from the CDN, nothing uploaded")

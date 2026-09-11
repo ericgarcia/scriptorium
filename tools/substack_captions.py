@@ -30,6 +30,7 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from md_to_substack import render_captions   # noqa: E402
+import substack_account as sa                # noqa: E402
 
 SNIPPET = r"""(() => {
   const WANT = %CAPS%;
@@ -77,7 +78,7 @@ def main():
     if not any(caps):
         print(f"{piece}: no captions in publish.yaml (captions:, cover_caption:) -- nothing to set.")
         return 2
-    js = SNIPPET.replace('%CAPS%', json.dumps(caps))
+    js = sa.guarded(piece, SNIPPET.replace('%CAPS%', json.dumps(caps)), 'substack_captions')
     with open(out, 'w', encoding='utf-8') as fh:
         fh.write(js)
     for i, c in enumerate(caps, 1):

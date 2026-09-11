@@ -92,7 +92,7 @@ def cache_control(key, cc):
         return cc.get('images')
     if key.startswith('talks/'):
         base = os.path.basename(key)
-        if base in ('notes.json', 'deck.html'):
+        if base in ('notes.json', 'deck.html', 'piece.json'):   # rewritten in place
             return cc.get('talks_mutable', cc.get('pieces'))
         return cc.get('talks')
     return cc.get('pieces')

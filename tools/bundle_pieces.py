@@ -110,7 +110,9 @@ def main():
     if os.path.exists(index_path):
         with open(index_path, encoding='utf-8') as fh:
             index = json.load(fh)
-    by_slug = {p['slug']: p for p in index.get('pieces', [])}
+    # Keyed by (slug, kind), not slug: a talk and an essay can share a slug, and merging
+    # one must never replace the other's entry (2026-09-10, the first MuffinLabs essay).
+    by_key = {(p['slug'], p.get('kind', 'piece')): p for p in index.get('pieces', [])}
 
     copied = set()
     for name in files:
@@ -145,7 +147,10 @@ def main():
         if meta.get('images'):
             piece['images'] = [{**i, 'src': to_relative(i.get('src'))} for i in meta['images']]
 
-        with open(os.path.join(a.bundle, 'pieces', f'{slug}.json'), 'w', encoding='utf-8') as fh:
+        out_path = (os.path.join(a.bundle, 'talks', slug, 'piece.json') if a.kind == 'talk'
+                    else os.path.join(a.bundle, 'pieces', f'{slug}.json'))
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, 'w', encoding='utf-8') as fh:
             json.dump(piece, fh, indent=2, ensure_ascii=False)
             fh.write('\n')
 
@@ -163,15 +168,15 @@ def main():
             'title': meta['title'],
             'published_at': piece['published_at'],
             'digest': meta['digest'],
-            'outlets': sorted(set((by_slug.get(slug, {}).get('outlets') or []) + [a.outlet])),
+            'outlets': sorted(set((by_key.get((slug, a.kind), {}).get('outlets') or []) + [a.outlet])),
             'kind': a.kind,
         }
         if meta.get('subtitle'):
             entry['subtitle'] = meta['subtitle']
-        by_slug[slug] = entry
+        by_key[(slug, a.kind)] = entry
 
     index['spec'] = '2'
-    index['pieces'] = sorted(by_slug.values(),
+    index['pieces'] = sorted(by_key.values(),
                              key=lambda p: p.get('published_at', ''), reverse=True)
     index['generated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     with open(index_path, 'w', encoding='utf-8') as fh:

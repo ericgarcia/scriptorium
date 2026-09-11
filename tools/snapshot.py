@@ -271,11 +271,15 @@ def main():
 
     for entry in entries:
         slug = entry['slug']
-        md_path = os.path.join(a.out, 'content', f'{slug}.md')
+        is_talk = entry.get('kind') == 'talk'
+        # A talk's record lives beside its deck, and so does its markdown here: a talk and
+        # its companion essay share a slug, so content/<slug>.md could hold only one of them.
+        md_path = (os.path.join(a.out, 'talks', slug, 'piece.md') if is_talk
+                   else os.path.join(a.out, 'content', f'{slug}.md'))
 
         if a.verify_only:
             if not os.path.exists(md_path):
-                faults.append(f'{slug}: content/{slug}.md missing')
+                faults.append(f'{slug}: {os.path.relpath(md_path, a.out)} missing')
                 continue
             with open(md_path, encoding='utf-8') as fh:
                 text = fh.read()
@@ -284,7 +288,16 @@ def main():
             piece = dict(meta)
             piece['body'] = text[end + 4:].lstrip('\n')
         else:
-            raw, err = fetch(f'{base}/pieces/{slug}.json')
+            if is_talk:
+                raw, err = fetch(f'{base}/talks/{slug}/piece.json')
+                if err:
+                    # Not moved yet: the legacy key — but only if what is there IS a talk.
+                    # Once the essay takes that key, a missing talk must read as missing.
+                    raw2, err2 = fetch(f'{base}/pieces/{slug}.json')
+                    if not err2 and '"talk"' in (raw2 or ''):
+                        raw, err = raw2, None
+            else:
+                raw, err = fetch(f'{base}/pieces/{slug}.json')
             if err:
                 faults.append(f'{slug}: pieces/{slug}.json — {err}')
                 continue
@@ -293,6 +306,7 @@ def main():
             except json.JSONDecodeError as e:
                 faults.append(f'{slug}: malformed JSON — {e}')
                 continue
+            os.makedirs(os.path.dirname(md_path), exist_ok=True)
             write_piece_md(md_path, piece)
 
         # Two records of the same claim, written at different times. They must agree.

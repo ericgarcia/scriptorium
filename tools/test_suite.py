@@ -1546,6 +1546,8 @@ def unit_store(tmp):
           and got['talks/x/deck.html'] == 'TALKMUT'
           and got['talks/x/notes.json'] == 'TALKMUT', str(got))
     check('content json is short-lived', got['index.json'] == 'IDX' and got['pieces/x.json'] == 'PIECES')
+    check("a talk's record is rewritten in place, so it is not cached for a year",
+          store_publish.cache_control('talks/x/piece.json', cc) == 'TALKMUT')
     check('an unknown key falls back rather than caching forever',
           store_publish.cache_control('stray.txt', cc) == 'PIECES')
     check('content types are pinned for the formats a bundle carries',
@@ -1578,7 +1580,10 @@ def unit_store(tmp):
     if r.returncode != 0:
         return
 
-    with open(os.path.join(bundle, 'pieces', 'a-talk.json'), encoding='utf-8') as f:
+    check("a talk's record is filed beside its deck, not in pieces/",
+          os.path.exists(os.path.join(bundle, 'talks', 'a-talk', 'piece.json'))
+          and not os.path.exists(os.path.join(bundle, 'pieces', 'a-talk.json')))
+    with open(os.path.join(bundle, 'talks', 'a-talk', 'piece.json'), encoding='utf-8') as f:
         piece = json.load(f)
     check('the piece carries a talk block with relative paths',
           piece['talk']['deck'] == '../talks/a-talk/deck.html'
@@ -1612,6 +1617,23 @@ def unit_store(tmp):
                          os.path.join(tmp, 'bundle2')], capture_output=True, text=True)
     check('a talk with no outlets is refused, not published everywhere',
           r2.returncode != 0 and 'outlets' in (r2.stdout + r2.stderr), (r2.stdout + r2.stderr).strip())
+
+    # ---- a talk and an essay sharing a slug: both must survive a merge ----
+    essay_src = os.path.join(tmp, 'same-slug')
+    os.makedirs(essay_src, exist_ok=True)
+    with open(os.path.join(essay_src, 'a-talk.md'), 'w', encoding='utf-8') as f:
+        f.write('---\nslug: a-talk\ntitle: A Talk, the essay\npublished_at: 2026-09-09\n'
+                'digest: sha256:0123456789ab\n---\n\nThe essay.\n')
+    r0 = subprocess.run([sys.executable, os.path.join(HERE, 'bundle_pieces.py'), essay_src, bundle,
+                         '--outlet', 'muffinlabs'], capture_output=True, text=True)
+    with open(os.path.join(bundle, 'index.json'), encoding='utf-8') as f:
+        both = sorted((p['slug'], p['kind']) for p in json.load(f)['pieces'] if p['slug'] == 'a-talk')
+    check('an essay sharing a talk\'s slug does not replace the talk in the index',
+          r0.returncode == 0 and both == [('a-talk', 'piece'), ('a-talk', 'talk')],
+          str(both) + ' ' + (r0.stdout + r0.stderr).strip()[:200])
+    check('and the two records live at different keys',
+          os.path.exists(os.path.join(bundle, 'pieces', 'a-talk.json'))
+          and os.path.exists(os.path.join(bundle, 'talks', 'a-talk', 'piece.json')))
 
     # ---- bundle_pieces: markdown bundle -> the JSON the store serves ----
     content = os.path.join(tmp, 'vendored')
@@ -1662,10 +1684,26 @@ def unit_store(tmp):
              'hero': {'src': '../images/a-piece/hero.webp', 'alt': 'A hero'}}
     with open(os.path.join(store_root, 'pieces', 'a-piece.json'), 'w', encoding='utf-8') as f:
         json.dump(piece, f)
+    # A talk that shares the essay's slug, filed beside its deck the way quire's getTalk
+    # reads it. The snapshot must keep both, not let one overwrite the other.
+    tdir = os.path.join(store_root, 'talks', 'a-piece')
+    os.makedirs(tdir, exist_ok=True)
+    talk_rec = {'slug': 'a-piece', 'title': 'A Talk', 'published_at': '2026-05-04',
+                'digest': 'sha256:fedcba654321', 'body': 'Framing.\n',
+                'talk': {'deck': '../talks/a-piece/deck.html',
+                         'notes': '../talks/a-piece/notes.json', 'slide_count': 1}}
+    with open(os.path.join(tdir, 'piece.json'), 'w', encoding='utf-8') as f:
+        json.dump(talk_rec, f)
+    for name, text in (('deck.html', '<deck-stage></deck-stage>'), ('deck-stage.js', '//'),
+                       ('notes.json', '{"slideCount": 1, "slides": []}')):
+        with open(os.path.join(tdir, name), 'w', encoding='utf-8') as f:
+            f.write(text)
     with open(os.path.join(store_root, 'index.json'), 'w', encoding='utf-8') as f:
         json.dump({'spec': '2', 'generated_at': '', 'pieces': [
             {'slug': 'a-piece', 'title': 'A Piece', 'published_at': '2026-05-04',
-             'digest': 'sha256:abc123def456', 'outlets': ['somewhere'], 'kind': 'piece'}]}, f)
+             'digest': 'sha256:abc123def456', 'outlets': ['somewhere'], 'kind': 'piece'},
+            {'slug': 'a-piece', 'title': 'A Talk', 'published_at': '2026-05-04',
+             'digest': 'sha256:fedcba654321', 'outlets': ['somewhere'], 'kind': 'talk'}]}, f)
 
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=store_root)
     class Quiet(handler.func):
@@ -1688,6 +1726,11 @@ def unit_store(tmp):
               os.path.exists(os.path.join(snap, 'content', 'a-piece.md')))
         check('and brings the images with it',
               os.path.exists(os.path.join(snap, 'images', 'a-piece', 'hero.webp')))
+        tmd = os.path.join(snap, 'talks', 'a-piece', 'piece.md')
+        check('a talk and an essay sharing a slug are both kept, at different paths',
+              os.path.exists(tmd) and 'title: A Talk' in open(tmd, encoding='utf-8').read()
+              and 'title: A Piece' in open(os.path.join(snap, 'content', 'a-piece.md'),
+                                           encoding='utf-8').read())
         if os.path.exists(os.path.join(snap, 'content', 'a-piece.md')):
             text = open(os.path.join(snap, 'content', 'a-piece.md'), encoding='utf-8').read()
             check('the date is a bare YYYY-MM-DD, not a quoted string',

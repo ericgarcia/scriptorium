@@ -7,7 +7,7 @@ A talk is a piece with slides (BUNDLE.md, "Talks"). This puts the two halves tog
   INPUT   <talk>/piece.yaml            title, date, venue, and the framing prose
           <deck>/                      output of dc_to_deck.py
 
-  OUTPUT  <bundle>/pieces/<slug>.json  the piece, with its `talk` block
+  OUTPUT  <bundle>/talks/<slug>/piece.json  the piece, with its `talk` block
           <bundle>/talks/<slug>/…      deck.html, notes.json, deck-stage.js, assets
           <bundle>/index.json          created, or updated in place if it exists
 
@@ -118,8 +118,11 @@ def main():
     if meta.get('syndicated'):
         piece['syndicated'] = meta['syndicated']
 
-    os.makedirs(os.path.join(bundle_dir, 'pieces'), exist_ok=True)
-    piece_path = os.path.join(bundle_dir, 'pieces', f'{slug}.json')
+    # A talk's record is filed BESIDE ITS DECK, not in pieces/. pieces/ is one namespace
+    # keyed by slug, and a talk and its companion essay share a title and so a slug — the
+    # MuffinLabs talk and essay "Love Is Not a Metric Space", 2026-09-10. quire's getTalk
+    # (6a8b96b) reads it here.
+    piece_path = os.path.join(talk_out, 'piece.json')
     with open(piece_path, 'w', encoding='utf-8') as fh:
         json.dump(piece, fh, indent=2, ensure_ascii=False)
         fh.write('\n')
@@ -141,7 +144,10 @@ def main():
     }
     if meta.get('subtitle'):
         entry['subtitle'] = meta['subtitle']
-    index['pieces'] = [p for p in index.get('pieces', []) if p.get('slug') != slug] + [entry]
+    # Replace THIS talk's entry and nothing else. Matching on slug alone would drop the
+    # essay that shares it.
+    index['pieces'] = [p for p in index.get('pieces', [])
+                       if not (p.get('slug') == slug and p.get('kind', 'piece') == 'talk')] + [entry]
     index['pieces'].sort(key=lambda p: p.get('published_at', ''), reverse=True)
     index['spec'] = '2'
     from datetime import datetime, timezone

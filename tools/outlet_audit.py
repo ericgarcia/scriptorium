@@ -237,7 +237,7 @@ def publishable_body(piece_dir):
     return body
 
 
-def content_drift(piece_dir, page_html):
+def content_drift(piece_dir, page_html, canonical_outlet=False):
     """Does the live page carry the desk's paragraphs?
 
     Deliberately a PRESENCE check, not an equality one, and the report says so. The
@@ -253,19 +253,30 @@ def content_drift(piece_dir, page_html):
     than implying more.
     """
     # Use the SAME renderer the converter and substack_verify use, rather than a second
-    # markdown-to-text written for this check. The hand-rolled one had a long tail of
-    # its own bugs — multi-line footnote definitions left phantom paragraphs, censored
-    # profanity (f\*\*k) normalised differently from the page, split links — and every
-    # one of them reported as drift on prose that was correct. A second implementation of
-    # a thing the desk already does right is a second set of bugs. (2026-09-10.)
+    # markdown-to-text written for this check (a second implementation is a second set
+    # of bugs; the hand-rolled one had several, 2026-09-10).
     try:
         want = [n for n in (_norm_text(t) for t in _render_reader(piece_dir)[0]) if len(n) >= 40]
     except Exception:                                          # noqa: BLE001
         return None
+    # render_reader prepends "Originally published at <canonical>" whenever a piece has
+    # a canonical URL (md_to_substack.py) — correct for a SYNDICATED copy, and correctly
+    # absent from the canonical outlet itself. Expecting it there reported the original
+    # site as stale for not calling itself a copy (2026-09-11).
+    if canonical_outlet:
+        want = [w for w in want if not w.startswith('Originally published at ')]
     if not want:
         return None
     have = _norm_text(_strip_page_furniture(page_html))
-    missing = [w for w in want if w not in have]
+    # Compare with ALL whitespace removed. Every remaining false lead on 2026-09-11 was a
+    # whitespace artifact of one kind or another — a line break inside a block joined with
+    # no space ("sent Me.I came"), an italic word before a suffix split by tag-stripping
+    # (*that*s -> "that s") — the same class as the space-before-comma and word-hyphen
+    # patches above, which this subsumes. A reader cannot see a whitespace-only difference,
+    # and any change to WORDS still changes the non-space characters, so nothing that
+    # matters is lost.
+    have_ns = re.sub(r'\s+', '', have)
+    missing = [w for w in want if re.sub(r'\s+', '', w) not in have_ns]
     return {'paragraphs': len(want), 'missing': missing}
 
 
@@ -323,7 +334,10 @@ def main():
                    'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
                    'final': final}
             if a.content and ok and body:
-                row['content'] = content_drift(os.path.join(a.pieces, pc['name']), body)
+                canon = str(pc['manifest'].get('canonical') or '')
+                base = str(outlets[oname].get('reader_base') or '').rstrip('/')
+                row['content'] = content_drift(os.path.join(a.pieces, pc['name']), body,
+                                               canonical_outlet=bool(canon and base and canon.startswith(base)))
             results.append(row)
             if status is None:
                 unreachable += 1

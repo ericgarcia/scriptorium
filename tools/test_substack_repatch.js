@@ -18,6 +18,8 @@
  *   D  edit beside an anchor     -> the inline node is spared
  *   E  whitespace differs only   -> no-op
  *   F  ONE MARK REMOVED          -> the text matches everywhere, and the mark is put back
+ *   G  two edits, far apart      -> patched, NOT flagged suspect (son-of-joseph [^almah])
+ *   H  a footnote misaligned     -> REFUSES as suspect, stages nothing
  *
  * F is the case the whole chain used to pass. Measured on `rising-after-falls` 2026-09-09:
  * italicising two words produced a regenerated patch byte-identical in size to the previous
@@ -174,6 +176,55 @@ if (FNS.length < 2) {
       && block.kids.map(x => x.text).join('') === curl(BODY[k]),
       `want=${JSON.stringify(wantKeys)} got=${JSON.stringify(gotKeys)} marks=${JSON.stringify(f.report.marks.applied).slice(0, 160)}`);
   }
+}
+
+// --- G: two small edits far apart in one node are an edit, not a misalignment -----
+// son-of-joseph's [^almah], 2026-09-11: two one-character fixes (`almah -> ʿalmah), one near
+// the start of a 573-char note and one deep in it. The misalignment guard scored the pair
+// 0.309 — prefix+suffix counted everything between the two fixes as changed — and refused a
+// correct patch. Substitutions keep every offset, so the node's marks stay valid as baked.
+{
+  const pick = arr => arr.reduce((best, t, i) => (t.length > (best < 0 ? -1 : arr[best].length) ? i : best), -1);
+  const fi = pick(FNS), bi = pick(BODY);
+  const useFn = fi >= 0 && FNS[fi].length >= 200;
+  const kind = useFn ? 'footnote' : 'body', idx = useFn ? fi : bi, orig = useFn ? FNS[fi] : BODY[bi];
+  if (!orig || orig.length < 200) skip('G two scattered edits are patched, not suspect', 'no node of 200+ chars');
+  else {
+    const letterAt = (from, dir) => { let k = from; while (k >= 0 && k < orig.length && !/[a-z]/.test(orig[k])) k += dir; return k; };
+    const at = [letterAt(Math.floor(orig.length * 0.05), 1), letterAt(Math.floor(orig.length * 0.9), -1)];
+    let typo = orig;
+    for (const k of at) typo = typo.slice(0, k) + (typo[k] === 'q' ? 'x' : 'q') + typo.slice(k + 1);
+    const liveB = BODY.map(curl), liveF = FNS.map(curl);
+    (useFn ? liveF : liveB)[idx] = curl(typo);
+    const g = run(liveB, liveF, TITLE, SUBTITLE, BODYMARKS, FNMARKS);
+    const node = g.tops[(useFn ? BODY.length : 0) + idx];
+    const got = node.kids.filter(k => !k.anchor).map(k => k.text).join('');
+    check('G two scattered edits are patched, not suspect',
+      !g.report.structural && !(g.report.suspect || []).length && g.report.failed.length === 0
+      && g.report.applied.length === 2 && g.report.applied.every(x => x.kind === kind && x.block === idx)
+      && norm(got) === norm(orig),
+      `${kind} ${idx} (${orig.length} chars) edits@${at} suspect=${JSON.stringify(g.report.suspect)} applied=${g.report.applied.length}`);
+  }
+}
+
+// --- H: a footnote paired with a different note's text is refused ------------------
+// The guard G must not loosen. The live note is replaced by text that exists nowhere in the
+// footnote list — so the reorder guard cannot see it and the count still matches — and it is
+// chosen ADVERSARIALLY: the body block nearest the note in length, the pairing most likely to
+// share common words by chance.
+if (!FNS.length) {
+  skip('H a misaligned footnote is refused as suspect', 'piece has no footnotes');
+} else {
+  const i = FNS.reduce((best, t, k) => (t.length > FNS[best].length ? k : best), 0);
+  const fnSet = new Set(FNS.map(t => norm(t)));
+  const pool = BODY.filter(t => !fnSet.has(norm(t)));
+  const other = pool.reduce((best, t) => (best === null || Math.abs(t.length - FNS[i].length) < Math.abs(best.length - FNS[i].length) ? t : best), null);
+  const liveF = FNS.map(curl); liveF[i] = curl(other);
+  const marksH = FNMARKS.map((m, k) => (k === i ? [] : m));
+  const h = run(BODY.map(curl), liveF, TITLE, SUBTITLE, BODYMARKS, marksH);
+  check('H a misaligned footnote is refused as suspect',
+    h.report.structural && (h.report.suspect || []).some(s => s.kind === 'footnote' && s.idx === i) && h.dispatches === 0,
+    `footnote ${i} vs body text of ${other.length} chars suspect=${JSON.stringify((h.report.suspect || []).map(s => [s.idx, s.similarity]))} dispatches=${h.dispatches}`);
 }
 
 process.exit(failures ? 1 : 0);

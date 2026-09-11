@@ -478,11 +478,35 @@ REPATCH_JS = r"""(() => {
   };
   // GUARD: and a pair that is neither equal nor plausibly the same node (a one-word fix
   // leaves a long block ~99% intact) means the lists are misaligned some other way.
-  const similarity = (a, b) => {
-    if (!a.length && !b.length) return 1;
+  //
+  // "Intact" is measured as the share of WORDS kept in order — an LCS over word tokens.
+  // Common prefix + common suffix alone counted everything between the first and last edit
+  // as changed, so two one-character fixes far apart scored like a rewrite: son-of-joseph's
+  // [^almah], 2026-09-11, `almah -> ʿalmah near the start and again deep in a 573-char note,
+  // scored 0.309 and a correct patch was refused. Words, not characters, because two
+  // unrelated English passages share a long CHARACTER subsequence (spaces, "the", "of") and
+  // a char-level ratio would wave a real misalignment through. The prefix+suffix ratio stays
+  // as a floor so a one-word node with one character fixed still reads as the same node.
+  const affixRatio = (a, b) => {
     let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
     let q = 0; while (q < a.length - p && q < b.length - p && a[a.length-1-q] === b[b.length-1-q]) q++;
     return (p + q) / Math.max(a.length, b.length);
+  };
+  const wordLcs = (A, B) => {
+    if (A.length * B.length > 4000000) return 0;          // too big to score: the floor decides
+    let prev = new Int32Array(B.length + 1), cur = new Int32Array(B.length + 1);
+    for (let i = 1; i <= A.length; i++) {
+      for (let j = 1; j <= B.length; j++)
+        cur[j] = A[i-1] === B[j-1] ? prev[j-1] + 1 : Math.max(prev[j], cur[j-1]);
+      [prev, cur] = [cur, prev];
+    }
+    return prev[B.length];
+  };
+  const similarity = (a, b) => {
+    a = sameText(a); b = sameText(b);
+    if (!a.length && !b.length) return 1;
+    const A = a ? a.split(' ') : [], B = b ? b.split(' ') : [];
+    return Math.max(affixRatio(a, b), wordLcs(A, B) / Math.max(A.length, B.length));
   };
   const findSuspect = (targets, live, kind) => {
     const out = [];

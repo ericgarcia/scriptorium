@@ -118,13 +118,17 @@ def check_commit(repo, sha):
             print(f'prepush: {short} green in {took}  {summary.strip()}')
             return 0
         print(f'prepush: {short} is RED ({took}) — push refused. What CI would say:')
-        for line in out:
-            s = line.strip()
-            if s.startswith(('FAIL', 'FAILED', 'Traceback', 'ModuleNotFoundError', 'Error')):
-                print('  ' + s)
-        print('  --- last lines ---')
-        for line in out[-15:]:
-            print('  ' + line)
+        # The suite's closing summary names every failed check (`  FAILED  <name>`), and
+        # ci_check's own verdicts are its unindented `FAIL  ` lines. Indented `FAIL` lines
+        # mid-run are not repeated: some are a tool under test printing the refusal a PASSING
+        # check expects, and echoing them sent a reader after failures that were not there.
+        verdicts = [l.strip() for l in out if l.strip().startswith('FAILED') or l.startswith('FAIL  ')]
+        for s in verdicts:
+            print('  ' + s)
+        if not any(s.startswith('FAILED') for s in verdicts):   # no summary: the suite died
+            print('  --- the run ended without a summary; its last lines ---')
+            for line in out[-15:]:
+                print('  ' + line)
         return 1
 
 

@@ -274,6 +274,10 @@ def render_footnote_block(b, piece_dir):
     text, _removed = clean_footnote(' '.join(m.group(2).split()))
     return inline(text, piece_dir)
 
+# The source recorded for the generated canonical line: never text that draft.md can hold.
+CANONICAL_SRC = '\x00canonical-line (generated from publish.yaml -> canonical:)'
+
+
 def parse_blocks(piece_dir):
     """Parse draft.md into (blocks, footnotes_ordered, stripped, residual).
     `blocks` is the ordered list of body-block HTML strings (<p>/<h2>/<h3>/<hr>/
@@ -377,6 +381,18 @@ def parse_blocks(piece_dir):
     # Name` (2026-09-01) rendered footnote #0 as `John 10:3` against a live #0 that was
     # the shelucho-shel-adam maxim; 30 == 30, zero aligned, and a re-sync would have
     # overwritten all thirty notes of a live essay with mismatched text.
+    # A SYNDICATED copy says where the original lives. Substack cannot emit rel=canonical
+    # (no publisher field for it, 2026-09-10), so the only instrument is a visible first line
+    # -- the same one md_to_linkedin writes. It is driven by `canonical:` in publish.yaml, the
+    # field md_to_linkedin already reads first; a piece whose home IS this Substack sets none
+    # and gets none. Generated here, in the parser both convert() and render_reader() share, so
+    # the composed post and substack_verify's expectation carry it together. Its source is a
+    # sentinel that cannot occur in draft.md, so substack_sync can never "pull" it into prose.
+    canonical = str(_man.get('canonical') or '').strip()
+    if canonical:
+        out.insert(0, '<p><em>Originally published at <a href="%s">%s</a>.</em></p>'
+                   % (esc(canonical), esc(canonical)))
+        out_src.insert(0, CANONICAL_SRC)
     seen, ref_order, duplicated = set(), [], []
     for blk in out:
         for ref in re.finditer(r'\[\[FN(\w+)\]\]', blk):

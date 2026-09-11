@@ -84,7 +84,7 @@ import sys, os, re, json, hashlib, subprocess, tempfile, shutil, difflib
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from md_to_substack import (render_reader, read_manifest, flatten_quotes,
+from md_to_substack import (CANONICAL_SRC, render_reader, read_manifest, flatten_quotes,
                             render_block, render_footnote_block, strip_to_reader,
                             render_marks, mark_sig, mark_keys)
 from substack_repatch import JS_HELPERS
@@ -575,6 +575,10 @@ def cmd_pull(piece_dir, plan_json, livetext_json):
             continue
         old_reader = texts[r['draftIdx']]
         block_src = sources[kind][r['draftIdx']]
+        if block_src == CANONICAL_SRC:
+            manual.append((r, 'the canonical line is generated from publish.yaml -> canonical:, '
+                              'not draft.md; change it there'))
+            continue
         if src.count(block_src) != 1:
             manual.append((r, 'block source is not uniquely locatable in draft.md'))
             continue

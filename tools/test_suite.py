@@ -697,6 +697,28 @@ def unit_converter(tmp):
     check('adjacent blockquotes merge into one block',
           len(merged) == 1 and merged[0] == 'onetwo', str(body))
 
+    # A syndicated copy opens with "Originally published at <canonical>" (2026-09-11: the
+    # MuffinLabs Substack copies the blog, and Substack emits no rel=canonical).
+    dc = os.path.join(tmp, 'canon')
+    os.makedirs(dc, exist_ok=True)
+    with open(os.path.join(dc, 'draft.md'), 'w') as f:
+        f.write('x\n\n---\n\nFirst paragraph.\n\nSecond.\n')
+    with open(os.path.join(dc, 'publish.yaml'), 'w') as f:
+        f.write('title: t\nsubtitle: s\ncanonical: https://example.com/blog/x\n')
+    cb, _cf, _cr, _ci = render_reader(dc)
+    check('a piece with canonical: opens with the Originally-published line',
+          cb[:2] == ['Originally published at https://example.com/blog/x.', 'First paragraph.'], str(cb))
+    blocks_c = parse_blocks(dc)[0]
+    check('and the line links the canonical',
+          blocks_c[0] == '<p><em>Originally published at <a href="https://example.com/blog/x">'
+                         'https://example.com/blog/x</a>.</em></p>', blocks_c[0])
+    check('its source cannot be located in draft.md (sync must never pull it into prose)',
+          render_reader.sources['body'][0] not in open(os.path.join(dc, 'draft.md')).read())
+    with open(os.path.join(dc, 'publish.yaml'), 'w') as f:
+        f.write('title: t\nsubtitle: s\n')
+    nb, _nf, _nr, _ni = render_reader(dc)
+    check('a piece with no canonical: gets no such line', nb[0] == 'First paragraph.', str(nb))
+
 
 def unit_footnote_continuation(tmp):
     """A footnote's continuation paragraph must stay in the footnote.

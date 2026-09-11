@@ -2333,53 +2333,76 @@ def unit_prose(tmp):
 
 
 def unit_substack_account(tmp):
-    """substack_account.py: a Substack write runs on a surface signed in as the outlet's account.
-    The pane's login is one cookie store shared by every tab and every session (measured
-    2026-09-11), so the check is what stops one byline's work landing under the other's."""
-    print("\n-- substack account: the surface is signed in as the outlet's account ---")
+    """substack_account.py: with several Substack outlets ONE is primary and runs in the pane; the
+    rest open in Claude in Chrome. The pane's login is one cookie store shared by every tab and
+    every session (measured 2026-09-11), so every write also proves it is on the right account."""
+    print("\n-- substack account: one primary in the pane, the rest in Chrome --------")
     import substack_account as sa
-    cfg = os.path.join(tmp, 'acct-outlets.yaml')
-    with open(cfg, 'w', encoding='utf-8') as fh:
-        fh.write("outlets:\n"
-                 "  substack:\n    account_handle: elmuffin\n    surface: pane\n"
-                 "  substack-muffinlabs:\n    notes_handle: ericgarciaphd\n    surface: chrome\n"
-                 "    chrome_browser: MuffinLabs\n"
-                 "  site:\n    reader_base: https://site.test/\n")
-    outs = sa.load(cfg)
-    check("substack_account: the account is the outlet's account_handle",
-          sa.expected(outs['substack']) == 'elmuffin')
-    check("substack_account: falls back to notes_handle, the same person",
-          sa.expected(outs['substack-muffinlabs']) == 'ericgarciaphd')
-    check("substack_account: signed in as the outlet's account passes",
-          sa.verdict(outs, 'substack', 'elmuffin')[0] == 0)
-    check("substack_account: the other account is refused — the pane as E. L. Muffin, writing to MuffinLabs",
-          sa.verdict(outs, 'substack-muffinlabs', 'elmuffin')[0] == 5)
-    check("substack_account: signed out is its own answer, not a pass",
-          sa.verdict(outs, 'substack', None)[0] == 3 and sa.verdict(outs, 'substack', '')[0] == 3)
-    check("substack_account: an outlet naming no account is refused, not assumed",
-          sa.verdict(outs, 'site', 'elmuffin')[0] == 6)
-    check("substack_account: an unknown outlet is a usage error",
-          sa.verdict(outs, 'nope', 'elmuffin')[0] == 1)
+
+    def w(name, text):
+        path = os.path.join(tmp, name)
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        return path
+
+    base = ("# a comment that must survive a primary switch\n"
+            "substack_primary: bg\n"
+            "outlets:\n"
+            "  bg:\n    reader_base: https://bg.substack.com/p/\n    account_handle: elmuffin\n"
+            "  ml:\n    reader_base: https://ml.substack.com/p/\n    notes_handle: ericgarciaphd\n"
+            "    chrome_browser: eric@muffinlabs.ai\n"
+            "  site:\n    reader_base: https://site.test/writings/\n")
+    cfg = w('acct-outlets.yaml', base)
+    doc = sa.load(cfg)
+    check("substack_account: the declared primary is the primary", sa.primary(doc) == ('bg', None))
+    check("substack_account: the primary runs in the pane; any other opens in its Chrome browser",
+          sa.route(doc, 'bg')['surface'] == 'pane' and sa.route(doc, 'ml')['surface'] == 'chrome'
+          and sa.route(doc, 'ml')['chrome_browser'] == 'eric@muffinlabs.ai')
+    check("substack_account: the primary, in the pane, as its account, passes",
+          sa.verdict(doc, 'bg', 'elmuffin', 'pane')[0] == 0)
+    check("substack_account: a non-primary, in its browser, as its account (notes_handle), passes",
+          sa.verdict(doc, 'ml', 'ericgarciaphd', 'chrome')[0] == 0)
+    check("substack_account: a non-primary checked in the pane is the wrong browser (exit 4)",
+          sa.verdict(doc, 'ml', 'elmuffin', 'pane')[0] == 4)
+    check("substack_account: signed in as someone else is a refusal (exit 5)",
+          sa.verdict(doc, 'ml', 'elmuffin', 'chrome')[0] == 5 and sa.verdict(doc, 'bg', 'ericgarciaphd', 'pane')[0] == 5)
+    check("substack_account: signed out is its own answer (exit 3)",
+          sa.verdict(doc, 'bg', None, 'pane')[0] == 3 and sa.verdict(doc, 'bg', '', 'pane')[0] == 3)
     check("substack_account: handles compare without the @ or case",
-          sa.verdict(outs, 'substack', '@ElMuffin')[0] == 0)
-    r = sa.route(outs, 'substack-muffinlabs')
-    check("substack_account: route names the surface and the Chrome browser; the pane is the default",
-          r['surface'] == 'chrome' and r['chrome_browser'] == 'MuffinLabs'
-          and sa.route(outs, 'site')['surface'] == 'pane', str(r))
-    outs2 = {'m': {'account_handle': 'ericgarciaphd', 'surface': 'pane', 'fallback_surface': 'chrome',
-                   'chrome_browser': 'eric@muffinlabs.ai'}}
-    r2 = sa.route(outs2, 'm')
-    check("substack_account: the pane first, a Chrome profile only as the fallback (in-app by default)",
-          r2['surface'] == 'pane' and r2['fallback'] == 'chrome'
-          and r2['chrome_browser'] == 'eric@muffinlabs.ai', str(r2))
-    code2, msg2 = sa.verdict(outs2, 'm', 'elmuffin', surface='pane')
-    check("substack_account: a refusal in the pane names the fallback — and is still a refusal",
-          code2 == 5 and 'falls back to chrome' in msg2 and 'eric@muffinlabs.ai' in msg2, msg2)
-    check("substack_account: the fallback, signed in as the outlet's account, passes",
-          sa.verdict(outs2, 'm', 'ericgarciaphd', surface='chrome')[0] == 0)
+          sa.verdict(doc, 'bg', '@ElMuffin', 'pane')[0] == 0)
+    check("substack_account: a non-Substack outlet and an unknown one are not routed",
+          sa.verdict(doc, 'site', 'x')[0] == 6 and sa.verdict(doc, 'nope', 'x')[0] == 1)
+
+    one = sa.load(w('acct-one.yaml', "outlets:\n  bg:\n    reader_base: https://bg.substack.com/p/\n"
+                                     "    account_handle: elmuffin\n"))
+    check("substack_account: a lone Substack outlet is the primary without saying so",
+          sa.primary(one) == ('bg', None))
+    two = sa.load(w('acct-two.yaml', base.replace("substack_primary: bg\n", "")))
+    check("substack_account: several Substack outlets and no primary is refused, not guessed",
+          sa.primary(two)[0] is None and sa.verdict(two, 'bg', 'elmuffin', 'pane')[0] == 6)
+    homeless = sa.load(w('acct-homeless.yaml', base.replace("    chrome_browser: eric@muffinlabs.ai\n", "")))
+    check("substack_account: a non-primary with no chrome_browser has nowhere to run (exit 6)",
+          sa.verdict(homeless, 'ml', 'ericgarciaphd', 'chrome')[0] == 6)
+
+    code, _msg = sa.set_primary(cfg, 'ml')
+    check("substack_account: switching refuses to demote an outlet with no browser to go to",
+          code == 6 and sa.load(cfg).get('substack_primary') == 'bg')
+    cfg2 = w('acct-switch.yaml', base.replace("    account_handle: elmuffin\n",
+                                              "    account_handle: elmuffin\n    chrome_browser: gmail\n"))
+    code, msg = sa.set_primary(cfg2, 'ml')
+    after = sa.load(cfg2)
+    with open(cfg2, encoding='utf-8') as fh:
+        text = fh.read()
+    check("substack_account: switching the primary rewrites it in place, comments intact",
+          code == 0 and after.get('substack_primary') == 'ml'
+          and '# a comment that must survive a primary switch' in text
+          and sa.route(after, 'bg')['surface'] == 'chrome' and sa.route(after, 'ml')['surface'] == 'pane', msg)
+    check("substack_account: the switch names the sign-ins it needs",
+          '@ericgarciaphd' in msg and "'gmail'" in msg and '@elmuffin' in msg, msg)
+    check("substack_account: switching to the current primary is a no-op; to a non-Substack outlet, refused",
+          sa.set_primary(cfg2, 'ml')[0] == 0 and sa.set_primary(cfg2, 'site')[0] == 1)
     check("substack_account: the snippet is same-origin (a cross-origin fetch fails in the pane)",
           "fetch('/api/v1/user/profile/self'" in sa.SNIPPET and 'substack.com/api' not in sa.SNIPPET)
-
 
 def unit_automode(tmp):
     """automode.py: the pane re-sync's standing rule, built from the desk's Substack outlets and

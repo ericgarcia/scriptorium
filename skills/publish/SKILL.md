@@ -55,7 +55,8 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
   editor** (`https://<pub>.substack.com/publish/post/<id>`). Either way the user is **logged
   in** — automation cannot enter credentials.
-- **Surface: the BUILT-IN BROWSER PANE is the default for BOTH a re-sync and a fresh compose.**
+- **Surface: the BUILT-IN BROWSER PANE is the default for BOTH a re-sync and a fresh compose — for
+  the PRIMARY Substack outlet; every other Substack outlet opens in Claude in Chrome (below).**
   Measured 2026-09-10 (Eric's preference: *"if we can publish using the built in browser instead
   of the plugin that would be preferable for the skill in general"*). The pane only ever looked
   Chrome-only because both paths need a generated snippet **inside the page** and the agent must
@@ -68,20 +69,21 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   was present in a fresh one, and a session that never signed in found the pane signed in). So a
   desk with two Substack accounts cannot hold both in the pane — and **never sign the pane out, or
   into the other account**: that silently turns every concurrent session's work into the other
-  byline's. Each account gets its own persistent login instead, declared per outlet in
-  `outlets.yaml` (`account_handle`, `surface: pane|chrome`, `chrome_browser`):
+  byline's. **With more than one Substack outlet, ONE is the primary** (`substack_primary:` in
+  `outlets.yaml`; Eric, 2026-09-11): the primary uses the pane for all its Substack operations, and
+  every other Substack outlet opens in **Claude in Chrome**, in the browser its `chrome_browser`
+  names. Change it with `substack_account.py primary <outlet>` — it refuses to demote an outlet that
+  has no browser to go to, and says which sign-ins the switch needs.
 
   ```
-  python3 framework/tools/substack_account.py route <outlet>   # which surface, which account
-  #   on that surface, on any *.substack.com page (the editor's host is fine), run the snippet
-  python3 framework/tools/substack_account.py check <outlet> --handle <what it returned>
+  python3 framework/tools/substack_account.py route <outlet>   # the pane (primary), or which Chrome browser
+  #   there, on any *.substack.com page (the editor's host is fine), run the snippet it prints
+  python3 framework/tools/substack_account.py check <outlet> --handle <what it returned> --surface pane|chrome
   ```
 
-  **Exit 5 is a refusal: stop.** Do not compose, re-sync or click anything on a surface signed in
-  as the wrong account. **The pane is always tried first** (Eric, 2026-09-11: *"we should use the
-  inapp browser by default if possible"*); an outlet whose account the pane does not hold names a
-  `fallback_surface` — `check --surface pane` points you at it. Go there; never switch the pane.
-  Exit 3 is signed out: the author signs in.
+  **Exit 5 is a refusal: stop** — signed in as the wrong account. Do not compose, re-sync or click
+  anything there, and never switch the pane to fix it. **Exit 4** means you checked this outlet in
+  the wrong browser. Exit 3 is signed out: the author signs in.
 - **The Claude in Chrome extension is a framework requirement, not an optional extra** — see
   *Requirements* in the framework README for install and troubleshooting. In short: extension
   **v1.0.36+**, a **direct Anthropic plan**, a session signed in with **`/login`** (an API-key or
@@ -579,8 +581,8 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    **The two-step still exists and is still lease-guarded:** run without `--paste` to load and hold
    the lease, `--verify` immediately before a ⌘V sent from the browser tool, then `--release`. Use it
    only where System Events cannot reach the browser.
-2. **Open the composer on the outlet's surface (`substack_account.py route`), confirmed by
-   `substack_account.py check` — the pane by default** — and set Title + Subtitle by JS (small, no prose in it),
+2. **Open the composer on the outlet's surface — the pane for the primary, Claude in Chrome for any
+   other (`substack_account.py route`) — confirmed by `substack_account.py check`** — and set Title + Subtitle by JS (small, no prose in it),
    then `clearContent(true)` so a retry can't append to a half-paste. **Snapshot any image or embed
    the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
    `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared

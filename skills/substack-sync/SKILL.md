@@ -68,10 +68,11 @@ next completed `seal`; nothing needs re-sealing on purpose.
 - The piece is live and `publish.yaml` carries **`post_url`** (the *editor* address,
   `/publish/post/<id>`) and **`public_url`** (the reader address, `/p/<slug>`). These are
   different URLs and both are needed.
-- **The surface is signed in as the outlet's account** — `substack_account.py route <outlet>`,
-  run its snippet there, then `check` (see the `publish` skill, *Confirm the ACCOUNT*). A push from
-  a surface signed in as the other account edits a post its session does not own, or fails
-  halfway. Exit 5 is a stop, not a prompt to sign in again.
+- **The right browser, signed in as the outlet's account.** The primary Substack outlet runs in
+  the pane; every other one in Claude in Chrome, in its `chrome_browser` (`substack_account.py
+  route <outlet>`). Run its snippet there, then `check --surface pane|chrome` (see the `publish`
+  skill, *Confirm the ACCOUNT*). A push from the wrong browser or account edits a post its session
+  does not own, or fails halfway. Exit 5 or 4 is a stop, not a prompt to sign in again.
 - The browser is open and **logged in** on that post's editor. Automation cannot enter
   credentials.
 - The piece has a **baseline** (`<piece>/sync-baseline.json`). If it does not, seed one

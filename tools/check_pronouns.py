@@ -25,8 +25,8 @@ WHY H EXISTS (2026-09-10).  Section D catches a bare lowercase *it* / *its* with
 after a God-word, and that shape is only half of how God gets turned into a *what*.  The other
 half is the REFLEXIVE, which D's window never sees: *They Them* shipped live carrying *the source
 that called itself us before it had made anything at all* and *A plural form, speaking of itself
-in the plural* — both corrected to *Themself* — and again it was Eric, reading the published page,
-who caught them.  A window cannot find these: the antecedent is what matters, and the two
+in the plural* — both corrected (to *Themself* then, to *Themselves* now) — and again it was Eric,
+reading the published page, who caught them.  A window cannot find these: the antecedent is what matters, and the two
 legitimate uses in the corpus (*a second thing standing outside God on its own ground*, *the
 clutching self is the source of its own suffering*) sit just as close to a God-word as the misses
 do.  So H asks a grammatical question instead of a proximity one — whose reflexive is it? — and
@@ -76,8 +76,9 @@ WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normali
      Luke, John — not 1/2/3 John) and it contains a first-person pronoun.  A Gospel voice is not
      always Jesus (the prodigal's *make me as one of thy hired servants*), so it lists, and the
      operator names the speaker.
-  H. LOWERCASE REFLEXIVE FOR GOD  *itself* / *its own* / *themself* whose antecedent is God.
-     Two paths, each reported with the evidence that qualified it:
+  H. THE REFLEXIVE FOR GOD  *itself* / *its own* / *themselves* whose antecedent is God, plus
+     *themself* in ANY case, which is simply the wrong form (see `wrong-form` below).
+     Three paths, each reported with the evidence that qualified it:
        `subject` / `rel` / `appositive` — the subject of the reflexive's own clause resolves to a
          God-word.  A relative clause takes the head noun it attaches to (*the source that called
          itself*), and a head noun that is an appositive in a copular chain resolves through it
@@ -86,6 +87,14 @@ WHAT IT CHECKS, on the whole draft body (footnotes included), whitespace-normali
        `self-naming` — the reflexive is the object of a verb of self-reference (call, name,
          describe, reveal, speak of, refer to, show, declare) in a paragraph that names God.  Only
          a someone can be *called* something, so in a God paragraph the referent is God.
+       `wrong-form` — the word is *themself*, in any case.  **God's reflexive is *Themselves***
+         (Eric, 2026-09-11: *Themself* "is more awkward than *Themselves*"), and this house has no
+         other use for the form — so unlike the two paths above, this one needs no antecedent and
+         reads INSIDE a quotation too, because a bracketed house substitution (*thy Father which
+         seeth in secret [Themselves]*) is this house's word in the source's sentence, not the
+         source's own.  A bare *themself* inside a quotation is the source's and is left alone.
+         This path takes no antecedent because there is no legitimate singular to protect: the rule
+         is about the FORM, and an instance that wants the singular silences it per piece.
      The INTENSIVE *itself* is skipped — *the thing itself*, *the wall itself* — where the word
      emphasizes a noun rather than standing for it; a God-word taking it (*the Father itself*) is
      kept.  Like C and G, a justified hit is silenced by a substring under `pronouns_allow:`.
@@ -162,7 +171,11 @@ REF_LABEL = re.compile(r'\[\^([^\]]+)\]')
 # `[Tt]he` because a subject sits at the head of its clause, where English forces the capital.
 GOD_SUBJECT = (r"(?:God|[Tt]he LORD|[Tt]he Lord|[Tt]he Father|[Tt]he Son|[Tt]he Spirit|"
                r"[Tt]he Holy Spirit|Christ|Jesus|They|Them|[Tt]he One|Someone)")
-REFLEXIVE = re.compile(r"\b(itself|themself|its own)\b")
+REFLEXIVE = re.compile(r"\b(itself|themselves|its own)\b")
+# *themself* is not a referent question at all — the house form is *Themselves* (2026-09-11), and
+# nothing in this corpus wants the singular.  Matched in any case, and inside a quotation when it
+# is bracketed, because a bracket is this house speaking inside the source's sentence.
+WRONG_FORM = re.compile(r"\b[Tt]hemself\b")
 # Clause boundaries, crude but adequate: punctuation, the coordinators, the common subordinators,
 # and existential *there is/are* (which opens a clause of its own inside an *if …* subordinate).
 CLAUSE_BREAK = re.compile(
@@ -183,7 +196,7 @@ SUBJ_LEAD = re.compile(r"^(?:and|but|so|then|now|yet|for|because|if|when|while|w
 SELF_NAMING = re.compile(
     r"\b(?:call(?:s|ed|ing)?|nam(?:e|es|ed|ing)|describ(?:e|es|ed|ing)|reveal(?:s|ed|ing)?|"
     r"speak(?:s|ing)?\s+of|refer(?:s|red|ring)?\s+to|show(?:s|ed|ing)?|declar(?:e|es|ed|ing))"
-    r"\s+(itself|themself)\b")
+    r"\s+(itself|themselves)\b")
 GOD_NAMED = re.compile(r"\b(?:God|the LORD|the Lord|the Father|the Spirit|Christ|Jesus|They|Them|the One)\b")
 IS_GOD = re.compile(r"^\W*" + GOD_SUBJECT + r"(?!['’]s)\b")
 # *They are X, Y, the source that called itself …* — a copular chain whose appositives are the subject.
@@ -298,6 +311,14 @@ def reflexive_hits(flat, allow=()):
         if not s:
             continue
         quoted = [(q.start(), q.end()) for q in QUOTE_SPAN.finditer(s)]
+        for m in WRONG_FORM.finditer(s):
+            bracketed = s[m.start() - 1:m.start()] == '[' if m.start() else False
+            if not bracketed and any(x <= m.start() < y for x, y in quoted):
+                continue                                   # the source's own singular, unbracketed
+            window = s[max(0, m.start() - 60):m.end() + 60]
+            if any(x in window for x in allow):
+                continue
+            hits.append((m.group(0), 'wrong-form:Themselves', s))
         for m in REFLEXIVE.finditer(s):
             if any(x <= m.start() < y for x, y in quoted):
                 continue                                   # the source's own words
@@ -565,7 +586,7 @@ def main():
     for w, ev, c in F: print(f"   {w:8s} {ev:14s} {_clip(c)}")
     print(f"\nG. mixed-case *Lord* in the body — the house writes LORD wherever it names God; justify each as a figure, another tradition, a fixed text or a title ({len(G)}):")
     for c in G: print(f"   {_clip(c)}")
-    print(f"\nH. lowercase reflexive whose antecedent reads as God — the house never lets God be a *what*: *Themself*, never *itself* ({len(H)}):")
+    print(f"\nH. the reflexive for God — the house never lets God be a *what*, and the form is *Themselves*, never *itself* and never *themself* ({len(H)}):")
     for w, ev, c in H: print(f"   {w:8s} {ev:42s} {_clip(c)}")
     print(f"\nI. a creature as a *what* — the house makes God, any person AND any animal a *who*; justify each as naming a thing rather than a creature ({len(I)}):")
     for c in I: print(f"   {_clip(c)}")

@@ -104,11 +104,13 @@ app's session list then reads as a shelf of pieces instead of a row of identical
    *Someone*) and keep God a *who*. Inside a scripture quotation, read sections E and F: a
    capitalized *He / Him / His* there says *the Son* — for the Father it is a bracketed *[Them]*
    (verb bracketed too where agreement needs it) — and the Son's own *me / my / mine* take the
-   capital. Read section H the same way: a lowercase *itself / its own / themself* whose antecedent
-   is God is God made a *what* — the word is *Themself*, *Their own*. Justify each remaining hit by
+   capital. Read section H the same way: a lowercase *itself / its own / themselves* whose antecedent
+   is God is God made a *what* — the word is *Themselves*, *Their own* — and a *themself* in any case
+   is simply the wrong form, bracketed substitutions included. Justify each remaining hit by
    naming its referent. (Added 2026-09-03 — see the constitution's pronoun section and
    `corrections.md`; E and F added 2026-09-07 after *False Light* carried four such misses; H added
-   2026-09-10 after *They Them* shipped two reflexives live.)
+   2026-09-10 after *They Them* shipped two reflexives live; the form settled on *Themselves*
+   2026-09-11, Eric's call, five uses swept.)
 1. Append a dated entry to `pieces/<name>/log/<current-month>.md` — what you
    drafted, decisions, open threads. Append-only, newest at the bottom.
 2. Update `pieces/<name>/README.md` — the `Stage:` and `Next move:` lines.

@@ -2480,7 +2480,9 @@ the elder says *We love [Them], because [They] first loved us.*[^1john] The poin
 
 
 # Section H's fixture: the two reflexives that shipped live in *They Them* (2026-09-10) as they
-# read before the correction to *Themself*, the two legitimate uses the same day's corpus sweep
+# read before the correction, the wrong FORM the correction first reached for (*Themself*, retired
+# 2026-09-11 for *Themselves* — in prose and inside a bracketed substitution, which is this house
+# speaking inside the source's sentence), the two legitimate uses the same day's corpus sweep
 # turned up, and the shapes that must stay quiet — the intensive, a possessive subject, a
 # quotation, a footnote definition, and the corrected wording itself.
 REFLEXIVE_FIXTURE = """*Draft — fixture for section H.*
@@ -2496,7 +2498,7 @@ God is not male. They are the One Xenophanes' oxen could not draw, the no-form s
 verb that refused to harden into a noun, the source that called itself *us* before They had made
 anything at all.
 
-God knows themself the way no creature is known. The Father itself is a phrase this house would
+God knows themselves the way no creature is known. The Father itself is a phrase this house would
 never write. They are doing the thing itself, and *I am that I am, saith the LORD unto itself*[^ex]
 is the source's wording, not ours.
 
@@ -2505,9 +2507,16 @@ its own ground. That the clutching self is the source of its own suffering is no
 follower of Jesus has to hold at arm's length.
 
 If God's power is total there is no second engine running anywhere on its own. And the corrected
-line reads: the source that called Themself *us*, a plural form speaking of Themself in the plural.
+line reads: the source that called Themselves *us*, a plural form speaking of Themselves in the
+plural.
+
+The form the house retired says what God *shows* of Themself, and the substitution carries it into
+a quotation: *thy Father which seeth in secret [Themself] shall reward thee openly*[^mt6]. A source
+that writes *they did it themself* unbracketed keeps its own wording.
 
 [^ex]: Exodus 3:14 (KJV). The King James reads *I AM THAT I AM*.
+
+[^mt6]: Matthew 6:4 (KJV), which reads *himself*.
 """
 
 def unit_pronouns(tmp):
@@ -2631,9 +2640,10 @@ def unit_pronouns(tmp):
     p = subprocess.run([sys.executable, tool, d3, '--strict'], capture_output=True, text=True)
     check('--strict exits 0 with only a G hit, and says it is a warning', p.returncode == 0 and 'hits are warnings' in p.stdout, f"rc={p.returncode}")
 
-    # H — a lowercase reflexive whose antecedent is God (2026-09-10).  The two hits are the two
-    # misses that shipped live in *They Them*; the two non-hits are the only two legitimate uses
-    # a corpus sweep found the same day, and both sit as close to a God-word as the misses do.
+    # H — a reflexive whose antecedent is God (2026-09-10), or the wrong form outright (2026-09-11).
+    # The two antecedent hits are the two misses that shipped live in *They Them*; the two non-hits
+    # are the only two legitimate uses a corpus sweep found the same day, and both sit as close to a
+    # God-word as the misses do.
     d5 = os.path.join(tmp, 'pronouns-h'); os.makedirs(d5, exist_ok=True)
     with open(os.path.join(d5, 'draft.md'), 'w', encoding='utf-8') as f:
         f.write(REFLEXIVE_FIXTURE)
@@ -2656,16 +2666,23 @@ def unit_pronouns(tmp):
           any('The Father itself' in sent for _, _, sent in r5['H']), str(r5['H']))
     check('H reads a possessive as the subject it is ("God\'s power ... on its own" is not God\'s)',
           not any("God's power" in sent for _, _, sent in r5['H']), str(r5['H']))
-    check('H catches a plain God subject ("God knows themself")',
-          ('themself', 'subject') in H, str(r5['H']))
+    check('H catches a plain God subject ("God knows themselves")',
+          ('themselves', 'subject') in H, str(r5['H']))
+    check('H catches *Themself* as a wrong form — the house reflexive is *Themselves* (2026-09-11)',
+          ('Themself', 'wrong-form') in H and 'shows* of Themself' in h_sent[('Themself', 'wrong-form')],
+          str(r5['H']))
+    check('the wrong form is caught inside a quotation when it is BRACKETED — the bracket is this house',
+          any('seeth in secret' in sent for w, _, sent in r5['H'] if w == 'Themself'), str(r5['H']))
+    check('an unbracketed *themself* inside a quotation is the source\'s own and stays',
+          not any('did it themself' in sent for _, _, sent in r5['H']), str(r5['H']))
     check('H leaves a quotation alone (the source\'s own case is evidence)',
           not any('saith the LORD' in sent for _, _, sent in r5['H']), str(r5['H']))
     check('H skips a footnote definition', not any('KJV' in sent for _, _, sent in r5['H']), str(r5['H']))
-    check('the corrected wording is clean — Themself and Their own are never H hits',
-          not any('Themself' in w or 'Their' in w for w, _, _ in r5['H']), str(r5['H']))
+    check('the corrected wording is clean — Themselves and Their own are never H hits',
+          not any('Themselves' in w or 'Their' in w for w, _, _ in r5['H']), str(r5['H']))
     d6 = os.path.join(tmp, 'pronouns-h2'); os.makedirs(d6, exist_ok=True)
     with open(os.path.join(d6, 'draft.md'), 'w', encoding='utf-8') as f:
-        f.write("*Draft.*\n\n---\n\nGod knows themself the way no creature is known.\n")
+        f.write("*Draft.*\n\n---\n\nGod knows themselves the way no creature is known.\n")
     r6 = check_pronouns.sweep(d6)
     check('the H-only fixture really is H-only (no C or D hit riding along)',
           r6['H'] and not r6['C'] and not r6['D'], str(r6['C'] + r6['D']))

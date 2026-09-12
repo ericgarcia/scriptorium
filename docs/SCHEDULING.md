@@ -151,6 +151,25 @@ does. `outlet_audit` then reads three states rather than two:
 | **NOT SCHEDULED** | due later, and nothing records one. **A finding, on the day it can still be fixed.** |
 | **MISS** | the moment has passed and the copy is not there |
 
+## Two things measured on the first scheduled publication (2026-09-11)
+
+**A scheduled Substack post has its slug from the moment it is scheduled.** `GET
+/api/v1/drafts/<id>` reads `slug: null` on a plain draft and the real slug once `postSchedules`
+exists — so the post's public URL is knowable days ahead, and anything that needs it (a Note, a
+cross-link, a LinkedIn copy) can be prepared before the post is live. The URL serves a teaser
+page in the meantime: title and `og:` tags, **no body**, `robots: noindex`. The piece is not
+readable early.
+
+**But a Note cannot attach a post that has not published.** Composing the Note ahead of time —
+with the correct URL, from the correct slug — puts *"This attachment is not available"* in the
+composer instead of the post's card. The teaser page carries every `og:` tag a card needs, so
+this is Substack refusing to attach an unpublished post, not missing metadata. The consequence
+is the rule:
+
+> **A Note scheduled ahead of its post carries a plain link, not a card.** To get the card, the
+> Note is composed *after* the post is live. `substack_notes.py text <slug> --post-url <url>`
+> builds the scheduled version for the case where a plain link is acceptable.
+
 ## Nothing here fires by itself
 
 Deliberately. `schedule.py` compares a moment to now; it owns no clock and starts no

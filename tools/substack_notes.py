@@ -321,6 +321,9 @@ def main(argv=None):
     ap.add_argument('slugs', nargs='*')
     ap.add_argument('--pieces', default=default_pieces())
     ap.add_argument('--url', help='record: the Note URL (or c-<id>)')
+    ap.add_argument('--post-url', help="text: the post's public URL, for a Note SCHEDULED "
+                                       "beside a post that is not live yet (a scheduled post "
+                                       "already has its slug)")
     ap.add_argument('--date', help='record: YYYY-MM-DD (default today, local)')
     ap.add_argument('--today', help=argparse.SUPPRESS)           # for tests
     ap.add_argument('--outlets', default='publishing/outlets.yaml')
@@ -383,7 +386,20 @@ def main(argv=None):
     if args.cmd == 'text':
         if len(args.slugs) != 1:
             ap.error('text takes one slug')
-        p = piece(args.slugs[0])
+        if args.post_url:
+            # A SCHEDULED Note. The corpus only holds pieces that are already live, because a
+            # Note has always followed a publication — but a scheduled post HAS ITS SLUG from
+            # the moment it is scheduled (measured 2026-09-11: `slug` is null on a draft and
+            # populated once `postSchedules` exists), so its public URL is knowable and the
+            # Note can be scheduled beside it rather than posted by hand afterwards.
+            d = os.path.join(args.pieces, os.path.basename(args.slugs[0].rstrip('/')))
+            if not os.path.isdir(d):
+                ap.error(f'no such piece: {args.slugs[0]}')
+            man = read_manifest(os.path.join(d, 'publish.yaml'))
+            p = {'slug': os.path.basename(d), 'dir': d,
+                 'title': str(man.get('title') or '').strip().strip('"\''), 'url': args.post_url}
+        else:
+            p = piece(args.slugs[0])
         paras, problems = read_note(p['dir'], p['url'])
         if problems:
             print(f"{p['slug']}: " + '; '.join(problems), file=sys.stderr)

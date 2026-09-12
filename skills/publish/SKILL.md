@@ -868,7 +868,14 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
       DOM after the composer closes, so "the dialog" is not a selector. It returns
       `{sha256, card, postEnabled}`: **the sha256 must equal the tool's**, `card` must be true
       (the post's card rendered), and Post must be enabled. On any miss, stop.
-   4. **Click Post — or Schedule, when the piece has a moment.** A Note announces a post, so it
+   4. **Click Post — or Schedule, when the piece has a moment.** **Know what scheduling costs
+      first:** a Note composed before its post is live shows *"This attachment is not available"*
+      where the card belongs — Substack will not attach an unpublished post, even though the
+      scheduled post's URL already resolves to a teaser with full `og:` tags (measured
+      2026-09-11). So a scheduled Note carries a **plain link**; a Note posted after the post is
+      live carries the **card**. Build the scheduled version with
+      `substack_notes.py text <slug> --post-url <the post's URL>` — a scheduled post has its slug
+      from the moment it is scheduled, so that URL is knowable days ahead. A Note announces a post, so it
       goes when the post goes. If the piece is due later (`schedule.py check` says EMBARGOED and
       its Substack outlet is `at_moment`), use the composer's **Schedule** for the same moment
       rather than posting now: a Note announcing a post nobody can read yet is the one way to get

@@ -130,6 +130,32 @@ scratch is the one editor allowed to be overwritten. Never Publish from it.
    author saw; click **Publish**. Success lands on `/pulse/<slug>-<author>-<id>/?published=t` —
    strip the query and record it (below). Measured 2026-09-11 on love-is-not-a-metric-space.
 
+### 8b. **Scheduling instead of publishing — the default when the piece has a moment.**
+
+   A piece can be live on its canonical and due on its feed outlets later: the canonical is
+   `on_schedule: immediate` and LinkedIn is `at_moment` (`publishing/outlets.yaml`). When
+   `python3 framework/tools/schedule.py check pieces/<slug>` says EMBARGOED and `linkedin` waits,
+   **use LinkedIn's own scheduler rather than coming back to click** — the dialog that holds
+   Publish also holds a schedule control, beside it.
+
+   Everything in step 8 still applies and none of it relaxes: the announcing post is typed the
+   same way, read back, and **refused unless it equals the text the author approved**; the
+   audience is checked; the approval is still per Article and still the author's. The only
+   difference is which control finishes it.
+
+   **Then record it, because nothing here can see it afterwards.** The schedule lives on
+   LinkedIn's side; the desk's only evidence is what it writes down:
+
+   ```
+   python3 framework/tools/schedule.py record pieces/<slug> --outlet linkedin \
+       --where "LinkedIn's own scheduler, in the Article publish dialog" \
+       --evidence "<article edit url>" --approved "<who, when>"
+   ```
+
+   `outlet_audit` reads that record. Without it, a piece due on LinkedIn reports **NOT
+   SCHEDULED** — which is the state you want to be told about on the day you could still fix it,
+   rather than the morning after.
+
 ## After it publishes
 
 - Record the Article's URL in `publish.yaml` under the outlet's `manifest_url_key`

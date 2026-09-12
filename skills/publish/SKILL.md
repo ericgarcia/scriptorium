@@ -170,7 +170,11 @@ first.
    moment in the composer** rather than coming back to click by hand: that is how the one email
    goes out on time whether or not anyone is at the Mac. `md_to_site.py` refuses outright
    (exit 12), so the blog cannot be published early even by accident.
-   [`framework/docs/SCHEDULING.md`](../../docs/SCHEDULING.md) has the field and the rule.
+   **And record the schedule once it is set** — `schedule.py record pieces/<name> --outlet <o>
+   --where "…" --evidence "<post id>" --approved "<who, when>"`. A native schedule lives on the
+   platform, so the desk cannot see it: without the record, `outlet_audit` cannot tell a piece
+   that is scheduled from one that was forgotten, and says the same reassuring sentence either
+   way. [`framework/docs/SCHEDULING.md`](../../docs/SCHEDULING.md) has the field and the rule.
 
 0. **Verification gate — run it, and do not argue with it.**
 
@@ -864,7 +868,15 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
       DOM after the composer closes, so "the dialog" is not a selector. It returns
       `{sha256, card, postEnabled}`: **the sha256 must equal the tool's**, `card` must be true
       (the post's card rendered), and Post must be enabled. On any miss, stop.
-   4. **Click Post.** Never use Schedule unless the author asks for it.
+   4. **Click Post — or Schedule, when the piece has a moment.** A Note announces a post, so it
+      goes when the post goes. If the piece is due later (`schedule.py check` says EMBARGOED and
+      its Substack outlet is `at_moment`), use the composer's **Schedule** for the same moment
+      rather than posting now: a Note announcing a post nobody can read yet is the one way to get
+      this wrong. Then record it —
+      `schedule.py record pieces/<slug> --outlet <substack outlet> --where "the Notes composer's
+      own scheduler" --approved "<who, when>"` — because nothing on this side can see a schedule
+      that lives on Substack's. *(This line used to read "never use Schedule unless the author
+      asks for it", which was right when every publication went out the moment it was composed.)*
    5. **Record, then verify.** `substack_notes.py record <slug>` takes the Note's id from the
       public feed (exactly one Note must name the post, or it writes nothing) and adds a
       `substack_note:` block to `publish.yaml`. Then `substack_notes.py verify <slug>`. Commit

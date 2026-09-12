@@ -19,6 +19,13 @@ Read it with `state()`, or from the command line:
   python3 tools/schedule.py runbook <piece>      the prompt a scheduled wake-up needs
   python3 tools/schedule.py arm <piece> --task … --does … --reviewed "<who, when>"
   python3 tools/schedule.py armed                what is armed across the desk
+  python3 tools/schedule.py record <piece> --outlet … --where … --approved "<who, when>"
+
+RECORD THE ACT, NOT ONLY THE INTENT. A native schedule lives on Substack's or LinkedIn's
+side, where nothing here can see it — so a tool reading `publish_at` alone says "its own
+scheduler has it for Tuesday" whether the schedule was set or forgotten. `record` writes
+the act into the manifest (when, where, against what evidence, approved by whom), and
+`outlet_audit` reads an outlet that is due with no record as NOT SCHEDULED.
 
 THE ORDER IS NOT NEGOTIABLE: compose the drafts, let the author read them, THEN arm. A
 scheduled publication fires with nobody watching, so the reading has to have happened
@@ -398,6 +405,81 @@ def cmd_runbook(args):
     return 0
 
 
+def scheduled_record(piece_dir, outlet):
+    """-> {at, set, where, approved} for a native schedule actually set on this outlet, or None.
+
+    THE DIFFERENCE THIS EXISTS FOR: `publish_at` says when a piece is DUE, which is intent, and
+    a tool that reports "its own scheduler has it for Tuesday" from intent alone says exactly the
+    same sentence whether the schedule was set or forgotten. A native schedule lives on
+    Substack's or LinkedIn's side, where nothing here can see it, so the desk records the ACT —
+    when it was set, where, and against what evidence — and an outlet that is due with no record
+    reads as NOT SCHEDULED rather than as fine."""
+    path = os.path.join(piece_dir, 'publish.yaml')
+    if not os.path.exists(path):
+        return None
+    block, cur, rec = False, None, {}
+    for line in open(path, encoding='utf-8'):
+        raw = line.rstrip('\n')
+        if not raw.strip() or raw.lstrip().startswith('#'):
+            continue
+        if not raw.startswith((' ', '\t')):
+            block = raw.split(':', 1)[0].strip() == 'scheduled'
+            cur = None
+            continue
+        if not block:
+            continue
+        stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip())
+        if indent <= 2 and stripped.endswith(':'):
+            cur = stripped[:-1].strip()
+            if cur == outlet:
+                rec = {}
+            continue
+        if cur == outlet and ':' in stripped:
+            k, v = stripped.split(':', 1)
+            rec[k.strip()] = v.split('#', 1)[0].strip()
+    return rec or None
+
+
+def cmd_record(args):
+    """Write down that a native schedule was set on one outlet."""
+    pdir = resolve(args.piece)
+    moment = parse_moment(args.at) if args.at else None
+    if not moment:
+        st, moment = state(pdir)
+        if not moment:
+            sys.exit(f'{os.path.basename(pdir)} has no {FIELD} and no --at — nothing to record')
+    if not args.approved:
+        sys.exit('refusing to record: --approved is required. A native schedule publishes with\n'
+                 '  nobody watching, so the reading has to have happened first; name who approved\n'
+                 '  it and when.')
+    path = os.path.join(pdir, 'publish.yaml')
+    src = open(path, encoding='utf-8').read()
+    from datetime import date
+    entry = (f'  {args.outlet}:\n'
+             f'    at: {fmt(moment)}\n'
+             f'    set: {date.today().isoformat()}\n'
+             f'    where: {args.where}\n'
+             f'    evidence: {args.evidence or "none recorded"}\n'
+             f'    approved: {args.approved}\n')
+    if re.search(r'(?m)^scheduled:$', src):
+        # replace this outlet's entry if it has one, else append to the block
+        pat = re.compile(r'(?ms)^  %s:\n(?:    .*\n)*' % re.escape(args.outlet))
+        if pat.search(src):
+            src = pat.sub(entry, src, count=1)
+        else:
+            src = re.sub(r'(?m)^scheduled:$', 'scheduled:\n' + entry.rstrip('\n'), src, count=1)
+    else:
+        src = src.rstrip('\n') + (
+            '\n\n# Native schedules actually SET on a platform, per outlet — the act, not the\n'
+            '# intent. `publish_at` says when the piece is due; this says a scheduler was told.\n'
+            'scheduled:\n' + entry)
+    open(path, 'w', encoding='utf-8').write(src)
+    print(f'{os.path.basename(pdir)}: {args.outlet} scheduled for {fmt(moment)} '
+          f'({args.where}) — recorded')
+    return 0
+
+
 def cmd_arm(args):
     """Record that a wake-up has been scheduled for this piece, and by what.
 
@@ -520,6 +602,15 @@ def main():
     c.add_argument('--fires', help='when, if not the publish_at moment itself')
     c.add_argument('--reviewed', help='who approved the drafts, and when — REQUIRED')
     c.set_defaults(fn=cmd_arm)
+
+    c = sub.add_parser('record', help='write down a native schedule that was actually set')
+    c.add_argument('piece')
+    c.add_argument('--outlet', required=True)
+    c.add_argument('--where', required=True, help="the platform's own control, named")
+    c.add_argument('--evidence', help='the post/article id or url the schedule sits on')
+    c.add_argument('--at', help='the moment, if not the piece\'s publish_at')
+    c.add_argument('--approved', help='who approved the drafts, and when — REQUIRED')
+    c.set_defaults(fn=cmd_record)
 
     c = sub.add_parser('armed', help='what is armed across the desk')
     c.set_defaults(fn=cmd_armed)

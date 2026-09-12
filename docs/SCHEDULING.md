@@ -91,18 +91,25 @@ to publish. Only the exact string `immediate`, on that one outlet, turns the mom
 piece published before its moment with nothing on the terminal reads exactly like a piece that
 never had an embargo.
 
-### The consequence for the unpublished guard, which had to move
+### What dates a canonical-first piece
 
-`md_to_site.py` holds back a piece with no `published_at`, on the ground that it is an unfinished
-draft (caught 2026-09-09, when a composed-but-unpublished piece entered a bundle bound for a live
-site). **That guard assumed this outlet publishes after somewhere else.** An `immediate` outlet
-inverts it: the canonical site publishes **first**, so its export *is* the piece's first
-publication and there is no earlier date to carry.
+`md_to_site.py` exports a piece once it has `published_at`, and `bundle_pieces.py` **requires**
+it — the page a reader gets has to be dated. So the date is the mechanism, and it is written at
+the canonical publication rather than derived from `publish_at`:
 
-What replaces the guard is not nothing — it is **`publish_at:` itself.** An immediate outlet may
-carry a piece with no `published_at` **only when the piece is scheduled**, which is a dated
-decision `schedule.py arm --reviewed` records an approval against. A draft nobody scheduled is
-still held back, and `--include-unpublished` remains the only way to ship one.
+- **A piece published canonically first** records `published_at` on the day the site goes live.
+  The feed outlets are then *scheduled, not missing* — `outlet_audit` reads that state through the
+  outlet's `on_schedule` and counts it as `sched` while the moment is ahead.
+- **A redraft of an already-live piece keeps its original date** (Eric, 2026-09-11:
+  *"the redrafts KEEP THEIR ORIGINAL DATES"*), held in `original_published_at:` and copied to
+  `published_at` at the cutover, so setting it early cannot put the piece into the store before
+  the switch.
+
+An earlier version of this page said the unpublished guard in `md_to_site.py` had to move for an
+immediate outlet. It did not: that guard only decides what enters the bundle *content*, and
+`bundle_pieces` refuses an undated piece immediately afterwards — so relaxing it moved a refusal
+one step later and changed nothing that could publish. The date is what makes a canonical-first
+publication possible, and `publish_at` still governs every outlet that waits.
 
 ## The wake-up, and what it is for
 
@@ -115,6 +122,34 @@ What a wake-up is *for* is the step no platform can do for itself — the canoni
 and the redirect removal. The subscriber email and the syndicated copies belong to Substack's and
 LinkedIn's own schedulers, which need nothing from this Mac and do not care whether the app is
 open.
+
+## Record the act, not only the intent
+
+`publish_at` says when a piece is **due**. A native schedule — Substack's, LinkedIn's — lives on
+the platform, where nothing in this desk can see it. So a tool reading `publish_at` alone reports
+*"its own scheduler has it for Tuesday"* **whether the schedule was set or forgotten**, which is
+the one failure a scheduled publication actually has.
+
+So the act is written down where the intent is:
+
+```yaml
+scheduled:
+  substack-muffinlabs:
+    at: 2026-09-15 09:00 EDT
+    set: 2026-09-11
+    where: Substack's own scheduler, on draft 215307337
+    evidence: https://muffinlabs.substack.com/publish/post/215307337
+    approved: Eric, 2026-09-11
+```
+
+written by `schedule.py record`, which **refuses without `--approved`** for the same reason `arm`
+does. `outlet_audit` then reads three states rather than two:
+
+| | |
+|---|---|
+| **scheduled** | due later, and a record says a scheduler was told — printed with where and when |
+| **NOT SCHEDULED** | due later, and nothing records one. **A finding, on the day it can still be fixed.** |
+| **MISS** | the moment has passed and the copy is not there |
 
 ## Nothing here fires by itself
 

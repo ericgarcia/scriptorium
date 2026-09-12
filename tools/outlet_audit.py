@@ -153,6 +153,27 @@ def landed_on_not_found(final_url, outlet_cfg):
     return any(m in (final_url or '') for m in markers)
 
 
+def schedule_state(piece_dir, outlet, outlet_cfg):
+    """-> ('scheduled', moment, how) | ('unscheduled', moment, None) | (None, None, None).
+
+    Three states, because the middle one was invisible: an outlet that WAITS, whose moment is
+    still ahead, either has a native schedule recorded against it or does not — and "does not"
+    is the silent miss this whole check exists for. Reading `publish_at` alone said the same
+    reassuring sentence either way."""
+    when = pending_until(piece_dir, outlet_cfg)
+    if not when:
+        return None, None, None
+    try:
+        import schedule
+        rec = schedule.scheduled_record(piece_dir, outlet)
+    except Exception:
+        rec = None
+    if rec:
+        how = f"{rec.get('where', 'recorded')} — set {rec.get('set', '?')}"
+        return 'scheduled', when, how
+    return 'unscheduled', when, None
+
+
 def pending_until(piece_dir, outlet_cfg):
     """-> the moment this piece is due on THIS outlet, if that moment is still ahead; else None.
 
@@ -442,7 +463,7 @@ def main():
         die(1, f"no publish.yaml under {a.pieces}")
 
     # ---- forward: declared + published -> must resolve -----------------------
-    jobs, unrecorded, scheduled_later = [], [], []
+    jobs, unrecorded, scheduled_later, unscheduled = [], [], [], []
     for pc in pieces:
         for oname in pc['declared']:
             if oname not in outlets:
@@ -460,9 +481,12 @@ def main():
                 # — so `syndication_at` in the future reads as PENDING, and the day it passes the
                 # same piece reads as UNRECORDED again. (The pattern, 2026-09-11: canonical first,
                 # the rest on each platform's own scheduler.)
-                when = pending_until(os.path.join(a.pieces, pc['name']), outlets[oname])
-                if when:
-                    scheduled_later.append((pc['name'], oname, when))
+                st, when, how = schedule_state(os.path.join(a.pieces, pc['name']), oname,
+                                               outlets[oname])
+                if st == 'scheduled':
+                    scheduled_later.append((pc['name'], oname, when, how))
+                elif st == 'unscheduled':
+                    unscheduled.append((pc['name'], oname, when))
                 else:
                     unrecorded.append((pc['name'], oname, outlets[oname].get('manifest_url_key')))
 
@@ -482,9 +506,15 @@ def main():
                 obase = str(outlets[oname].get('reader_base') or '').rstrip('/')
                 is_canonical_outlet = bool(canon and obase and canon.startswith(obase))
                 if not is_canonical_outlet:
-                    later = pending_until(os.path.join(a.pieces, pc['name']), outlets[oname])
-                    if later:
-                        scheduled_later.append((pc['name'], oname, later))
+                    st2, later, how2 = schedule_state(os.path.join(a.pieces, pc['name']), oname,
+                                                      outlets[oname])
+                    if st2 == 'scheduled':
+                        scheduled_later.append((pc['name'], oname, later, how2))
+                    elif st2 == 'unscheduled':
+                        # Absent because the moment has not come — so not 'missing' — but with
+                        # nothing recording that a scheduler was told, which is its own finding
+                        # below rather than a copy counted as gone.
+                        unscheduled.append((pc['name'], oname, later))
             row = {'piece': pc['name'], 'outlet': oname, 'url': url, 'scheduled_for': later,
                    'status': status, 'ok': ok,
                    'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
@@ -601,8 +631,12 @@ def main():
             print(f"  reverse {oname}: all {len(info['live'])} live URL(s) are known to the desk")
     for name, oname in lying:
         print(f"  UNDECLARED  {name} records a {oname} URL but does not list {oname} in `outlets:`")
-    for name, oname, when in scheduled_later:
-        print(f"  scheduled   {name} is not on {oname} yet — its own scheduler has it for {when}")
+    for name, oname, when, how in scheduled_later:
+        print(f"  scheduled   {name} is not on {oname} yet — {oname}'s own scheduler has it for "
+              f"{when} ({how})")
+    for name, oname, when in unscheduled:
+        print(f"  NOT SCHEDULED  {name} is due on {oname} at {when}, and nothing records a "
+              f"schedule set there — intent is not a scheduler")
     for name, oname, key in unrecorded:
         print(f"  UNRECORDED  {name} is published and declares {oname}, whose URLs cannot be "
               f"derived — record it under `{key}` or the copy is unaudited")
@@ -642,6 +676,12 @@ def main():
         sys.exit(3)
     if undeclared or lying:
         print("\nFAILED: an outlet carries something the manifests do not declare.")
+        sys.exit(3)
+    if unscheduled:
+        print("\nFAILED: a piece is due on an outlet and nothing records a schedule set there.\n"
+              "  A native schedule lives on the platform, so the desk cannot see it — only the\n"
+              "  record can tell 'scheduled' from 'forgotten' before the moment passes.\n"
+              "  Set it, then `schedule.py record <piece> --outlet <o> --where … --approved …`.")
         sys.exit(3)
     if unrecorded:
         # Not 'missing' — the copy may well be up. But nothing can check it, and a check

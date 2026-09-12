@@ -207,11 +207,29 @@ def ignore_entry(book, name):
     return f"/books/{book}/references/{name}"
 
 
+def is_ignored(rel, r=None):
+    """Ask git, do not read .gitignore.
+
+    String-matching the file for an exact line was right while every index had its own
+    entry and wrong the moment a directory rule covered them all: the covered files
+    then read as NOT ignored, which would have reported every restricted index as
+    exposed and appended a redundant line for each one, forever. The question is "would
+    git commit this", and only git answers it. (2026-09-11, adding the blanket
+    `/books/*/references/.index/` rule.)
+    """
+    try:
+        return subprocess.run(["git", "check-ignore", "-q", rel], cwd=r or root(),
+                              capture_output=True).returncode == 0
+    except Exception:
+        return False
+
+
 def ensure_ignored(entries, r=None):
     """Append any missing entry. Never rewrites or reorders — another session may be
     editing this file, and the whole point of the line is that it is never lost."""
     have = set(l.strip() for l in gitignore_lines(r))
-    add = [e for e in entries if e not in have]
+    add = [e for e in entries
+           if e not in have and not is_ignored(e.lstrip("/"), r)]
     if add:
         p = gitignore_path(r)
         with open(p, "a", encoding="utf-8") as f:
@@ -626,7 +644,7 @@ def cmd_check(argv):
             # here was ignored on disk with no verdict written in its row, so the
             # verdict-driven check would have left its index committable. The stricter
             # of the two signals wins, because only one direction is recoverable.
-            file_ignored = ignore_entry(b, f) in ignored
+            file_ignored = is_ignored(rel, r)
             if row["restricted"] or file_ignored:
                 if row["restricted"] and not file_ignored:
                     print(f"  ⚠️  RESTRICTED AND NOT GITIGNORED: {rel}")
@@ -635,8 +653,7 @@ def cmd_check(argv):
                     print(f"  ⚠️  RESTRICTED AND TRACKED BY GIT: {rel}")
                     bad += 1
                 idx = index_for(b, f, r)
-                if os.path.exists(idx) and \
-                        ignore_entry(b, f"{INDEX_DIR}/{os.path.basename(idx)}") not in ignored:
+                if os.path.exists(idx) and not is_ignored(os.path.relpath(idx, r), r):
                     print(f"  ⚠️  INDEX OF A RESTRICTED SOURCE NOT GITIGNORED: "
                           f"{os.path.relpath(idx, r)}  (an index IS the text)")
                     bad += 1

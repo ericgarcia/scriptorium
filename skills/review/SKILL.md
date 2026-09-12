@@ -39,8 +39,18 @@ python3 framework/tools/check_verified.py pieces/<slug>
 python3 framework/tools/check_pronouns.py pieces/<slug> --names <named figures>
 python3 framework/tools/check_stage_direction.py pieces/<slug>
 python3 framework/tools/check_refs.py
+python3 framework/tools/check_scripture.py pieces/<slug>
+python3 framework/tools/check_quotes.py pieces/<slug>
 python3 framework/tools/md_to_substack.py pieces/<slug>
 ```
+
+**`check_quotes.py` is the gate that changes what the source re-read is for.** It matches every
+non-scripture quotation against the copy of the source held in `books/<book>/references/` and
+reports the page. What it cannot do is tell you the page says what the prose claims — so the
+re-read stops being a transcription check and becomes the only thing it was ever good for:
+does the source bear the weight the argument puts on it. A **NOT HELD** finding means the
+quotations in that footnote were checked by nothing at all; bring the source in with
+`references.py add` before the review claims to have tested them.
 
 Every gate result goes in the artifact's `gates`, pass or fail — the author should
 see what ran, not be told it was fine.

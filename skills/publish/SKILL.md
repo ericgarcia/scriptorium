@@ -461,8 +461,71 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    `framework/tools/refindex.py <kjv.pdf> --scheme kjv --out books/<name>/references/kjv.tsv.gz`,
    with a provenance row in that folder's README. `--verify` refuses an index with interior
    gaps, because a chapter missing a verse answers "not found" for a locus that exists, and the
-   reader of that answer cannot tell which side is wrong. `refindex.py --scheme pages` indexes
-   any other reference PDF the same way, for sources checked by quotation rather than locus.
+   reader of that answer cannot tell which side is wrong.
+
+0b-quotes. **Check every OTHER quotation against the source on disk:**
+   `python3 framework/tools/check_quotes.py pieces/<name>`
+   The same move as 0b-scripture, for books, opinions, lexicons and transcripts: it resolves
+   each footnote to the reference the desk actually holds and matches the quoted spans against
+   that source's index, reporting the page or line the words are on.
+
+   **The finding that matters most is NOT HELD** — a footnote citing a source that is not in
+   `books/<book>/references/`, whose quotations were therefore checked by *nothing*. That is
+   the state in which wording gets supplied from memory, and before this tool it was invisible:
+   a piece with twelve unheld quotations looked exactly like a piece with none. Bring the source
+   in rather than waving it through:
+
+       python3 framework/tools/references.py add <file> --book <book> \
+           --work "<Work> — <Author> (<year>)" --edition "<provenance>" --restricted|--public
+
+   `add` copies the file in, hashes it, writes the manifest row, **adds the .gitignore line
+   before the bytes land** when it is restricted, and builds the index. An index of a
+   copyrighted source is that source's text in another shape, so it is gitignored too.
+
+   **PAGE OUT OF RANGE** is checked by CALIBRATION, not comparison: a `pages` index
+   counts PDF pages while a footnote cites the printed leaf, so the tool learns the
+   constant offset this source and this piece agree on and reports only the citation
+   that disagrees with it. A page number is a claim a reader can follow, and it is
+   invisible to a text comparison.
+
+   **SOURCE ILLEGIBLE HERE** means the held scan's text layer is too degraded around
+   that passage to compare words against — read the page by eye rather than believing
+   either side.
+
+   The other statuses: **UNMARKED ELISION** — every word is in the source and in order, but the
+   quotation drops a passage without an ellipsis, so it reads as contiguous text and is not.
+   **DRIFT** names the word where the quotation leaves the source. **OUT OF ORDER** — the
+   fragments are all there but not in the order the ellipsis claims. **NO OVERLAP** is counted
+   separately and not as a failure: an italic run in this house is as often emphasis or a title
+   as a quotation. Read the count anyway — if one of those *was* meant to be a quotation, it is
+   not in that source at all.
+
+   `references.py list` says what is held and what is indexed; `references.py search "<phrase>"`
+   answers *do we hold a source that says this* across every index in one call, which is the
+   command to reach for instead of recalling a wording. `references.py check` proves the
+   manifest, the disk, the .gitignore and the indexes agree.
+
+   **A MATCH IS NOT A CLEAN BILL, AND A GREEN RUN IS NOT "THE FOOTNOTES ARE RIGHT."**
+   On this corpus **most footnote faults are CHARACTERIZATIONS of a source, not
+   misquotations** — a note saying a lexicon ranks one derivation first when it ranks
+   another; a claim attributed to the writer who reported it rather than the one who
+   made it a year later. Nothing mechanical can see those. Three such faults were found
+   by hand on this corpus on 2026-09-11 and **not one was a misquotation.** The tool
+   narrows the re-read; it does not replace it.
+
+0b-commonmark. **Check that the markup survives a strict parser:**
+   `python3 framework/tools/check_commonmark.py pieces/<name>` — must report **0 findings.**
+   The desk composes Substack with its own converter, which is lenient; every other outlet
+   renders the same draft through CommonMark, which is not. So a draft can be right on Substack
+   and print literal markup everywhere else — and every other check here compares the draft
+   against the outlet that tolerated it. Found live 2026-09-11, both reader-visible:
+   `not-yet` (`Confessions*, know` — a `*` after a letter and before a comma cannot open
+   emphasis) and `son-of-joseph` (ʿayin written as a backtick, which opens inline code).
+   **Fix only the occurrence the parser flags.** The not-yet repair matched the same characters
+   in a *correct* italic inside a verbatim footnote quotation and broke it; this check is what
+   caught that. Write ʿ (U+02BF) and ʾ (U+02BE), never a backtick. `md_to_site.py` also runs it
+   at export and warns without blocking, since the bundle is the whole site.
+
 
 0b-commonmark. **Check that the markup survives a strict parser:**
    `python3 framework/tools/check_commonmark.py pieces/<name>` — must report **0 findings.**

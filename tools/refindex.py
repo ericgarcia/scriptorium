@@ -72,7 +72,31 @@ def page_texts(pdf):
 def clean(t):
     t = unicodedata.normalize("NFC", t)
     t = re.sub(r"\s+", " ", t).strip()
-    return re.sub(r"\s+([,.;:!?])", r"\1", t)
+    t = re.sub(r"\s+([,.;:!?])", r"\1", t)
+    # A word broken across a line comes back as "believ- able", and a checker then
+    # reports a correct quotation of "believable" as drift. (Measured 2026-09-11 on
+    # the U.S. Reports scan, Jackson's dissent.) The hyphen must TOUCH the word before
+    # it, so a spaced dash " - " and a real compound "self-aware" are both untouched.
+    return re.sub(r"(\w)[-\u00ad]\s+(\w)", r"\1\2", t)
+
+
+def build_text(src, out, lines_per_block=40):
+    """A .txt source indexed by line number.
+
+    No overlap between blocks, deliberately: the searcher joins the rows back into
+    one stream, so a quotation crossing a block boundary is found anyway, and an
+    overlap would make the same sentence match twice and report two locations for
+    one quote.
+    """
+    with open(src, encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    n = 0
+    with opener(out, "wt") as f:
+        for i in range(0, len(lines), lines_per_block):
+            text = clean(" ".join(lines[i:i + lines_per_block]))
+            if text:
+                f.write(f"{i + 1}\t{text}\n"); n += 1
+    return f"{n} block(s) of {lines_per_block} lines, {len(lines)} lines"
 
 
 def build_pages(pdf, out):
@@ -138,8 +162,16 @@ def verify(path):
     import collections
     rows = [l.rstrip("\n").split("\t") for l in opener(path) if l.strip()]
     if not (rows and len(rows[0]) == 4):
-        print(f"page index: {len(rows)} pages")
-        return 0
+        # pages and text share this shape; the locator says which, and a checker
+        # only needs "N rows, locators ascending".
+        locs = [r[0] for r in rows]
+        ok = all(l.isdigit() for l in locs) and locs == sorted(locs, key=int)
+        print(f"2-column index: {len(rows)} row(s), locators "
+              f"{locs[0] if locs else '-'}..{locs[-1] if locs else '-'}")
+        if not ok:
+            print("  LOCATORS NOT ASCENDING INTEGERS — a lookup would report the wrong place")
+        print("  OK" if ok else "  NOT USABLE AS A CHECKER")
+        return 0 if ok else 4
 
     books = {r[0] for r in rows}
     missing = [b for b in KJV_BOOKS if b not in books]
@@ -179,15 +211,20 @@ def main():
         print(__doc__.strip()); sys.exit(1)
     if a[0] == "--verify":
         sys.exit(verify(a[1]))
-    pdf = a[0]
+    src = a[0]
     out = a[a.index("--out") + 1] if "--out" in a else None
-    scheme = a[a.index("--scheme") + 1] if "--scheme" in a else "pages"
+    default = "text" if src.lower().endswith((".txt", ".md")) else "pages"
+    scheme = a[a.index("--scheme") + 1] if "--scheme" in a else default
     if not out:
         print("--out is required"); sys.exit(1)
-    if not os.path.exists(pdf):
-        print(f"no such pdf: {pdf}"); sys.exit(1)
+    if not os.path.exists(src):
+        print(f"no such file: {src}"); sys.exit(1)
+    if scheme != "text" and not src.lower().endswith(".pdf"):
+        print(f"scheme {scheme} reads a PDF; {os.path.basename(src)} is not one "
+              f"(use --scheme text)"); sys.exit(1)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    got = build_kjv(pdf, out) if scheme == "kjv" else build_pages(pdf, out)
+    got = (build_text(src, out) if scheme == "text" else
+           build_kjv(src, out) if scheme == "kjv" else build_pages(src, out))
     print(f"{got} -> {out}")
     sys.exit(verify(out))
 

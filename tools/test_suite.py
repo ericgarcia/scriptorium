@@ -109,7 +109,6 @@ def live_url(man):
     import check_status as cs
     return cs.live_url(man, corpus_outlets()[0])
 
-
 from md_to_substack import (flatten_quotes, smarten_quotes, render_block,
                             render_footnote_block, strip_to_reader, render_reader,
                             read_manifest, parse_blocks, manifest_gate,
@@ -136,6 +135,445 @@ def check(name, ok, detail=''):
 def skip(name, why):
     SKIP.append((name, why))
     print(f"  skip  {name}   ({why})")
+
+
+# ---------------------------------------------------------------- unit: normalization
+def unit_normalization():
+    print("\n-- normalization -------------------------------------------------")
+    s = 'the “word” it’s'
+    check('flatten_quotes is length-preserving',
+          len(flatten_quotes(s)) == len(s),
+          'a positional offset computed on it must index the real text')
+    check('H ignores quote style', H('the "x" y') == H('the “x” y'))
+    check('H ignores whitespace runs', H('it.  The') == H('it. The'),
+          'a double space describes a block no draft can produce')
+    check('H still sees real differences', H('a b') != H('a c'))
+    check('H ignores leading/trailing space', H('  a b  ') == H('a b'))
+    check('smarten opens then closes', smarten_quotes('"a" b') == '“a” b')
+    check('smarten handles an apostrophe mid-word', smarten_quotes("it's") == 'it’s')
+
+
+# ---------------------------------------------------------------- unit: commonmark parity
+def unit_commonmark(tmp):
+    """The desk's Substack converter is lenient; every other outlet renders CommonMark.
+
+    Two live faults came through that gap on 2026-09-11 (not-yet, son-of-joseph). These
+    cases pin what the check must flag and — as important — what it must leave alone,
+    because a parity check that flags the house censoring convention would be ignored.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'cc', os.path.join(os.path.dirname(__file__), 'check_commonmark.py'))
+    cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+    md = cc._md()
+    if md is None:
+        print("  skip  commonmark: markdown-it-py is not installed — this is NOT a pass")
+        return
+    kinds = lambda body: [k for k, _ in cc.check_text('x\n---\n' + body, md)]
+    check('commonmark: a star after a letter before a comma is flagged',
+          kinds("*as those who have read it,* Confessions*, know — one of us.* Go on.") == ['stray-asterisk'])
+    check('commonmark: the same sentence, fixed, is clean',
+          kinds("*as those who have read it,* Confessions, *know — one of us.* Go on.") == [])
+    check('commonmark: a backtick used as ayin is flagged',
+          kinds("The Hebrew is *`almah*; it means young woman.") == ['backtick-letter-mark'])
+    check('commonmark: the real ayin is clean',
+          kinds("The Hebrew is *ʿalmah*; it means young woman.") == [])
+    check('commonmark: escaped censoring (f\\*\\*k) is not a leak',
+          kinds("He tells the camera to f\\*\\*k off.") == [])
+    check('commonmark: an asterisk inside code is not a leak',
+          kinds("The glob `*.md` matches every *draft* here.") == [])
+
+
+# ---------------------------------------------------------------- unit: outlet content
+def unit_outlet_content(tmp):
+    """outlet_audit --content: what counts as drift, and what must not.
+
+    Every false lead on 2026-09-11 was one of two things: a whitespace-only difference a
+    reader cannot see, or the syndication line expected on the canonical outlet. Both are
+    pinned here, along with the half that must never regress — a changed WORD is drift.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'oa', os.path.join(os.path.dirname(__file__), 'outlet_audit.py'))
+    oa = importlib.util.module_from_spec(spec); spec.loader.exec_module(oa)
+    d = os.path.join(tmp, 'oapiece'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'publish.yaml'), 'w').write(
+        'title: T\nsubtitle: S\ncanonical: https://www.example.com/blog/a-piece\n')
+    para = ("The tuning was set before the player arrived, by cuts nobody consulted "
+            "the flute about, and no work on the surface reaches it.")
+    open(os.path.join(d, 'draft.md'), 'w').write('scaffold\n---\n' + para + '\n')
+    ws = '<p>' + para.replace(', by', ' , by').replace('the flute', 'the\n  flute') + '</p>'
+    r = oa.content_drift(d, ws, canonical_outlet=True)
+    check('outlet content: a whitespace-only difference is not drift',
+          r is not None and not r['missing'])
+    bad = '<p>' + para.replace('player', 'singer') + '</p>'
+    r = oa.content_drift(d, bad, canonical_outlet=True)
+    check('outlet content: a changed word is still drift',
+          r is not None and len(r['missing']) == 1)
+    r = oa.content_drift(d, ws, canonical_outlet=False)
+    check('outlet content: a syndicated copy must carry the originally-published line',
+          r is not None and any(w.startswith('Originally published at') for w in r['missing']))
+
+    # --- the link preview: a store publish never touches the site repo, so a live page's
+    # og:image can 404 (one of 33, 2026-09-11). No network: the probe is stubbed.
+    page_url = 'https://site.test/writings/a-piece/'
+    head = ('<meta property="og:image:width" content="1200"/>'
+            '<meta content="/og/a-piece.jpg" property="og:image"/>')
+    check('preview: og:image is found whatever the attribute order, and made absolute',
+          oa.og_image_url(head, page_url) == 'https://site.test/og/a-piece.jpg',
+          str(oa.og_image_url(head, page_url)))
+    check('preview: og:image:width is not mistaken for the image',
+          oa.og_image_url('<meta property="og:image:width" content="1200"/>', page_url) is None)
+    stub = lambda answer: (lambda _url: answer)
+    check('preview: an image that answers 200 image/* is fine',
+          oa.preview_problem(head, page_url, stub((200, 'image/jpeg'))) is None)
+    check('preview: a 404 og:image is reported',
+          'HTTP 404' in (oa.preview_problem(head, page_url, stub((404, ''))) or ''))
+    check('preview: a 200 that is not an image is reported (an HTML error page)',
+          'not an image' in (oa.preview_problem(head, page_url, stub((200, 'text/html'))) or ''))
+    check('preview: a page that names no og:image is reported',
+          oa.preview_problem('<p>x</p>', page_url, stub((200, 'image/jpeg'))) is not None)
+    check('preview: an unreachable image is not a pass',
+          oa.preview_problem(head, page_url, stub((None, ''))) is not None)
+
+
+# ---------------------------------------------------------------- unit: substack pages
+def unit_pages(tmp):
+    """A page is a post with type "page" — the checks that must NOT fire on one.
+
+    Measured 2026-09-10: clicking Add page opens /publish/post/<id> in the same composer,
+    and the draft object differs only by `type`. So the transport is shared and the risk
+    is the other direction — a post-shaped check reporting a page as broken because it is
+    absent from a list it was never going to be in.
+    """
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'sv', os.path.join(os.path.dirname(__file__), 'substack_verify.py'))
+    sv = importlib.util.module_from_spec(spec); spec.loader.exec_module(sv)
+
+    repo = os.path.join(tmp, 'pagerepo'); pieces = os.path.join(repo, 'pieces')
+    for slug, extra in (('an-essay', ''), ('a-colophon', 'substack_type: page\n')):
+        d = os.path.join(pieces, slug); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write(
+            f"title: T\nsubtitle: S\n{extra}"
+            f"public_url: https://example.substack.com/p/{slug}\n")
+    man_page = sv.read_manifest(os.path.join(pieces, 'a-colophon', 'publish.yaml'))
+    man_post = sv.read_manifest(os.path.join(pieces, 'an-essay', 'publish.yaml'))
+    check('pages: substack_type is read from the manifest',
+          man_page.get('substack_type') == 'page')
+    check('pages: a post does not accidentally declare itself one',
+          man_post.get('substack_type') is None)
+
+    # The header gate refuses a post with no subtitle — and a PAGE HAS NO SUBTITLE FIELD,
+    # so requiring one refused a compose that was correct. A gate that refuses correct work
+    # is the worst kind: it teaches you to reach for an override. (2026-09-10.)
+    spec2 = importlib.util.spec_from_file_location(
+        'mts', os.path.join(os.path.dirname(__file__), 'md_to_substack.py'))
+    mts = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(mts)
+    pg = os.path.join(pieces, 'a-colophon')
+    open(os.path.join(pg, 'publish.yaml'), 'w').write(
+        'title: A Colophon\nsubstack_type: page\n')
+    errs, _warns = mts.manifest_gate(pg)
+    check('pages: the header gate does not demand a subtitle of a page', not errs)
+    po = os.path.join(pieces, 'an-essay')
+    open(os.path.join(po, 'publish.yaml'), 'w').write('title: An Essay\n')
+    errs2, _ = mts.manifest_gate(po)
+    check('pages: a POST with no subtitle is still refused', bool(errs2))
+
+
+# ---------------------------------------------------------------- unit: references + quotes
+def unit_references(tmp):
+    """Intake, indexing, and the two ways this pair reported correct work as wrong.
+
+    Both cases here were measured on 2026-09-11, the day the tools were written, and
+    both are the same failure the scripture checker names in its own docstring: a
+    checker that flags correct prose trains the reader to skim past it.
+    """
+    import importlib.util, os, gzip
+
+    def load(name):
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(os.path.dirname(__file__), name + '.py'))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        return m
+
+    R, RI = load('references'), load('refindex')
+
+    # The manifest's ⚠️ does two different jobs. Four public-domain scans read
+    # "✅ Public domain. ⚠️ OCR." and were called restricted, which demanded they be
+    # removed from git. The LEADING marker is the verdict.
+    check('references: ✅ then ⚠️ is public domain, not restricted',
+          R._verdict('✅ Public domain. ⚠️ OCR.') == 'ok')
+    check('references: a leading ⚠️ is restricted',
+          R._verdict('⚠️ **In copyright** — do not republish.') == 'restricted')
+    check('references: a cell with neither marker states no verdict',
+          R._verdict('Public domain, probably') is None)
+
+    # There are THREE verdict markers. ❌ was missed by the first parser, so the one
+    # row using it ("❌ **Not redistributable.** arXiv's licence grants us none") read
+    # as no-verdict — and no-verdict then meant UNRESTRICTED, which is the unsafe
+    # direction. Only an unrelated .gitignore line kept it from mattering.
+    check('references: ❌ is a verdict, and it means restricted',
+          R._verdict("❌ **Not redistributable.** arXiv's licence grants us none.")
+          == 'restricted')
+    check('references: an unreadable verdict FAILS CLOSED',
+          R._restricted('Probably fine?') is True)
+    check('references: only an explicit ✅ is unrestricted',
+          R._restricted('✅ Public domain. ⚠️ OCR.') is False)
+    check('references: an unclassifiable verdict is also a FINDING, not just fail-closed',
+          R._verdict('Probably fine?') is None and R._restricted('Probably fine?') is True)
+
+    # An apostrophe is a letter inside a word and punctuation around one.
+    check('references: a quote-mark apostrophe is dropped',
+          R.norm("the ‘city of light’ where") == 'the city of light where')
+    check("references: a contraction's apostrophe survives",
+          "it's" in R.norm("it's here"))
+
+    # A word broken across a PDF line comes back hyphenated.
+    check('refindex: a line-break hyphen is rejoined',
+          RI.clean('what is believ- able here') == 'what is believable here')
+    check('refindex: a spaced dash is not a hyphenation',
+          '-' in RI.clean('the source - and the draft'))
+
+    # A .txt source indexes by line, and the locators ascend.
+    src = os.path.join(tmp, 'src.txt')
+    open(src, 'w').write('\n'.join(f'line {i} of the source text' for i in range(200)))
+    out = os.path.join(tmp, 'src.tsv.gz')
+    RI.build_text(src, out, lines_per_block=40)
+    rows, stream, offsets = R.load_index(out)
+    check('refindex: text scheme writes ascending integer locators',
+          len(rows) == 5 and [int(r[0]) for r in rows] == sorted(int(r[0]) for r in rows))
+
+    # The joined stream is the whole point: a phrase spanning two rows is findable.
+    check('references: a phrase straddling two index rows is found',
+          'line 39 of the source text line 40 of the source text' in stream)
+    check('references: locate reports the row a hit fell in',
+          R.locate(offsets, stream.find('line 41')) == '41')
+
+    # A scanned PDF has no text layer, and treating it as a held source would report
+    # every true quotation from it as missing.
+    big = os.path.join(tmp, 'scan.pdf')
+    open(big, 'wb').write(b'x' * 300_000)
+    tiny = os.path.join(tmp, 'scan.tsv.gz')
+    with gzip.open(tiny, 'wt') as f:
+        f.write('1\tcover page\n')
+    check('references: a big file with a tiny index is reported as having no text layer',
+          'NO USABLE TEXT' in (R.text_layer_verdict(big, tiny) or ''))
+    check('references: a real index is not',
+          R.text_layer_verdict(src, out) is None)
+
+
+def unit_reference_add(tmp):
+    """`add` end to end — the one command here with a one-way consequence.
+
+    Getting `--restricted` wrong puts a copyrighted file in git history, where no later
+    edit removes it. So: the file lands, the manifest gains a row, the index is built,
+    and a restricted source gains BOTH ignore lines — its own and its index's, because
+    an index of a copyrighted source is that source's text in another shape.
+    """
+    import importlib.util, os
+
+    spec = importlib.util.spec_from_file_location(
+        'references', os.path.join(os.path.dirname(__file__), 'references.py'))
+    R = importlib.util.module_from_spec(spec); spec.loader.exec_module(R)
+
+    home = os.path.join(tmp, 'inst')
+    refs = os.path.join(home, 'books', 'tst', 'references')
+    os.makedirs(refs)
+    open(os.path.join(refs, 'README.md'), 'w').write(
+        '# References\n\n| File | Work | Edition / provenance | Added | Redistribution |\n'
+        '|---|---|---|---|---|\n\n## A section after the table\n\nProse.\n')
+    src = os.path.join(tmp, 'incoming.txt')
+    open(src, 'w').write('\n'.join(f'a sentence number {i} in the held source'
+                                    for i in range(120)))
+
+    R.root = lambda: home
+    R.tracked = lambda rel, r=None: False        # no git in a scratch tree
+
+    rc = R.cmd_add([src, '--book', 'tst', '--work', '*A Held Work* — An Author (1999)',
+                    '--edition', 'First edition', '--restricted'])
+    check('references add: exits 0', rc == 0)
+    check('references add: the file is copied in',
+          os.path.exists(os.path.join(refs, 'incoming.txt')))
+    check('references add: an index is built',
+          os.path.exists(os.path.join(refs, '.index', 'incoming.tsv.gz')))
+
+    readme = open(os.path.join(refs, 'README.md')).read()
+    check('references add: a manifest row is appended', '[incoming.txt](incoming.txt)' in readme)
+    check('references add: the row carries the work and a hash',
+          'A Held Work' in readme and 'sha256' in readme)
+    check('references add: the row goes INSIDE the table, not at end of file',
+          readme.index('incoming.txt') < readme.index('## A section after the table'))
+
+    ig = open(os.path.join(home, '.gitignore')).read()
+    check('references add: a restricted file is gitignored',
+          '/books/tst/references/incoming.txt' in ig)
+    check("references add: and so is its index — an index IS the text",
+          '/books/tst/references/.index/incoming.tsv.gz' in ig)
+
+    # And the round trip: the thing just added is findable by search, at its line.
+    cat = R.catalog(r=home, book='tst')
+    check('references add: the new source appears in the catalog as indexed',
+          len(cat) == 1 and cat[0]['index'] and cat[0]['restricted'])
+    _, stream, offsets = R.load_index(cat[0]['index'])
+    check('references add: its text is searchable', 'sentence number 77' in stream)
+
+    # A second add of a DIFFERENT file under the same name must not overwrite.
+    open(src, 'w').write('completely different bytes')
+    rc2 = R.cmd_add([src, '--book', 'tst', '--work', 'x', '--restricted'])
+    check('references add: refuses to overwrite a different file of the same name', rc2 == 1)
+
+
+
+def unit_quotes_false_positives(tmp):
+    """The three false positives another session found by running this tool on the corpus.
+
+    Reported 2026-09-11 by the session that closed REFERENCES-TO-CHECK, from a read-only
+    run against pieces/son-of-joseph: three of five DRIFT findings were wrong, each for a
+    different reason. All three are named here so none of them comes back.
+    """
+    import importlib.util, os
+
+    spec = importlib.util.spec_from_file_location(
+        'check_quotes', os.path.join(os.path.dirname(__file__), 'check_quotes.py'))
+    cq = importlib.util.module_from_spec(spec); spec.loader.exec_module(cq)
+
+    # (1) ALIAS COLLISION. "english" was an alias for five held sources, because the
+    # filename stem contributed words. A note about the Nicene Creed thereby "named"
+    # two lexicons, a Syriac study and the Summa, and its quotation was reported as
+    # drift against whichever shared four common words.
+    al = cq.aliases('*An Arabic-English Lexicon* — Edward William Lane (1863)',
+                    'arabic-english-lexicon-lane-book1-part3-ocr.txt')
+    check('quotes: a generic word is not an alias for a source',
+          'english' not in al and 'arabic' not in al, str(sorted(al)))
+    check('quotes: the full title is the strongest alias',
+          al.get('an arabic english lexicon') == 100, str(sorted(al.items())))
+    check("quotes: the author's surname is an alias, at lower weight",
+          al.get('lane') == 40 or al.get('edward') == 40, str(sorted(al.items())))
+
+    # A footnote shortens a title; the manifest holds the long form.
+    al2 = cq.aliases('*The Spiritual Exercises of St. Ignatius of Loyola* — tr. Charles Seager',
+                     'spiritual-exercises-ignatius-seager-1849-ocr.txt')
+    check('quotes: a shortened title still names the source',
+          any(a == 'the spiritual exercises' for a in al2), str(sorted(al2)))
+
+    # But a prefix must still BE a name. Two words of "Book I Part 3" gave the alias
+    # "book i", which matched any footnote containing the word "book" and tied Lane's
+    # Arabic lexicon to a third of the corpus — where its degraded OCR then produced a
+    # finding every time. Measured 2026-09-11: 152 corpus findings became 18.
+    al3 = cq.aliases('*An Arabic-English Lexicon*, **Book I Part 3** — Edward William Lane',
+                     'arabic-english-lexicon-lane-book1-part3-ocr.txt')
+    check('quotes: a title prefix of only common short words is not an alias',
+          'book i' not in al3 and 'an arabic' not in al3, str(sorted(al3)))
+    check('quotes: the lexicon is still named by its full title',
+          al3.get('an arabic english lexicon') == 100, str(sorted(al3.items())))
+
+    # (2) OCR SPLIT WORDS. The held scan reads "je sus christ"; the draft has
+    # "Jésus-Christ". Reported as drift, and the drift was the scanner's.
+    check('quotes: an accented word normalizes to one word, not two',
+          cq.norm('Jésus-Christ') == 'jesus christ', cq.norm('Jésus-Christ'))
+    scan = 'a review of the spirit ual exercises of loyola was published that year'
+    st, _, detail, _ = cq.find('the spiritual exercises of Loyola', scan, [(0, '1')],
+                               None, scan.replace(' ', ''))
+    check('quotes: a word the held OCR split is still a match',
+          st == 'MATCH' and 'word breaks' in detail, f'{st}: {detail}')
+
+    # (3) DEGRADED OCR. BDB's scan reads "is able to do anything with e3ris". A
+    # quotation checked against that is reported as drift; the right answer is that
+    # the held copy cannot be compared against here.
+    garble = ('a lmh f y g m ib is able to do anything with e3ris 4 cf ay n '
+              'i2 the s3 w o rd 7b i and e ris n o t')
+    check('quotes: a degraded OCR window is recognized as illegible',
+          cq.ocr_garbled(garble), garble[:60])
+    check('quotes: ordinary prose is not called illegible',
+          not cq.ocr_garbled('and he said unto them ye are they which justify '
+                             'yourselves before men but god knoweth your hearts'))
+
+    # PAGE CITATIONS ARE CALIBRATED, NOT COMPARED. A `pages` index counts PDF pages and
+    # a footnote cites the printed leaf; front matter puts a constant between them.
+    # Comparing directly flagged 23 correct citations in one piece.
+    obs = [('a', [(25, 27)], 29), ('b', [(28, 30)], 33), ('c', [(29, 29)], 33),
+           ('d', [(24, 24)], 28), ('e', [(30, 30)], 40)]
+    deltas = [f - lo for _, cs, f in obs for lo, _ in cs]
+    mode = max(set(deltas), key=deltas.count)
+    odd = [k for k, cs, f in obs if not any(lo - 1 <= f - mode <= hi + 1 for lo, hi in cs)]
+    check('quotes: a constant printed-to-index offset is learned', mode == 4, str(deltas))
+    check('quotes: citations that agree with the offset are not flagged',
+          odd == ['e'], str(odd))
+
+
+def unit_quotes(tmp):
+    """check_quotes: who a quotation belongs to, and the three statuses that are not drift."""
+    import importlib.util, os, gzip
+
+    spec = importlib.util.spec_from_file_location(
+        'check_quotes', os.path.join(os.path.dirname(__file__), 'check_quotes.py'))
+    cq = importlib.util.module_from_spec(spec); spec.loader.exec_module(cq)
+
+    src = ('arouse yourselves from the snare of the senses that is engulfing you awake '
+           'from your lethargy before it is too late and the individual may draw any '
+           'quantity he desires to himself by the use of that law')
+    offsets = [(0, '29')]
+
+    # A paragraph carries several quotations and several markers; a span belongs to the
+    # marker that FOLLOWS it. Handing every span to every marker checked one book's
+    # sentence against another book and reported both as drift.
+    paras = ['Here is 1934: *thought is the only thing*[^a] And here is 2006: '
+             '*you are a creator and there is an easy process*[^b]']
+    by = cq.body_spans_by_marker(paras)
+    check('quotes: a body span goes to the marker that follows it',
+          by.get('a') == ['thought is the only thing']
+          and by.get('b') == ['you are a creator and there is an easy process'])
+
+    check('quotes: an exact quotation matches',
+          cq.find('awake from your lethargy', src, offsets)[0] == 'MATCH')
+
+    # The house marks an elision with an ellipsis. A quotation that drops words
+    # silently is neither a match nor a misquotation; it is its own finding.
+    st, _, detail, _ = cq.find('Arouse yourselves. Awake from your lethargy.', src, offsets)
+    check('quotes: words in order with a dropped passage is UNMARKED ELISION',
+          st == 'UNMARKED ELISION' and 'snare of the senses' in detail, detail)
+
+    # An italic run with nothing in common is the author's own emphasis, not a
+    # quotation that went missing.
+    check('quotes: an unrelated italic run is NO OVERLAP, not NOT FOUND',
+          cq.find('the desk keeps its own counsel entirely', src, offsets)[0] == 'NO OVERLAP')
+
+    # A real misquotation still has to be caught.
+    check('quotes: a changed word inside a real quotation is DRIFT',
+          cq.find('awake from your slumber before it is too late', src, offsets)[0]
+          in ('DRIFT', 'NOT FOUND'))
+
+    # A title is not a quotation.
+    # Bold is the author's own prose. The italic pattern reads `**x**` as `*x*`, so a
+    # bolded sentence was extracted as a quotation: *Jealous of a Calf*'s own line
+    # "There cannot be two infinites" was matched against the Summa and reported as
+    # drift against a Trinity question about innascibility. (Named 2026-09-11.)
+    check('quotes: a bolded sentence is prose, not a quoted span',
+          not any('two infinites' in x for x in
+                  cq.spans('the argument is simple: **There cannot be two infinites** '
+                           'and that is the whole of it')),
+          str(cq.spans('the argument is simple: **There cannot be two infinites** '
+                       'and that is the whole of it')))
+    check('quotes: a real italic quotation beside bold is still found',
+          any('awake from your lethargy' in x for x in
+              cq.spans('**Not a quote.** He wrote *awake from your lethargy today*')))
+    check('quotes: bold does not shift the marker a span is attributed to',
+          cq.body_spans_by_marker(
+              ['**Bold prose here.** He wrote *awake from your lethargy now*[^a]']
+          ).get('a') == ['awake from your lethargy now'])
+
+    check('quotes: an italic book title is recognized as a title',
+          cq.looks_like_a_title('Thought Vibration, or the Law of Attraction in the '
+                                'Thought World'))
+    check('quotes: ordinary quoted prose is not',
+          not cq.looks_like_a_title('awake from your lethargy before it is too late'))
+
+    # A PDF interleaves running page numbers with the prose.
+    numbered = 'the thought and feeling 28 is that instant stamped upon it'
+    check('quotes: an interleaved page number is not drift',
+          cq.find('the thought and feeling is that instant stamped upon it',
+                  numbered, [(0, '32')], cq.denumbered(numbered))[0] == 'MATCH')
 
 
 # ---------------------------------------------------------------- unit: normalization
@@ -526,7 +964,6 @@ def unit_outlet_reverse(tmp):
           str(sorted(oa.known_on(pieces, li))))
 
 
-
 # ------------------------------- unit: a second publication is INSIDE the gates
 def unit_live_urls(tmp):
     """A piece is LIVE at its own outlet's address — for every tool that asks, not just two.
@@ -660,7 +1097,6 @@ def unit_live_urls(tmp):
                         '--syndicated', 'nosuch', '--apply'], capture_output=True, text=True, cwd=root)
     check('bundle: --syndicated on an outlet the registry does not define is refused',
           r.returncode == 8, (r.stdout + r.stderr)[-200:])
-
 
 
 # ---------------------------------------------------------------- unit: companions
@@ -4348,6 +4784,10 @@ def main():
         unit_pages(tmp)
         unit_outlet_content(tmp)
         unit_commonmark(tmp)
+        unit_references(tmp)
+        unit_reference_add(tmp)
+        unit_quotes(tmp)
+        unit_quotes_false_positives(tmp)
         unit_notes(tmp)
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)

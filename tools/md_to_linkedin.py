@@ -240,8 +240,18 @@ def main():
         print('\nready — every gate passes; nothing written (--check)')
         return 0
 
-    parts = [f'<p><em>Originally published at <a href="{html.escape(canonical)}">'
-             f'{html.escape(canonical)}</a>.</em></p>']
+    # The shared converter ALREADY prepends this line for any piece that records a
+    # `canonical:` (md_to_substack, the `syndicated` branch), and this tool prepended its own
+    # on top — so a piece whose canonical was recorded before its LinkedIn copy was composed
+    # got the line TWICE, one above the subtitle and one below it. Measured 2026-09-11 on
+    # scaling-computer-vision-workflows-aws, in the editor, by eye: nothing compared the
+    # first block against the second, because each was correct on its own.
+    already = bool(body) and 'Originally published at ' in body[0]
+    parts = [] if already else [f'<p><em>Originally published at <a href="{html.escape(canonical)}">'
+                                f'{html.escape(canonical)}</a>.</em></p>']
+    if already:
+        # Keep the reading order the outlet wants: canonical line, then the lede.
+        parts.append(body.pop(0))
     if manifest.get('subtitle'):
         parts.append(f"<p><em>{html.escape(str(manifest['subtitle']))}</em></p>")
     parts += body

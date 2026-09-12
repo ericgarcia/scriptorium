@@ -3243,6 +3243,37 @@ def unit_store(tmp):
 
 
 
+def unit_linkedin_canonical_once(tmp):
+    """The canonical line appears ONCE. The shared converter already prepends it for a piece
+    that records a `canonical:`, and md_to_linkedin prepended its own on top — so a piece whose
+    canonical was recorded before its LinkedIn copy was composed carried the line twice, one
+    above the subtitle and one below (measured 2026-09-11, in the editor, by eye)."""
+    print("\n-- linkedin: the canonical line, exactly once ------------------------")
+    import md_to_linkedin as ml
+    d = os.path.join(tmp, 'li-canon')
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8').write(
+        '*scaffold*\n\n---\n\nOpening paragraph.\n\nClosing paragraph.\n')
+    open(os.path.join(d, 'publish.yaml'), 'w', encoding='utf-8').write(
+        'title: T\nsubtitle: S\ncanonical: https://example.invalid/blog/t\n'
+        'outlets:\n  - linkedin\n')
+    body, _notes, _imgs, _meta = ml.build(d)
+    seeded = sum(1 for b in body if 'Originally published at ' in b)
+    check('linkedin: the shared converter is the one that seeds the canonical line', seeded == 1,
+          f'{seeded} in body')
+    # what main() assembles, in the same two lines it uses
+    already = bool(body) and 'Originally published at ' in body[0]
+    parts = [] if already else ['<p><em>Originally published at …</em></p>']
+    if already:
+        parts.append(body.pop(0))
+    parts.append('<p><em>S</em></p>')
+    parts += body
+    total = sum(1 for p in parts if 'Originally published at ' in p)
+    check('linkedin: the assembled article carries it exactly once', total == 1, f'{total} in parts')
+    check('linkedin: and it still comes before the subtitle',
+          'Originally published at ' in parts[0] and '<em>S</em>' in parts[1])
+
+
 # ---------------------------------------------------------------- unit: linkedin outlet
 def unit_captions(tmp):
     """Captions live in publish.yaml and reach every outlet from there (2026-09-11)."""
@@ -5031,6 +5062,7 @@ def main():
         unit_review_artifact(tmp)
         unit_corpus(tmp)
         unit_required_companions(tmp)
+        unit_linkedin_canonical_once(tmp)
         unit_schedule(tmp)
         unit_scripture(tmp)
         unit_pages(tmp)

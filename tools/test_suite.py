@@ -1200,6 +1200,42 @@ def unit_companions(tmp):
 
 
 # ---------------------------------------------------------------- unit: scripture check
+def unit_required_companions(tmp):
+    """A publication can require a companion of its PUBLISHED pieces — the same shape as
+    required_outlets, one layer in. (Eric, 2026-09-11: every MuffinLabs Substack post gets a Note.)"""
+    print("\n-- publications: a required companion ---------------------------------")
+    import publications as pb
+    root = os.path.join(tmp, 'reqdesk'); os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    d = os.path.join(root, 'pieces', 'p1'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(root, 'publishing', 'publications.yaml'), 'w').write(
+        'publications:\n  pro:\n    name: Pro\n    outlets: [sub]\n    required_companions: [note]\n')
+    pubs, probs = pb.load(root)
+    check('required_companions: the registry parses it', not probs and
+          pubs['pro']['required_companions'] == ['note'], str(probs))
+    outs = {'sub': {'manifest_url_key': 'substack_url'}}
+    live = {'publication': 'pro', 'substack_url': 'https://x', 'outlets': ['sub']}
+    check('required_companions: a published piece with no note is caught',
+          pb.missing_companions(live, pubs, d, outs) == [('note', 'not declared')])
+    check('required_companions: an unpublished draft is not held to it',
+          pb.missing_companions({'publication': 'pro', 'outlets': ['sub']}, pubs, d, outs) == [])
+    paper = dict(live, companions={'note': 'note.md'})
+    check('required_companions: a note declared but not on disk is caught',
+          [r for r, _w in pb.missing_companions(paper, pubs, d, outs)] == ['note'])
+    open(os.path.join(d, 'note.md'), 'w').write('form: note\nstyle: v\n---\nA line.\n')
+    check('required_companions: a note on disk satisfies it',
+          pb.missing_companions(paper, pubs, d, outs) == [])
+    check('required_companions: an exemption needs a reason',
+          pb.missing_companions(dict(live, companions_exempt={'note': ''}), pubs, d, outs) ==
+          [('note', 'exempted without a reason')] and
+          pb.missing_companions(dict(live, companions_exempt={'note': 'a link post'}), pubs, d, outs) == [])
+    bad, probs2 = pb.load(root) if False else (None, None)
+    open(os.path.join(root, 'publishing', 'publications.yaml'), 'w').write(
+        'publications:\n  pro:\n    name: Pro\n    outlets: [sub]\n    required_companions: [sonnet]\n')
+    _p, probs3 = pb.load(root)
+    check('required_companions: a role that is not a companion role is refused',
+          any('required_companions' in x for x in probs3), str(probs3))
+
+
 def unit_corpus(tmp):
     """Two namespaces: a slug is unique within one, not across the desk, and a companion
     pointer resolves by role. (The talk and its essay, 2026-09-11.)"""
@@ -4653,6 +4689,20 @@ def corpus_prose():
         short += [f'{d} ({o}: {why})' for o, why in pb.missing_required(m, pubs, outlets_reg)]
     check("every published piece is on every outlet its publication requires, or says why not",
           not short, ', '.join(short[:6]))
+    # The same rule one layer in: a publication can require a companion of its published pieces.
+    # MuffinLabs requires a Note, so it is written with the piece rather than on the morning.
+    lacking = []
+    for d in sorted(os.listdir(PIECES)):
+        mp = os.path.join(PIECES, d, 'publish.yaml')
+        if not os.path.exists(mp):
+            continue
+        with open(mp, encoding='utf-8') as fh:
+            m = yaml.safe_load(fh) or {}
+        lacking += [f'{d} ({role}: {why})'
+                    for role, why in pb.missing_companions(m, pubs, os.path.join(PIECES, d),
+                                                           outlets_reg)]
+    check("every published piece carries the companions its publication requires, or says why not",
+          not lacking, ', '.join(lacking[:6]))
     # `publish_at:` is a refusal, so a manifest the gate cannot read is a gate that is not
     # there — and a piece that is already live cannot also be waiting to go live.
     import schedule as sched
@@ -4949,6 +4999,7 @@ def main():
         unit_link_extraction()
         unit_review_artifact(tmp)
         unit_corpus(tmp)
+        unit_required_companions(tmp)
         unit_schedule(tmp)
         unit_scripture(tmp)
         unit_pages(tmp)

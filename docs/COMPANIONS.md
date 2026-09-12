@@ -160,3 +160,31 @@ name as an example. Content is.
 
 Findings can anchor in a Note's text exactly as they do in the prose, and `--apply` writes them into
 the companion file. A talk is reviewed on its own page; its companion card links the two.
+
+## A publication can require one
+
+A companion that is only a convention is written when somebody remembers. **`required_companions:`
+in `publishing/publications.yaml` makes it a rule of the publication**, checked of its *published*
+pieces the way `required_outlets` already is:
+
+```yaml
+muffinlabs:
+  required_companions: [note]     # every MuffinLabs Substack post gets a Note
+```
+
+(Eric, 2026-09-11: *"lets create a companion note and make that the default behavior for muffinlabs
+substack posts."*)
+
+**Why a Note in particular.** It is posted on the day a piece goes live, which is the worst moment
+to be writing one: the piece is out, the author is reading the post rather than composing an
+announcement, and the Note that gets written then is a summary of the piece instead of the piece's
+own best lines. Required, it is drafted *with* the piece and reviewed alongside it — and it shows up
+on the piece's review page, where it can be judged next to the prose it announces.
+
+**A draft is not held to it**, exactly as with outlets: the check reads liveness by the piece's own
+outlet's manifest key and asks nothing of a piece that has not published. A piece that genuinely
+should not have one opts out **with a reason** — `companions_exempt: {note: "<why>"}` — because the
+rule is *every piece, unless the author says otherwise*, and the saying has to be written down.
+
+The suite gates it (`corpus_prose`), so CI and the pre-push hook refuse a push that publishes a
+piece without the companion its publication requires.

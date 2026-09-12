@@ -640,6 +640,20 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    on every outlet that carries tags. A tag the vocabulary does not define is not a warning —
    `tags.py check` fails, and `md_to_site.py` refuses to export it.
 
+0f. **Does its publication require a companion?** A Note is posted the day a piece goes live, and
+   a publication can require one of every published piece (`required_companions:` in
+   `publishing/publications.yaml`; MuffinLabs requires a Note).
+
+   ```
+   python3 framework/tools/companions.py list <slug>      # what it declares, and whether it resolves
+   ```
+
+   **Say so before composing, not after publishing.** The corpus gate only fires once the piece is
+   live — which is the morning the Note is due, and the worst moment to write one. A required Note
+   missing here is a stop-and-ask, and the answer is either a `note.md` written with the piece or an
+   exemption with a reason (`companions_exempt: {note: "<why>"}`).
+   [`framework/docs/COMPANIONS.md`](../../docs/COMPANIONS.md) has the rule.
+
 ## Steps — composing the body
 
 **Two transports, and the choice is the surface, not the quality.** On the **built-in pane**

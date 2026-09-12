@@ -198,6 +198,16 @@ def load(root, explicit=None):
         if stray:
             problems.append(f'{pid}: required_outlets {stray} are not among its own outlets')
         entry['required_outlets'] = [o for o in req if o in entry['outlets']]
+        # Companions EVERY published piece of this publication must carry, unless the piece
+        # records why not. The same shape as required_outlets, one layer in: a Note is written
+        # with the piece rather than remembered on the morning it goes live.
+        rc = e.get('required_companions') or []
+        if not isinstance(rc, list) or not all(isinstance(x, str) for x in rc):
+            problems.append(f'{pid}: required_companions must be a list of roles'); rc = []
+        stray = [c for c in rc if c not in ('note', 'talk')]
+        if stray:
+            problems.append(f'{pid}: required_companions {stray} are not companion roles')
+        entry['required_companions'] = [c for c in rc if c not in stray]
         t = e.get('tags')
         entry['tags'] = os.path.join(root, t) if isinstance(t, str) and t.strip() else \
             os.path.join(root, 'publishing', 'tags', f'{pid}.yaml')
@@ -243,6 +253,42 @@ def missing_required(man, pubs, outlets=None):
         if isinstance(why, str) and why.strip():
             continue
         out.append((o, 'exempted without a reason' if o in exempt else 'not declared'))
+    return out
+
+
+def missing_companions(man, pubs, piece_dir, outlets=None):
+    """-> [(role, why)] for a PUBLISHED piece: each companion its publication requires that the
+    piece neither declares nor exempts. `companions_exempt: {note: "reason"}` opts out, with a
+    reason, for the same cause as outlets_exempt: the rule is "every piece, unless the author
+    says otherwise", and the saying has to be written down. A draft is not held to it.
+
+    Published is read the same way `missing_required` reads it — by the piece's OWN outlet's
+    manifest key — so this asks nothing of a piece that has not gone live."""
+    if not pubs or not man:
+        return []
+    if outlets is None:
+        live = man.get('public_url')
+    else:
+        import check_status as cs
+        live = cs.live_url(man, outlets)
+    if not live:
+        return []
+    e = pubs.get(man.get('publication') or '')
+    if not e:
+        return []
+    declared = man.get('companions') if isinstance(man.get('companions'), dict) else {}
+    exempt = man.get('companions_exempt') if isinstance(man.get('companions_exempt'), dict) else {}
+    out = []
+    for role in e.get('required_companions') or []:
+        target = declared.get(role)
+        if isinstance(target, str) and target.strip():
+            if role == 'note' and not os.path.exists(os.path.join(piece_dir, target.strip())):
+                out.append((role, f'declares {target.strip()}, which is not on disk'))
+            continue
+        why = exempt.get(role)
+        if isinstance(why, str) and why.strip():
+            continue
+        out.append((role, 'exempted without a reason' if role in exempt else 'not declared'))
     return out
 
 

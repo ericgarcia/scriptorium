@@ -4718,8 +4718,17 @@ def corpus_prose():
             continue
         with open(os.path.join(pdir, 'publish.yaml'), encoding='utf-8') as fh:
             m = yaml.safe_load(fh) or {}
-        if st == 'embargoed' and (m.get('published_at') or live_url(m)):
-            faults.append(f'{d}: embargoed until {sched.fmt(moment)}, but it is already published')
+        # "Live AND embargoed" stopped being a contradiction the day an outlet could be
+        # `on_schedule: immediate`: a piece is published on its canonical site the moment it is
+        # ready and still waits for its feed outlets. The contradiction is narrower now — live on
+        # an outlet that was supposed to WAIT — and asking the old question failed the first
+        # canonical-first publication for doing exactly what it was told.
+        waited_on = [o for o, cfg in (outlets_reg or {}).items()
+                     if cfg.get('manifest_url_key') and m.get(cfg['manifest_url_key'])
+                     and sched.policy_for(outlets_reg, o) != 'immediate']
+        if st == 'embargoed' and waited_on:
+            faults.append(f'{d}: embargoed until {sched.fmt(moment)}, but it is already live on '
+                          f'{", ".join(waited_on)}, which waits for the moment')
     check("every publish_at is a readable moment, and no live piece is still embargoed",
           not faults, '; '.join(faults[:5]))
 
@@ -4765,6 +4774,20 @@ def corpus_commonmark():
           not found, '; '.join(found[:4]))
 
 
+def on_substack(man):
+    """Is this piece live on a Substack outlet? An outlet is Substack-shaped when it carries an
+    `account_handle` — the account the guard checks before any write — and the piece is live
+    there when its manifest holds that outlet's own url key."""
+    outlets, _legacy = corpus_outlets()
+    for _name, cfg in (outlets or {}).items():
+        if not cfg.get('account_handle'):
+            continue
+        key = cfg.get('manifest_url_key')
+        if key and man.get(key):
+            return True
+    return False
+
+
 def corpus_baselines():
     print("\n-- corpus: published pieces match their baselines -----------------")
     pieces_dir = PIECES
@@ -4778,6 +4801,14 @@ def corpus_baselines():
         man = read_manifest(os.path.join(d, 'publish.yaml'))
         if not live_url(man):
             continue                                              # composed drafts are not live
+        # A baseline is the THREE-WAY SYNC's record of what Substack last held, and it exists
+        # because Substack's editor is a second writer that can change a post out from under the
+        # desk. A piece live only on a store-served site has no second editor: the store copy is
+        # regenerated from this draft every publish, so there is nothing to merge against and a
+        # missing baseline is not a fault. Asked of every live piece, this failed the first
+        # canonical-first publication — live on the blog, Substack still scheduled for Tuesday.
+        if not on_substack(man):
+            continue
         pub += 1
         base = load_baseline(d)
         if base is None:

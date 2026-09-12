@@ -57,14 +57,43 @@ def banner(man, outlets=None):
     nowhere: `*Published 2026-09-11 · [Title]() —*`. Its `canonical:` wins when it records
     one, because that is the piece saying which of its addresses is home.
     """
-    url, title = cs.live_url(man, outlets or {}), man.get('title', '')
+    url = cs.live_url(man, outlets or {})
+    # A YAML title is often quoted; the quotes are the file's, not the piece's, and they
+    # were landing inside the link text as ["Title"].
+    title = str(man.get('title', '')).strip().strip('"\'')
     date = man.get('published_at', '')
-    return '\n'.join([
-        f"*Published {date} · [{title}]({url}) —",
-        "this file is the source of record for the live post.",
-        "Edits here are not live until pushed (`substack_sync push`),",
-        "and `substack_verify --fresh` confirms they landed.*",
-    ])
+    # HOW AN EDIT REACHES READERS DEPENDS ON WHERE THE PIECE IS HOME, and until the
+    # professional line published canonically to a site, every piece here was Substack's.
+    # A store-served canonical has no push and no substack_verify: the edit is re-exported
+    # and re-published, and the live page is what confirms it. Saying the Substack sentence
+    # over a blog piece tells its next editor to run a command that does not apply to it.
+    if _is_substack_home(man, outlets or {}):
+        how = ["Edits here are not live until pushed (`substack_sync push`),",
+               "and `substack_verify --fresh` confirms they landed.*"]
+    else:
+        how = ["Edits here are not live until the piece is exported and published again",
+               "(`md_to_site.py` → `bundle_pieces.py` → `store_publish.py`);",
+               "the live page is what confirms it landed.*"]
+    return '\n'.join([f"*Published {date} · [{title}]({url}) —",
+                       "this file is the source of record for the live post."] + how)
+
+
+def _is_substack_home(man, outlets):
+    """Is the piece's HOME a Substack outlet? A Substack outlet is one carrying an
+    `account_handle` — the account its writes are guarded against. `canonical:` wins when the
+    piece records one, which is the piece saying which of its addresses is home.
+
+    UNKNOWN ANSWERS YES, and that is the conservative direction rather than the tidy one: a
+    desk with no outlets registry is the framework's starter shape, one Substack publication
+    keyed on `public_url`, and every header ever written here says the Substack sentence. Only
+    a home that positively matches a registered NON-Substack outlet gets the other one, so this
+    change moves the two blog-canonical pieces and leaves everything else exactly as it was."""
+    home = str(man.get('canonical') or cs.live_url(man, outlets) or '')
+    for _name, cfg in (outlets or {}).items():
+        base = str(cfg.get('reader_base') or '').rstrip('/')
+        if base and home.startswith(base):
+            return bool(cfg.get('account_handle'))
+    return True
 
 
 def rewrite(src, man, outlets=None):

@@ -153,6 +153,24 @@ def landed_on_not_found(final_url, outlet_cfg):
     return any(m in (final_url or '') for m in markers)
 
 
+def pending_until(piece_dir, outlet_cfg):
+    """-> the moment this piece is due on THIS outlet, if that moment is still ahead; else None.
+
+    One field, read two ways, which is the point: `publish_at` is the piece's moment, and an
+    outlet's `on_schedule` decides whether it waits for it. A canonical site is `immediate` and
+    is live now; a feed outlet is `at_moment` and is absent on purpose until then. Anything
+    else — no moment, an unreadable one, an immediate outlet — answers None, so the absence is
+    audited rather than excused."""
+    if str((outlet_cfg or {}).get('on_schedule') or '').strip().lower() == 'immediate':
+        return None
+    try:
+        import schedule
+        st, moment = schedule.state(piece_dir)
+    except Exception:
+        return None                                   # unreadable: audit it rather than excuse it
+    return schedule.fmt(moment) if st == 'embargoed' else None
+
+
 def slug_of(manifest, piece_name, outlet_cfg):
     """The piece's address on this outlet: the manifest's own URL if it records one,
     else reader_base + the slug. A recorded URL always wins — a piece whose live slug
@@ -424,7 +442,7 @@ def main():
         die(1, f"no publish.yaml under {a.pieces}")
 
     # ---- forward: declared + published -> must resolve -----------------------
-    jobs, unrecorded = [], []
+    jobs, unrecorded, scheduled_later = [], [], []
     for pc in pieces:
         for oname in pc['declared']:
             if oname not in outlets:
@@ -435,14 +453,39 @@ def main():
             if url:
                 jobs.append((pc, oname, url))
             elif outlets[oname].get('derive') is False:
-                unrecorded.append((pc['name'], oname, outlets[oname].get('manifest_url_key')))
+                # A piece can be live on its canonical and not yet on its syndicated outlets:
+                # the canonical publishes immediately (a store publish has no scheduler) while
+                # Substack and LinkedIn are scheduled on their own platforms for a later moment.
+                # That is the ordinary shape of a scheduled publication, not a hole in the record
+                # — so `syndication_at` in the future reads as PENDING, and the day it passes the
+                # same piece reads as UNRECORDED again. (The pattern, 2026-09-11: canonical first,
+                # the rest on each platform's own scheduler.)
+                when = pending_until(os.path.join(a.pieces, pc['name']), outlets[oname])
+                if when:
+                    scheduled_later.append((pc['name'], oname, when))
+                else:
+                    unrecorded.append((pc['name'], oname, outlets[oname].get('manifest_url_key')))
 
     results, unreachable, previews = [], 0, []
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for (pc, oname, url), (status, body, final) in zip(
                 jobs, ex.map(lambda j: fetch(j[2]), jobs)):
             ok = status == 200 and not landed_on_not_found(final, outlets[oname])
-            row = {'piece': pc['name'], 'outlet': oname, 'url': url,
+            # Not there YET is not the same as missing. A piece goes canonical-first — the
+            # canonical has no scheduler, the syndicated outlets have their own — so between
+            # the two moments the syndicated copy is absent BY DESIGN. Excused only for an
+            # outlet that is not this piece's canonical, and only while `syndication_at` is
+            # still ahead: the day it passes, the same absence is a finding again.
+            later = None
+            if not ok:
+                canon = str(pc['manifest'].get('canonical') or '')
+                obase = str(outlets[oname].get('reader_base') or '').rstrip('/')
+                is_canonical_outlet = bool(canon and obase and canon.startswith(obase))
+                if not is_canonical_outlet:
+                    later = pending_until(os.path.join(a.pieces, pc['name']), outlets[oname])
+                    if later:
+                        scheduled_later.append((pc['name'], oname, later))
+            row = {'piece': pc['name'], 'outlet': oname, 'url': url, 'scheduled_for': later,
                    'status': status, 'ok': ok,
                    'redirected': final.rstrip('/') != url.split('?')[0].rstrip('/'),
                    'final': final}
@@ -476,15 +519,28 @@ def main():
             base = oc.get('reader_base', '').rstrip('/')
             live = set()
             for loc in re.findall(r'<loc>([^<]+)</loc>', body):
-                if base and loc.rstrip('/').startswith(base) and loc.rstrip('/') != base:
-                    live.add(loc.rstrip('/').split('/')[-1])
+                u = loc.rstrip('/')
+                if not base or not u.startswith(base) or u == base:
+                    continue
+                rest = u[len(base):].strip('/')
+                # A piece lives at <reader_base>/<slug>, one segment deep. Anything deeper is
+                # the site's own index — /blog/tag/<tag>, and whatever it adds next — and calling
+                # those unknown pieces is the audit inventing a problem. Found the day the first
+                # MuffinLabs tags shipped, when three tag pages read as three missing pieces.
+                if '/' in rest:
+                    continue
+                live.add(rest)
             reverse[oname] = {'live': live, 'unknown': sorted(live - known_on(pieces, oc))}
 
     # ---- report --------------------------------------------------------------
     stale = [r for r in results
              if r.get('content') and r['content']['missing']]
     no_preview = [r for r in results if r.get('preview')]
-    missing = [r for r in results if not r['ok'] and r['status'] is not None]
+    # A copy whose own platform has it scheduled is absent but not missing — reported on its
+    # own line above, and counted apart so the summary stays literally true.
+    not_yet = [r for r in results if not r['ok'] and r.get('scheduled_for')]
+    missing = [r for r in results
+               if not r['ok'] and r['status'] is not None and not r.get('scheduled_for')]
     unreach = [r for r in results if r['status'] is None]
     pending = [pc for pc in pieces if pc['declared'] and not pc['published']]
     undeclared = []
@@ -509,7 +565,9 @@ def main():
     if not a.quiet:
         print(f"auditing {len(pieces)} piece(s) across {len(outlets)} outlet(s)  [cache-busted]")
         for r in sorted(results, key=lambda x: (x['piece'], x['outlet'])):
-            mark = 'ok  ' if r['ok'] else 'MISS'
+            # 'MISS' on a copy its own platform has scheduled would read as a fault; it is
+            # an absence with a date on it.
+            mark = 'ok  ' if r['ok'] else ('sched' if r.get('scheduled_for') else 'MISS')
             c = r.get('content')
             extra = ''
             if c is not None:
@@ -524,7 +582,8 @@ def main():
 
     legacy_n = sum(1 for pc in pieces if pc['legacy'])
     print()
-    print(f"{len(results) - len(missing) - len(unreach)} present, {len(missing)} missing, "
+    print(f"{len(results) - len(missing) - len(unreach) - len(not_yet)} present, "
+          f"{len(not_yet)} scheduled, {len(missing)} missing, "
           f"{len(unreach)} unreachable across {len(outlets)} outlet(s)")
     if pending:
         print(f"  {len(pending)} piece(s) declare an outlet but are not published yet "
@@ -542,6 +601,8 @@ def main():
             print(f"  reverse {oname}: all {len(info['live'])} live URL(s) are known to the desk")
     for name, oname in lying:
         print(f"  UNDECLARED  {name} records a {oname} URL but does not list {oname} in `outlets:`")
+    for name, oname, when in scheduled_later:
+        print(f"  scheduled   {name} is not on {oname} yet — its own scheduler has it for {when}")
     for name, oname, key in unrecorded:
         print(f"  UNRECORDED  {name} is published and declares {oname}, whose URLs cannot be "
               f"derived — record it under `{key}` or the copy is unaudited")

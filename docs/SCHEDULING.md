@@ -170,6 +170,43 @@ is the rule:
 > Note is composed *after* the post is live. `substack_notes.py text <slug> --post-url <url>`
 > builds the scheduled version for the case where a plain link is acceptable.
 
+## The Note goes by a scheduled task, and that is the house default
+
+(Eric, 2026-09-11: *"ok lets formalize using the claude-app task for notes."*)
+
+A Note is the one piece of a scheduled publication that **cannot** use its platform's scheduler
+properly, for the reason measured above: Substack will not attach an unpublished post, so a Note
+scheduled ahead carries a plain link where the card belongs. So the Note is posted **after** the
+post is live, by a one-shot scheduled task in the Claude app:
+
+```
+python3 framework/tools/substack_notes.py task <slug> --post-url <the post's URL> --at "<moment>"
+```
+
+prints a **self-contained prompt** — a scheduled session has no memory of the conversation that
+armed it — and the task is created for a few minutes after the post's own moment. Record it like
+any other schedule: `schedule.py record <piece> --outlet note --where "Claude app task <id>"
+--approved "<who, when>"`.
+
+**What the prompt refuses to do, and why each one is in it:**
+
+| the guard | what it prevents |
+|---|---|
+| Fetch the post cache-busted and require the **body**, not the teaser | announcing a post nobody can read, if Substack runs late |
+| `substack_notes.py status` first; stop if a Note is recorded | a second Note — there is one per post, ever |
+| The composer snippet's **sha256 must equal the tool's** | a Note that is not the text the author read |
+| **`card` must be true** | the exact failure this whole arrangement exists to avoid |
+| Name the browser and confirm the account before composing | posting under the other publication's byline |
+| Stop and report on any refusal | a half-finished public act with nobody watching |
+
+**The authorization is specific and the prompt says so**: the author approved *this* Note, whose
+text he had already read. It does not extend to rewriting it or posting a different one.
+
+**Two caveats worth saying out loud.** The task runs while the app is open — if it is closed at
+the moment, it runs at next launch, which for a Note is late but harmless. And a task's first run
+may pause on tool permissions; *Run now* on a task that has nothing to do is the cheap way to
+pre-approve them.
+
 ## Nothing here fires by itself
 
 Deliberately. `schedule.py` compares a moment to now; it owns no clock and starts no

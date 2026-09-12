@@ -183,6 +183,56 @@ def read_note(piece_dir, post_url):
     return note_paragraphs(comp) + [post_url], []
 
 
+TASK_PROMPT = """\
+Post the Substack Note for {slug} — "{title}".
+
+You are a scheduled session with no memory of how this was arranged. Everything you need is
+here and in the piece. The desk is {root}. Do not improvise past this list.
+
+WHY A TASK AND NOT A SCHEDULED NOTE: Substack will not attach a post that has not published, so
+a Note composed ahead of time carries a plain link where the post's card belongs. Posting it
+after the post is live is the only way to get the card. (Eric, 2026-09-11, formalizing it.)
+
+1. The post must be LIVE first. Fetch {post_url} cache-busted and confirm it serves the piece —
+   the BODY, not the scheduled-post teaser (the teaser carries the title and og: tags and no
+   body). If it is not live, STOP and say so; do not post a Note announcing a post nobody can
+   read. It was scheduled for {moment}; if it is late, that is Substack's business, not yours to
+   work around.
+2. Check the Note has not already gone out:
+   `python3 framework/tools/substack_notes.py status` — if this piece already records a
+   `substack_note:`, STOP. One Note per post, ever.
+3. Build it, and never retype it:
+   `python3 framework/tools/substack_notes.py text {slug}`
+   That prints the paragraphs, a sha256, and a composer snippet. The Note's text is note.md plus
+   the post's URL as the last paragraph.
+4. Open the Notes composer at https://substack.com/home (the "What's on your mind?" box), signed
+   in as the piece's own Substack account, and run the printed snippet. It refuses unless exactly
+   one composer is open and empty. It returns {{sha256, card, postEnabled}}:
+   - the sha256 MUST equal the tool's, or stop;
+   - `card` MUST be true — that is the post's card, and getting it is the whole reason this runs
+     after the post is live rather than before;
+   - Post must be enabled.
+5. Click Post. Then record and verify:
+   `python3 framework/tools/substack_notes.py record {slug}` (it takes the id from the public
+   feed — exactly one Note must name the post, or it writes nothing), then
+   `python3 framework/tools/substack_notes.py verify {slug}`.
+6. Commit the manifest by path, and tell Eric what went out with the Note's URL.
+
+IF ANYTHING REFUSES, STOP AND REPORT. A Note is public the moment Post is clicked and there is no
+second one. Eric authorized this posting in advance, on 2026-09-11, for a Note whose text he had
+already read; that authorization does not extend to rewriting the Note or posting a different one.
+"""
+
+
+def cmd_task(slug, piece_dir, post_url, moment, root):
+    """The self-contained prompt for a scheduled session that posts this Note after the post
+    goes live. Generated rather than typed, so a moved moment or a renamed piece cannot leave a
+    stale instruction inside a prompt nobody re-reads."""
+    man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    title = str(man.get('title') or '').strip().strip('"\'')
+    return TASK_PROMPT.format(slug=slug, title=title, post_url=post_url, moment=moment, root=root)
+
+
 def note_hash(paras):
     """What the composer must echo back: paragraph texts joined by a blank line. Computed
     from the editor's JSON on the page side, so it cannot depend on getText()'s separator."""
@@ -317,10 +367,11 @@ def config(args, outlet=None):
 # ------------------------------------------------------------------------ main
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('cmd', choices=['status', 'next', 'text', 'record', 'verify', 'probe'])
+    ap.add_argument('cmd', choices=['status', 'next', 'text', 'record', 'verify', 'probe', 'task'])
     ap.add_argument('slugs', nargs='*')
     ap.add_argument('--pieces', default=default_pieces())
     ap.add_argument('--url', help='record: the Note URL (or c-<id>)')
+    ap.add_argument('--at', help='task: the moment the post was scheduled for')
     ap.add_argument('--post-url', help="text: the post's public URL, for a Note SCHEDULED "
                                        "beside a post that is not live yet (a scheduled post "
                                        "already has its slug)")
@@ -407,6 +458,19 @@ def main(argv=None):
         print(json.dumps({'slug': p['slug'], 'title': p['title'], 'paragraphs': paras,
                           'sha256': note_hash(paras), 'js': composer_js(paras, p['title'])},
                          indent=2, ensure_ascii=False))
+        return 0
+
+    if args.cmd == 'task':
+        if len(args.slugs) != 1:
+            ap.error('task takes one slug')
+        if not args.post_url:
+            ap.error('task needs --post-url (a scheduled post has its slug already)')
+        d = os.path.join(args.pieces, os.path.basename(args.slugs[0].rstrip('/')))
+        if not os.path.isdir(d):
+            ap.error(f'no such piece: {args.slugs[0]}')
+        print(cmd_task(os.path.basename(d), d, args.post_url,
+                       args.at or 'the moment in publish.yaml',
+                       os.path.dirname(os.path.abspath(args.pieces))))
         return 0
 
     if args.cmd == 'record':

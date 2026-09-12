@@ -48,6 +48,24 @@ rule is stated positively.
 
 **It is house prose too**, so the voice's sweeps govern it, and it is re-swept after it changes.
 
+### Every figure gets one, by default
+
+**A figure carries a caption unless there is a reason it does not.** Not only the hero — every
+image in the body. (Eric, 2026-09-11, on a redraft whose one figure had alt text and nothing
+else: *"the figure should have a caption. (and this should be the default behavior)"*.)
+
+The reason it is a default rather than a judgment each time: a figure is introduced by the
+sentence before it and read by the sentence after it, so its caption is the one line that
+survives a reader who is skimming — and skimming past a figure is what readers do. A drafting
+pass that writes alt text and stops has given the screen-reader user a description and the
+sighted reader nothing.
+
+Captions live in `publish.yaml` under `captions:`, keyed by the image's local path, beside
+`cover_caption:` for the hero. `md_to_substack` emits them on compose; `substack_captions.py`
+sets them on a post composed before that existed. The caption rules above govern them — what
+the image represents in *this* piece, never a re-description, a provenance note, or a line
+lifted from the body.
+
 ## Length
 
 As long as the image is informative and no longer. A photograph is usually a sentence. **A chart

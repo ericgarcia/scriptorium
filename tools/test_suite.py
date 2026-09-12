@@ -470,10 +470,10 @@ def unit_quotes_false_positives(tmp):
 
     # (2) OCR SPLIT WORDS. The held scan reads "je sus christ"; the draft has
     # "Jésus-Christ". Reported as drift, and the drift was the scanner's.
-    check('quotes: an accented word normalizes to one word, not two',
-          cq.norm('Jésus-Christ') == 'jesus christ', cq.norm('Jésus-Christ'))
-    scan = 'a review of the spirit ual exercises of loyola was published that year'
-    st, _, detail, _ = cq.find('the spiritual exercises of Loyola', scan, [(0, '1')],
+    check('quotes: an accented word normalizes without splitting',
+          cq.norm('Rhône-Café') == 'rhone cafe', cq.norm('Rhône-Café'))
+    scan = 'a notice of the quiet ude of evening was printed in that year'
+    st, _, detail, _ = cq.find('the quietude of evening', scan, [(0, '1')],
                                None, scan.replace(' ', ''))
     check('quotes: a word the held OCR split is still a match',
           st == 'MATCH' and 'word breaks' in detail, f'{st}: {detail}')
@@ -481,13 +481,13 @@ def unit_quotes_false_positives(tmp):
     # (3) DEGRADED OCR. BDB's scan reads "is able to do anything with e3ris". A
     # quotation checked against that is reported as drift; the right answer is that
     # the held copy cannot be compared against here.
-    garble = ('a lmh f y g m ib is able to do anything with e3ris 4 cf ay n '
+    garble = ('q vbn f y g m ib is able to do anything with e3ris 4 cf ay n '
               'i2 the s3 w o rd 7b i and e ris n o t')
     check('quotes: a degraded OCR window is recognized as illegible',
           cq.ocr_garbled(garble), garble[:60])
     check('quotes: ordinary prose is not called illegible',
-          not cq.ocr_garbled('and he said unto them ye are they which justify '
-                             'yourselves before men but god knoweth your hearts'))
+          not cq.ocr_garbled('the keeper set the lamp down beside the door and waited '
+                             'there until the household had finished its evening meal'))
 
     # PAGE CITATIONS ARE CALIBRATED, NOT COMPARED. A `pages` index counts PDF pages and
     # a footnote cites the printed leaf; front matter puts a constant between them.
@@ -510,29 +510,35 @@ def unit_quotes(tmp):
         'check_quotes', os.path.join(os.path.dirname(__file__), 'check_quotes.py'))
     cq = importlib.util.module_from_spec(spec); spec.loader.exec_module(cq)
 
-    src = ('arouse yourselves from the snare of the senses that is engulfing you awake '
-           'from your lethargy before it is too late and the individual may draw any '
-           'quantity he desires to himself by the use of that law')
+    # INVENTED PROSE, ON PURPOSE. An earlier version of these fixtures quoted the real
+    # sources on the shelf, which put copyrighted text from restricted references into
+    # the shareable framework repo — the exact thing voice_privacy.py exists to catch,
+    # and it caught it. A checker's tests need strings of the right SHAPE, never the
+    # right provenance. (2026-09-11.)
+    src = ('rouse the sleepers from the long habit of the couch that is holding them '
+           'stand up from your idleness before the hour is gone and the keeper may draw '
+           'any measure he wishes to himself by the use of that rule')
     offsets = [(0, '29')]
 
     # A paragraph carries several quotations and several markers; a span belongs to the
     # marker that FOLLOWS it. Handing every span to every marker checked one book's
     # sentence against another book and reported both as drift.
-    paras = ['Here is 1934: *thought is the only thing*[^a] And here is 2006: '
-             '*you are a creator and there is an easy process*[^b]']
+    paras = ['Here is the first: *a lamp is the only thing*[^a] And here is the second: '
+             '*you are a builder and there is a simple method*[^b]']
     by = cq.body_spans_by_marker(paras)
     check('quotes: a body span goes to the marker that follows it',
-          by.get('a') == ['thought is the only thing']
-          and by.get('b') == ['you are a creator and there is an easy process'])
+          by.get('a') == ['a lamp is the only thing']
+          and by.get('b') == ['you are a builder and there is a simple method'])
 
     check('quotes: an exact quotation matches',
-          cq.find('awake from your lethargy', src, offsets)[0] == 'MATCH')
+          cq.find('stand up from your idleness', src, offsets)[0] == 'MATCH')
 
     # The house marks an elision with an ellipsis. A quotation that drops words
     # silently is neither a match nor a misquotation; it is its own finding.
-    st, _, detail, _ = cq.find('Arouse yourselves. Awake from your lethargy.', src, offsets)
+    st, _, detail, _ = cq.find('Rouse the sleepers. Stand up from your idleness.',
+                               src, offsets)
     check('quotes: words in order with a dropped passage is UNMARKED ELISION',
-          st == 'UNMARKED ELISION' and 'snare of the senses' in detail, detail)
+          st == 'UNMARKED ELISION' and 'habit of the couch' in detail, detail)
 
     # An italic run with nothing in common is the author's own emphasis, not a
     # quotation that went missing.
@@ -541,7 +547,7 @@ def unit_quotes(tmp):
 
     # A real misquotation still has to be caught.
     check('quotes: a changed word inside a real quotation is DRIFT',
-          cq.find('awake from your slumber before it is too late', src, offsets)[0]
+          cq.find('stand up from your slumber before the hour is gone', src, offsets)[0]
           in ('DRIFT', 'NOT FOUND'))
 
     # A title is not a quotation.
@@ -556,23 +562,23 @@ def unit_quotes(tmp):
           str(cq.spans('the argument is simple: **There cannot be two infinites** '
                        'and that is the whole of it')))
     check('quotes: a real italic quotation beside bold is still found',
-          any('awake from your lethargy' in x for x in
-              cq.spans('**Not a quote.** He wrote *awake from your lethargy today*')))
+          any('stand up from your idleness' in x for x in
+              cq.spans('**Not a quote.** He wrote *stand up from your idleness today*')))
     check('quotes: bold does not shift the marker a span is attributed to',
           cq.body_spans_by_marker(
-              ['**Bold prose here.** He wrote *awake from your lethargy now*[^a]']
-          ).get('a') == ['awake from your lethargy now'])
+              ['**Bold prose here.** He wrote *stand up from your idleness now*[^a]']
+          ).get('a') == ['stand up from your idleness now'])
 
     check('quotes: an italic book title is recognized as a title',
-          cq.looks_like_a_title('Thought Vibration, or the Law of Attraction in the '
-                                'Thought World'))
+          cq.looks_like_a_title('Lantern Papers, or the Rule of Attention in the '
+                                'Quiet House'))
     check('quotes: ordinary quoted prose is not',
-          not cq.looks_like_a_title('awake from your lethargy before it is too late'))
+          not cq.looks_like_a_title('stand up from your idleness before the hour is gone'))
 
     # A PDF interleaves running page numbers with the prose.
-    numbered = 'the thought and feeling 28 is that instant stamped upon it'
+    numbered = 'the measure and the moment 28 is that instant marked upon it'
     check('quotes: an interleaved page number is not drift',
-          cq.find('the thought and feeling is that instant stamped upon it',
+          cq.find('the measure and the moment is that instant marked upon it',
                   numbered, [(0, '32')], cq.denumbered(numbered))[0] == 'MATCH')
 
 

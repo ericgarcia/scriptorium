@@ -273,8 +273,9 @@ def stream_for(src):
 def ocr_garbled(window):
     """Is this stretch of the held copy too degraded to compare words against?
 
-    BDB's scan reads *"is able to do anything with e3ris"*. A quotation checked against
-    that is reported as drift, and the drift is the scanner's. The signal is crude and
+    A degraded lexicon scan comes back as letter-and-digit salad with a few real words
+    stranded in it. A quotation checked against that is reported as drift, and the drift
+    is the scanner's. The signal is crude and
     needs no dictionary: real prose is mostly ordinary words: short fragments and
     letter-digit salad are what a bad OCR layer produces.
     (Suggested by the session that ran this tool across the corpus, 2026-09-11.)
@@ -291,8 +292,8 @@ def denumbered(stream):
     """The same stream with standalone digit runs removed.
 
     A PDF's text layer interleaves running page numbers with the prose, so a correct
-    13-word quotation reads "…thought and feeling 28 is that instant…" in the index
-    and is reported as drift at the number. Matching against this variant is a
+    13-word quotation comes back with a bare page number sitting in the middle of the
+    sentence and is reported as drift at that number. Matching against this variant is a
     second attempt, never the first, and a hit is REPORTED as one so the reader knows
     the source's own stream had something in the middle of the sentence.
     """
@@ -342,8 +343,8 @@ def in_order_with_gaps(words, stream):
     """Do the draft's words appear in the source in order, with material between them?
 
     This house marks an elision with an ellipsis. A quotation that silently drops words
-    reads to a reader as contiguous source text and is not — *Arouse yourselves. Awake
-    from your lethargy.* sets side by side two clauses twelve words apart in the book.
+    reads to a reader as contiguous source text and is not: two clauses a dozen words
+    apart in the source, set side by side with nothing between them.
     That is not drift (nothing is misquoted) and it is not a match; it is its own thing,
     and it is the finding a reader of the published piece would care about most.
     """
@@ -408,8 +409,8 @@ def find(span, stream, offsets, _denum=None, _despaced=None):
                     gaps0 = None
             if gaps0 and all(ocr_garbled(g) or len(g.split()) <= 2 for g in gaps0):
                 # A Calibre PDF interleaves running heads and marginal noise with the
-                # prose ("r h e m 0 n 0 m v t h"), and that lands BETWEEN two halves of
-                # a perfectly contiguous quotation. The author elided nothing; the text
+                # prose as letter salad, and that lands BETWEEN two halves of a
+                # perfectly contiguous quotation. The author elided nothing; the text
                 # layer did. Report the match and say what was stepped over.
                 return ("MATCH", R.locate(offsets, at),
                         "whole, once the held copy's interleaved page furniture is "

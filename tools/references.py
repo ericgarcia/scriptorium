@@ -318,19 +318,19 @@ def norm(t):
     checkers do not disagree about what 'the same words' means — but WITHOUT its
     bracket-stripping, which is a King James convention and not a general one."""
     # Drop combining marks rather than letting the punctuation strip turn them into
-    # spaces. NFKD splits "Jésus" into "Je" + a combining acute + "sus", and the
-    # character class below then made it "je sus" — so an accented word silently
-    # became two, and matched neither the source nor itself. (2026-09-11.)
+    # spaces. NFKD splits an accented letter into its base plus a combining mark, and
+    # the character class below then turned the mark into a space — so any accented
+    # word silently became two, and matched neither the source nor itself. (2026-09-11.)
     t = unicodedata.normalize("NFKD", t)
     t = "".join(c for c in t if not unicodedata.combining(c))
     t = t.replace("’", "'").replace("‘", "'")
     t = t.replace("“", '"').replace("”", '"')
     t = t.replace("—", " ").replace("–", " ").replace("‐", "-")
     t = re.sub(r"[^a-z0-9' ]+", " ", t.lower())
-    # An apostrophe is a letter inside a word (it's, Elisha's) and punctuation
-    # everywhere else. Keeping it everywhere made ‘city of light’ in a source fail to
-    # match `city of light` in a draft — reported as DRIFT, and it was a quotation mark.
-    # (Measured 2026-09-11, first run of check_quotes against Unveiled Mysteries.)
+    # An apostrophe is a letter inside a word (it's, the keeper's) and punctuation
+    # everywhere else. Keeping it everywhere made a phrase in single quotation marks in
+    # a source fail to match the same phrase unquoted in a draft — reported as DRIFT,
+    # and the difference was a quotation mark. (Measured 2026-09-11, first corpus run.)
     t = re.sub(r"(?<![a-z0-9])'|'(?![a-z0-9])", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 

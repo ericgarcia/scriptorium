@@ -937,6 +937,18 @@ def main():
     piece_dir = args[0].rstrip('/')
     out_js = args[1] if len(args) > 1 else 'paste.js'
     man = read_manifest(os.path.join(piece_dir, 'publish.yaml'))
+    # An embargo does NOT stop a compose: a Substack draft is private, and composing
+    # early is how a scheduled publication is prepared at all. It stops the click,
+    # which is the skill's job, so this says the moment out loud where the composer
+    # will read it. schedule.py holds the field.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import schedule as _sched
+    _state, _moment = _sched.state(piece_dir)
+    if _state == 'embargoed':
+        print(f"EMBARGO: this piece is not due until {_sched.fmt(_moment)} "
+              f"({_sched.human_delta(_moment)}). Composing is fine — the draft is private. "
+              f"DO NOT CLICK PUBLISH: set Substack's own scheduled time to that moment "
+              f"instead, or come back when it opens.")
     gate_errors, gate_warnings = manifest_gate(piece_dir)
     for w in gate_warnings:
         print(f"WARNING: {w} -- the author has not signed off on this line; make sure they "

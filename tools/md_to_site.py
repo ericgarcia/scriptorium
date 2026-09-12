@@ -56,6 +56,7 @@ from md_to_substack import clean_footnote, render_reader, load_captions, caption
 import tags as tagvocab                                              # noqa: E402
 import publications as pb                                            # noqa: E402
 import check_status as cs                                            # noqa: E402
+import schedule                                                      # noqa: E402
 
 try:
     from PIL import Image
@@ -461,6 +462,15 @@ def main():
         # unpublished piece entered a bundle bound for a live site.
         if not load_manifest(p).get('published_at') and not o.include_unpublished:
             unpublished.append(p); continue
+        # A piece can be finished, dated, and still not due. `publish_at:` is a moment
+        # the piece may not be public before, and the store bundle IS public: a site
+        # reads it. So this refuses rather than skipping -- a piece deliberately named
+        # on the command line and silently dropped is how an embargo gets discovered
+        # in a week. schedule.py holds the field and the rule.
+        refusal = schedule.refuse_if_embargoed(p)
+        if refusal:
+            die(12, f'{refusal}\n'
+                    f'  -> `schedule.py list` shows every embargo on the desk.')
         selected.append(p)
     if unpublished:
         names = ', '.join(os.path.basename(x.rstrip('/')) for x in unpublished)

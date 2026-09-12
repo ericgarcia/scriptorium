@@ -158,6 +158,20 @@ A published draft must be **critiqued**, carry **verified** claims, and carry **
 notes. The converter enforces the last; `check_verified.py` enforces the second; you enforce the
 first.
 
+0-. **Is it even due yet?** A piece can be sealed and not due, and the manifest says so:
+
+   ```
+   python3 framework/tools/schedule.py check pieces/<name>        # exit 4 = embargoed
+   ```
+
+   **Exit 4 means compose, and do not click.** A Substack draft is private, so composing early is
+   how a scheduled publication is prepared at all — but the Publish click, the store publish and
+   the LinkedIn post all wait for the moment. **For Substack, set its own scheduled time to that
+   moment in the composer** rather than coming back to click by hand: that is how the one email
+   goes out on time whether or not anyone is at the Mac. `md_to_site.py` refuses outright
+   (exit 12), so the blog cannot be published early even by accident.
+   [`framework/docs/SCHEDULING.md`](../../docs/SCHEDULING.md) has the field and the rule.
+
 0. **Verification gate — run it, and do not argue with it.**
 
    ```

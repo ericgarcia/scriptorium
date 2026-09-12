@@ -1166,6 +1166,52 @@ def unit_companions(tmp):
 
 
 # ---------------------------------------------------------------- unit: scripture check
+def unit_schedule(tmp):
+    """`publish_at:` — the moment is read strictly, the gate refuses before it, and the
+    tools that make a piece public refuse while the tools that only prepare it warn."""
+    print("\n-- scheduling: a piece can be finished and not be due ----------------")
+    import schedule as sched
+    from datetime import datetime, timezone
+
+    for bad, why in [('2026-09-15', 'a bare date names no moment'),
+                     ('soon', 'prose is not a moment'),
+                     ('2026-09-15 09:00 Mars/Olympus', 'an unknown zone')]:
+        try:
+            sched.parse_moment(bad)
+            check(f'schedule: refuses {bad!r} — {why}', False, 'it was accepted')
+        except sched.Malformed:
+            check(f'schedule: refuses {bad!r} — {why}', True)
+
+    same = (sched.parse_moment('2026-09-15 09:00 America/New_York')
+            == sched.parse_moment('2026-09-15 13:00 UTC'))
+    check('schedule: a zone and an offset name the same instant', same)
+
+    d = os.path.join(tmp, 'schedpiece'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'publish.yaml'), 'w').write(
+        'title: T\nsubtitle: S\npublish_at: 2026-09-15 09:00 America/New_York  # a comment\n')
+    before = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    after = datetime(2026, 9, 15, 14, 0, tzinfo=timezone.utc)
+    check('schedule: embargoed before the moment', sched.state(d, before)[0] == 'embargoed')
+    check('schedule: open after it', sched.state(d, after)[0] == 'open')
+    check('schedule: a trailing comment does not break the field',
+          sched.read_field(d).startswith('2026-09-15 09:00'))
+    check('schedule: the refusal names the piece and the moment',
+          'schedpiece' in (sched.refuse_if_embargoed(d, before) or ''))
+    check('schedule: no refusal once it is open', sched.refuse_if_embargoed(d, after) is None)
+
+    open(os.path.join(d, 'publish.yaml'), 'w').write('title: T\n')
+    check('schedule: a piece with no publish_at is never embargoed',
+          sched.state(d)[0] == 'none' and sched.refuse_if_embargoed(d) is None)
+
+    # The wiring, stated as the rule it is: public REFUSES, preparing WARNS.
+    site = open(os.path.join(HERE, 'md_to_site.py'), encoding='utf-8').read()
+    check('schedule: md_to_site refuses an embargoed piece (exit 12)',
+          'refuse_if_embargoed' in site and 'die(12' in site)
+    for tool, word in (('md_to_substack.py', 'EMBARGO'), ('md_to_linkedin.py', 'EMBARGO')):
+        src = open(os.path.join(HERE, tool), encoding='utf-8').read()
+        check(f'schedule: {tool} warns rather than refusing', word in src)
+
+
 def unit_scripture(tmp):
     """The scripture checker's conventions, which are where it can go wrong.
 
@@ -4510,6 +4556,25 @@ def corpus_prose():
         short += [f'{d} ({o}: {why})' for o, why in pb.missing_required(m, pubs, outlets_reg)]
     check("every published piece is on every outlet its publication requires, or says why not",
           not short, ', '.join(short[:6]))
+    # `publish_at:` is a refusal, so a manifest the gate cannot read is a gate that is not
+    # there — and a piece that is already live cannot also be waiting to go live.
+    import schedule as sched
+    faults = []
+    for d in sorted(os.listdir(PIECES)):
+        pdir = os.path.join(PIECES, d)
+        if sched.read_field(pdir) is None:
+            continue
+        try:
+            st, moment = sched.state(pdir)
+        except sched.Malformed as e:
+            faults.append(f'{d}: {e}')
+            continue
+        with open(os.path.join(pdir, 'publish.yaml'), encoding='utf-8') as fh:
+            m = yaml.safe_load(fh) or {}
+        if st == 'embargoed' and (m.get('published_at') or live_url(m)):
+            faults.append(f'{d}: embargoed until {sched.fmt(moment)}, but it is already published')
+    check("every publish_at is a readable moment, and no live piece is still embargoed",
+          not faults, '; '.join(faults[:5]))
 
 
 def corpus_tags():
@@ -4786,6 +4851,7 @@ def main():
         unit_normalization()
         unit_link_extraction()
         unit_review_artifact(tmp)
+        unit_schedule(tmp)
         unit_scripture(tmp)
         unit_pages(tmp)
         unit_outlet_content(tmp)

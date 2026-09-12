@@ -171,6 +171,16 @@ def main():
 
     refusals = []
 
+    # An embargo does not stop the file being written — it is a file on this Mac, and
+    # preparing early is the point of a scheduled publication. It is said loudly here
+    # because the next thing a person does with this file is paste it into LinkedIn.
+    import schedule as _sched
+    _state, _moment = _sched.state(piece)
+    if _state == 'embargoed':
+        print(f"EMBARGO: {os.path.basename(piece)} is not due until {_sched.fmt(_moment)} "
+              f"({_sched.human_delta(_moment)}). This file is written for you to hold; "
+              f"do not post it before that moment.", file=sys.stderr)
+
     if 'linkedin' not in (manifest.get('outlets') or []):
         refusals.append("publish.yaml does not name `linkedin` among its outlets — "
                         "nothing goes somewhere it was not sent")

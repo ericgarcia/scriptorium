@@ -791,10 +791,27 @@ IMAGES_JS = """(() => {
     'blockquote','bulletList','orderedList','listItem','footnote','codeBlock',
     'footnoteAnchor']);   // footnoteAnchor is structural, not media — the footnote machinery owns it
   const emb = [];
+  // An image WRAPPER is not an embed. `captionedImage` carries the caption and the image sits
+  // in its child `image2`, so a node's OWN attrs cannot settle it -- and since captions began
+  // being emitted (2026-09-11) every captioned hero read as an unrecorded embed and refused
+  // its own recompose. Ask the SUBTREE instead: a node containing an image the scrape already
+  // collected is that image's wrapper. A youtube2 still carries no image anywhere under it, so
+  // catching a new embed kind by default is unchanged -- which is the property to keep.
+  const hasImageInSubtree = (n) => {
+    let found = false;
+    const walk = (m) => {
+      if (found) return;
+      const a = m.attrs || {};
+      if (['src','url','imageSrc','thumbnail'].some(k => typeof a[k] === 'string' && out.some(o => o.src === a[k]))) {
+        found = true; return;
+      }
+      m.forEach ? m.forEach(walk) : null;
+    };
+    walk(n);
+    return found;
+  };
   const visitEmbed = (n) => {
-    const a = n.attrs || {};
-    const isImage = out.some(o => ['src','url','imageSrc','thumbnail'].some(k => a[k] === o.src));
-    if (!TEXTY.has(n.type.name) && !isImage) {
+    if (!TEXTY.has(n.type.name) && !hasImageInSubtree(n)) {
       const id = Object.values(a).find(v => typeof v === 'string' && v.length);
       emb.push({ type: n.type.name, key: id || n.type.name, attrs: a });
     }
@@ -868,11 +885,33 @@ def cmd_check_images(piece_dir, images_json):
             continue
         seen.add(c)
         live.append({**im, 'canonical': c})
-    missing = [im for im in live if im['canonical'] not in draft]
+    # A piece may reference an uploaded asset the SANCTIONED way — `![alt](assets/hero.png)`
+    # in draft.md, plus an `images:` entry in publish.yaml mapping that file to the URL it is
+    # already at (the publish skill's 0b-images). The converter reads that map and emits
+    # <img src="<that url>">, so a recompose REUSES the asset rather than orphaning it: this
+    # is the safe case, and comparing live URLs against the draft's TEXT alone reported it as
+    # the dangerous one — then advised pasting the URL into draft.md, which contradicts the
+    # convention it is meant to protect. Both halves are required: a map entry whose local
+    # file nothing in the draft references would still be lost by a re-paste.
+    mapped = set()
+    man_path = os.path.join(piece_dir, 'publish.yaml')
+    if os.path.exists(man_path):
+        try:
+            import yaml as _yaml
+            man = _yaml.safe_load(open(man_path, encoding='utf-8')) or {}
+        except Exception:
+            man = {}
+        for local, url in (man.get('images') or {}).items():
+            if local and isinstance(url, str) and str(local) in draft:
+                mapped.add(canonical_image_url(url))
+    missing = [im for im in live
+               if im['canonical'] not in draft and im['canonical'] not in mapped]
     print(f"live images: {len(live)} (deduped)   referenced in draft.md: {len(live) - len(missing)}")
     for im in live:
+        via = ' (via publish.yaml images:)' if (im not in missing
+                                                and im['canonical'] not in draft) else ''
         mark = 'MISSING' if im in missing else 'ok     '
-        print(f"  {mark} {im['type']:12} {im['canonical'][:76]}")
+        print(f"  {mark} {im['type']:12} {im['canonical'][:76]}{via}")
     if missing:
         print(f"\nREFUSING: {len(missing)} live image(s) are not referenced in draft.md.")
         print("A recompose re-pastes the body and would destroy them, and the desk keeps no")

@@ -172,12 +172,54 @@ def slug_of(manifest, piece_name, outlet_cfg):
     # directory keeps its original name (`thousand-faces` publishes as
     # `the-mask-comes-off-last`). Prefer the slug the piece already has on another
     # outlet, which is derived from the title the same way.
+    #
+    # `site_slug` OUTRANKS BOTH, because it is the desk saying the address outright — it is
+    # the one field whose whole purpose is to override the derivation, and `md_to_site`
+    # already publishes under it (`site_slug_of`), so a web outlet serves that slug and not
+    # this piece's directory name. This tool did not read it, so it would have checked the
+    # wrong page in the forward direction and called the right one unknown in reverse. Three
+    # imported MuffinLabs pieces carry one to keep a URL across a redraft; all three happen
+    # to match their directory today, so nothing on the corpus moves (measured 2026-09-11) —
+    # it is the next retitle that would have found this, as a false finding.
     slug = piece_name
     src = outlet_cfg.get('slug_source')
     if src and manifest.get(src):
         slug = str(manifest[src]).rstrip('/').split('/')[-1]
+    if manifest.get('site_slug'):
+        slug = str(manifest['site_slug']).rstrip('/').split('/')[-1]
     url = base.rstrip('/') + '/' + slug
     return url + '/' if outlet_cfg.get('trailing_slash') else url
+
+
+def known_on(pieces, outlet_cfg):
+    """Every slug the desk CLAIMS on this outlet — the set the reverse check subtracts from.
+
+    It asks `slug_of`, the same resolver the forward direction uses, so the two cannot
+    disagree about a piece's address. That is the whole fix: this was a hand-rolled set of
+    `public_url` and `site_url` slugs plus every piece's directory name, which is neither of
+    the two things that actually decide a public address. It missed
+
+      * EVERY OTHER OUTLET'S KEY. outlets.yaml has said since the professional line was added
+        that each outlet gets its own `manifest_url_key`, and it named this as the cost of
+        that: a `blog_url` read as a page the desk does not know. The comment said to fix it
+        in the tool rather than by re-colliding the keys, and this is that fix.
+      * `site_slug`, which is the desk SAYING what a piece is called in public — the one
+        field whose entire purpose is to override the derivation. Three imported MuffinLabs
+        pieces carry one.
+      * `slug_source`, which is why alignmentfellowship resolves at all: its published slug
+        is derived from the Substack URL, not from the directory name.
+
+    A directory name is still included, because a piece with no recorded URL and no
+    `site_slug` on an outlet that cannot derive one is claimed under its handle and nothing
+    else. Measured 2026-09-11: alignmentfellowship's 36 live URLs stay known, and muffinlabs'
+    sitemap can be wired without a single false finding.
+    """
+    known = {pc['name'] for pc in pieces}
+    for pc in pieces:
+        u = slug_of(pc['manifest'], pc['name'], outlet_cfg)
+        if u:
+            known.add(str(u).rstrip('/').split('/')[-1])
+    return known
 
 
 def load_pieces(pieces_dir, legacy_outlet):
@@ -421,11 +463,6 @@ def main():
             row['preview'] = problem
 
     # ---- reverse: what each outlet lists that the desk does not claim --------
-    known = {pc['name'] for pc in pieces}
-    for pc in pieces:
-        for k in ('public_url', 'site_url'):
-            if pc['manifest'].get(k):
-                known.add(str(pc['manifest'][k]).rstrip('/').split('/')[-1])
     reverse = {}
     if not a.no_reverse:
         for oname, oc in outlets.items():
@@ -441,7 +478,7 @@ def main():
             for loc in re.findall(r'<loc>([^<]+)</loc>', body):
                 if base and loc.rstrip('/').startswith(base) and loc.rstrip('/') != base:
                     live.add(loc.rstrip('/').split('/')[-1])
-            reverse[oname] = {'live': live, 'unknown': sorted(live - known)}
+            reverse[oname] = {'live': live, 'unknown': sorted(live - known_on(pieces, oc))}
 
     # ---- report --------------------------------------------------------------
     stale = [r for r in results

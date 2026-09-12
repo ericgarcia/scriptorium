@@ -471,6 +471,62 @@ def unit_outlet_urls(tmp):
         importlib.invalidate_caches()
 
 
+# ---------------------------------------- unit: what the desk CLAIMS on an outlet
+def unit_outlet_reverse(tmp):
+    """`outlet_audit` reverse: the only direction that can see a page the desk never made.
+
+    It subtracts what the desk claims from what the outlet lists, so everything depends on
+    that set being right. It was hand-rolled — `public_url` and `site_url` slugs plus every
+    directory name — and outlets.yaml had already written down the consequence: with a key
+    per outlet, a `blog_url` reads as a page the desk does not know. It said to fix it in the
+    tool rather than by re-colliding the keys, and `known_on` is that: it asks `slug_of`, the
+    resolver the FORWARD direction uses, so the two cannot disagree.
+
+    A false finding here is the expensive kind. Reverse drift is what an audit is for, so a
+    run that always reports one is a run nobody reads — which is exactly why muffinlabs' real
+    sitemap was left unwired until 2026-09-11.
+    """
+    print("\n-- outlet reverse: what the desk claims on an outlet ----------------")
+    import outlet_audit as oa
+
+    blog = {'reader_base': 'https://example.com/blog/', 'manifest_url_key': 'blog_url'}
+    site = {'reader_base': 'https://example.org/writings/', 'manifest_url_key': 'site_url',
+            'slug_source': 'public_url', 'trailing_slash': True}
+    li = {'reader_base': 'https://www.linkedin.com/pulse/', 'manifest_url_key': 'linkedin_url',
+          'derive': False}
+
+    pieces = [
+        # a piece whose live address is recorded under ITS OWN outlet's key, and whose
+        # directory name does not match it — a retitle, which is the normal case
+        {'name': 'old-handle', 'manifest': {'title': 'New Name',
+                                            'blog_url': 'https://example.com/blog/new-name'}},
+        # the desk SAYING what a piece is called in public: the one field whose whole purpose
+        # is to override the derivation. Three imported MuffinLabs pieces carry one.
+        {'name': 'dir-name', 'manifest': {'title': 'Something Else',
+                                          'site_slug': 'kept-url'}},
+        # alignmentfellowship's case: its slug comes from the Substack URL, not the directory
+        {'name': 'af-handle', 'manifest': {'title': 'T',
+                                           'public_url': 'https://one.substack.com/p/real-slug'}},
+    ]
+
+    check('reverse: a recorded url under the outlet\'s own key is claimed',
+          'new-name' in oa.known_on(pieces, blog))
+    check('reverse: `site_slug` is claimed — the desk said so explicitly',
+          'kept-url' in oa.known_on(pieces, blog), str(sorted(oa.known_on(pieces, blog))))
+    check('reverse: `slug_source` is honoured, so a derived site slug is claimed',
+          'real-slug' in oa.known_on(pieces, site), str(sorted(oa.known_on(pieces, site))))
+    check('reverse: a directory name is still claimed, for a piece with neither',
+          {'old-handle', 'dir-name', 'af-handle'} <= oa.known_on(pieces, blog))
+    check('reverse: a page nothing on the desk names is NOT claimed',
+          'a-native-post' not in oa.known_on(pieces, blog))
+    # derive: false means an address can only be RECORDED, and guessing one here would
+    # claim a page that never existed — the mirror of the finding this check exists for.
+    check('reverse: an outlet whose urls cannot be derived claims only handles and records',
+          oa.known_on(pieces, li) == {'old-handle', 'dir-name', 'af-handle'},
+          str(sorted(oa.known_on(pieces, li))))
+
+
+
 # ------------------------------- unit: a second publication is INSIDE the gates
 def unit_live_urls(tmp):
     """A piece is LIVE at its own outlet's address — for every tool that asks, not just two.
@@ -4295,6 +4351,7 @@ def main():
         unit_notes(tmp)
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)
+        unit_outlet_reverse(tmp)
         unit_companions(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)

@@ -14,6 +14,10 @@ and adjust it.
   single next move.
 - Detail lives in `pieces/<name>/outline.md`, `draft.md`, `notes.md`, and
   `log/`.
+- **A talk lives in `talks/<slug>/`, the desk's second namespace**, so it can carry the
+  same slug as the essay of the same argument. A slug is unique within a namespace, not
+  across the desk; `tools/corpus.py` resolves one, and a companion pointer resolves by
+  role. See `docs/NAMESPACES.md`.
 
 When asked "what's on the desk," read the dashboard, drill into the live piece
 README, and propose one concrete next move. After a writing session, log it

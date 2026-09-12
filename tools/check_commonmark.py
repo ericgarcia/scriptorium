@@ -31,6 +31,10 @@ EXIT
   "Could not check" is never reported as a pass.
 """
 import sys, os, re, html
+import sys as _sys, os as _os                                        # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import corpus                                                        # noqa: E402
+
 
 
 def _md():
@@ -81,8 +85,8 @@ def check_text(src, md):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if '--all' in sys.argv:
-        args = sorted(os.path.join('pieces', d) for d in os.listdir('pieces')
-                      if os.path.exists(os.path.join('pieces', d, 'draft.md')))
+        args = sorted(d for _s, d, _k in corpus.texts(corpus.desk_root())
+                      if os.path.exists(os.path.join(d, 'draft.md')))
     if not args:
         print(__doc__.strip()); sys.exit(1)
     md = _md()

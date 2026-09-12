@@ -175,19 +175,16 @@ def pieces_root(start=None):
 def resolve(ref):
     if os.path.isdir(ref):
         return os.path.abspath(ref)
-    root = pieces_root()
-    cand = os.path.join(root, ref) if root else None
-    if cand and os.path.isdir(cand):
-        return cand
+    import corpus
+    found = corpus.find(corpus.desk_root(), ref)
+    if found:
+        return found
     sys.exit(f'no such piece: {ref}')
 
 
 def all_pieces():
-    root = pieces_root()
-    if not root:
-        return []
-    return sorted(os.path.join(root, d) for d in os.listdir(root)
-                  if os.path.isdir(os.path.join(root, d)))
+    import corpus
+    return [d for _s, d, _k in corpus.texts(corpus.desk_root())]
 
 
 def parse_window(s):

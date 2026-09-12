@@ -115,6 +115,18 @@ def main():
 
     old_dir = os.path.join(ROOT, 'pieces', o.old)
     if not os.path.isdir(old_dir):
+        # A talk lives in talks/ and carries talk.yaml rather than publish.yaml, so none of
+        # the machinery below (title_of, former_slugs, the outlet sweeps) applies to it.
+        # Say that, rather than "no such piece" about a text that plainly exists.
+        sys.path.insert(0, HERE)
+        import corpus
+        found = corpus.find(ROOT, o.old, prefer='talk')
+        if found and corpus.kind_of(found) == 'talk':
+            die(f"{corpus.rel(ROOT, found)} is a TALK, and this tool renames pieces. A talk has no\n"
+                f"  publish.yaml, no former_slugs and no outlet manifest, so the move is by hand:\n"
+                f"  git mv, rename its DASHBOARD.d fragment, sweep the cross-references, then\n"
+                f"  `dashboard.py render` (not sync -- sync re-ingests the stale block) and\n"
+                f"  companions.py check. framework/docs/NAMESPACES.md has the procedure.")
         die(f"no such piece: pieces/{o.old}")
     title = title_of(old_dir)
     new = o.new or (derive(title) if title else None)

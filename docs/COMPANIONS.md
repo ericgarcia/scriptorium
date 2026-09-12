@@ -51,7 +51,7 @@ In the main piece's `publish.yaml`:
 ```yaml
 companions:
   note: note.md                  # a file companion
-  talk: curse-of-dimensionality  # a piece companion
+  talk: love-is-not-a-metric-space  # a piece companion, in talks/ (see NAMESPACES.md)
 ```
 
 A **file companion** opens with its own header, closed by a `---` line. The header is never posted:

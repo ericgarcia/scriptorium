@@ -39,6 +39,10 @@ switched off:
 Exit: 0 consistent | 1 disagreements found | 2 nothing could be checked.
 """
 import os, re, sys
+import sys as _sys, os as _os                                        # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import corpus                                                        # noqa: E402
+
 
 SCAN_NAMES = ('README.md', 'notes.md', 'outline.md', 'draft.md', 'DASHBOARD.md')
 SKIP_DIR_PARTS = ('/log/', '/.git/', '/node_modules/', '/__pycache__/')
@@ -139,16 +143,17 @@ def truth(root):
     """slug -> title. publish.yaml's `title` where there is one — the manifest is the witness,
     kept against the live post by the sync tools — and the README H1 otherwise."""
     out = {}
-    pdir = os.path.join(root, 'pieces')
-    if not os.path.isdir(pdir):
-        return out
-    for slug in sorted(os.listdir(pdir)):
-        t = manifest_field(os.path.join(pdir, slug, 'publish.yaml'), 'title')
+    # Both namespaces. A talk and its essay share a slug AND a title, so they agree by
+    # construction; what matters is that a talk's title is known at all.
+    for slug, d, _kind in corpus.texts(root):
+        t = manifest_field(os.path.join(d, 'publish.yaml'), 'title')
         if not t:
-            rd = os.path.join(pdir, slug, 'README.md')
+            t = manifest_field(os.path.join(d, 'talk.yaml'), 'title')
+        if not t:
+            rd = os.path.join(d, 'README.md')
             t = h1_title(rd) if os.path.isfile(rd) else None
         if t:
-            out[slug] = t
+            out.setdefault(slug, t)
     return out
 
 
@@ -208,7 +213,7 @@ def scan_files(root):
 def collect(root):
     """-> claims[slug] = set of (title, relpath, lineno), and unknown-slug references."""
     claims, unknown = {}, []
-    known = set(os.listdir(os.path.join(root, 'pieces'))) if os.path.isdir(os.path.join(root, 'pieces')) else set()
+    known = {slug for slug, _d, _k in corpus.texts(root)}
     for path in scan_files(root):
         rel = os.path.relpath(path, root)
         try:
@@ -228,7 +233,7 @@ def collect(root):
                     # `../<name>/` is only a PIECE reference from inside pieces/. From
                     # books/all-my-stories it means the sibling book, and calling that a
                     # missing piece is the checker inventing a problem.
-                    if (rel.startswith('pieces' + os.sep)
+                    if (rel.startswith(('pieces' + os.sep, 'talks' + os.sep))
                             and slug not in ('..', '.') and not slug.endswith('.md')):
                         unknown.append((slug, rel, i))
                     continue

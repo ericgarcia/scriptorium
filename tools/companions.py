@@ -22,7 +22,8 @@ DECLARING THEM — publish.yaml of the main piece
 
   companions:
     note: note.md                   # a FILE companion, in the piece's own directory
-    talk: curse-of-dimensionality   # a PIECE companion: a sibling piece with its own scaffold
+    talk: love-is-not-a-metric-space  # a PIECE companion: a sibling text with its own scaffold,
+                                     # resolved in talks/ by role (corpus.py, docs/NAMESPACES.md)
 
   A file companion opens with its own header, closed by a `---` line:
 
@@ -34,7 +35,8 @@ DECLARING THEM — publish.yaml of the main piece
     ...
 
   A piece companion keeps its own directory (a talk has figures, a deck and a log; burying it
-  inside another piece would hide it from every tool that walks `pieces/*/draft.md`). It points
+  inside another piece would hide it from every tool that walks the corpus) — a talk's directory
+  lives under `talks/`, where it can carry the same slug as the essay it belongs to. It points
   back: `companion_of: <main slug>` in its talk.yaml. `check` holds both ends to each other.
 
 Commands
@@ -46,6 +48,10 @@ Commands
 Exit: 0 ok, 1 problem found.
 """
 import sys, os, re, argparse
+import sys as _sys, os as _os                                        # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import corpus                                                        # noqa: E402
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMEWORK = os.path.dirname(HERE)
@@ -196,7 +202,12 @@ def companions(piece_dir):
                 c['form'] = c['meta'].get('form', '')
                 c['style'] = c['meta'].get('style', '')
         elif kind == 'piece':
-            c['path'] = os.path.join(pieces_dir, target)
+            # A companion pointer knows the role it is resolving, and that is what makes a
+            # shared slug legible: the essay's `talk:` resolves into talks/, the talk's
+            # `companion_of:` back into pieces/. corpus.py has the rule.
+            root = os.path.dirname(os.path.abspath(pieces_dir))
+            c['path'] = (corpus.find(root, target, prefer='talk')
+                         or os.path.join(pieces_dir, target))
             if os.path.exists(os.path.join(c['path'], 'talk.yaml')):
                 c['form'] = 'talk'
             c['style'] = readme_style(c['path'])
@@ -262,10 +273,11 @@ def problems_of(c, piece_dir):
 
 
 def check(pieces_dir):
-    """-> [(slug, problem)] across the corpus."""
+    """-> [(slug, problem)] across the corpus — both namespaces, since a talk carries the
+    back-pointer half of every companion pair."""
     out = []
-    for slug in sorted(os.listdir(pieces_dir)):
-        d = os.path.join(pieces_dir, slug)
+    root = os.path.dirname(os.path.abspath(pieces_dir))
+    for slug, d, _kind in corpus.texts(root):
         if not os.path.isdir(d):
             continue
         if os.path.exists(os.path.join(d, LEGACY_NOTE)):
@@ -274,7 +286,7 @@ def check(pieces_dir):
             out += [(slug, p) for p in problems_of(c, d)]
         back = manifest_value(os.path.join(d, 'talk.yaml'), 'companion_of')
         if back:
-            main = os.path.join(pieces_dir, back)
+            main = corpus.find(root, back, prefer='piece') or os.path.join(pieces_dir, back)
             tgt = manifest_block(os.path.join(main, 'publish.yaml'), 'companions').get('talk')
             if tgt != slug:
                 out.append((slug, f'talk.yaml says companion_of: {back}, but {back} does not declare it as its talk'))

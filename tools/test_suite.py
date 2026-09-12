@@ -1200,6 +1200,51 @@ def unit_companions(tmp):
 
 
 # ---------------------------------------------------------------- unit: scripture check
+def unit_corpus(tmp):
+    """Two namespaces: a slug is unique within one, not across the desk, and a companion
+    pointer resolves by role. (The talk and its essay, 2026-09-11.)"""
+    print("\n-- corpus: pieces/ and talks/ -----------------------------------------")
+    import corpus
+    import companions as cp
+    root = os.path.join(tmp, 'twodesk')
+    ess = os.path.join(root, 'pieces', 'same-name')
+    talk = os.path.join(root, 'talks', 'same-name')
+    other = os.path.join(root, 'talks', 'only-a-talk')
+    for d in (ess, talk, other):
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'draft.md'), 'w').write('*scaffold*\n---\n\nBody.\n')
+    open(os.path.join(ess, 'publish.yaml'), 'w').write(
+        'title: Same Name\nsubtitle: S\ncompanions:\n  talk: same-name\n')
+    open(os.path.join(talk, 'talk.yaml'), 'w').write('title: Same Name\ncompanion_of: same-name\n')
+    open(os.path.join(other, 'talk.yaml'), 'w').write('title: Only a Talk\n')
+    for d in (talk, other):
+        open(os.path.join(d, 'README.md'), 'w').write(
+            '# Same Name\n**Style:** [plain-talk](../../framework/styles/plain-talk/style.md)\n')
+
+    check('corpus: both namespaces are walked',
+          {(s, k) for s, _d, k in corpus.texts(root)} ==
+          {('same-name', 'piece'), ('same-name', 'talk'), ('only-a-talk', 'talk')})
+    check('corpus: a bare slug prefers pieces/', corpus.find(root, 'same-name') == ess)
+    check("corpus: prefer='talk' takes the talks/ side",
+          corpus.find(root, 'same-name', prefer='talk') == talk)
+    check('corpus: a text that exists once resolves wherever it lives',
+          corpus.find(root, 'only-a-talk') == other)
+    check('corpus: a slug in neither namespace is None', corpus.find(root, 'nope') is None)
+    check('corpus: kind is read from the directory, not the path',
+          corpus.kind_of(talk) == 'talk' and corpus.kind_of(ess) == 'piece')
+    check('corpus: rel names the namespace', corpus.rel(root, talk) == os.path.join('talks', 'same-name'))
+
+    # The pair resolves both ways across the shared slug — the whole point of the move.
+    c = cp.companion(ess, 'talk')
+    check('companions: the essay\'s talk pointer lands in talks/', c and c['path'] == talk)
+    check('companions: the pair checks clean across namespaces',
+          not cp.check(os.path.join(root, 'pieces')), str(cp.check(os.path.join(root, 'pieces'))))
+    open(os.path.join(other, 'talk.yaml'), 'a').write('companion_of: same-name\n')
+    probs = cp.check(os.path.join(root, 'pieces'))
+    check('companions: a talk claiming an essay that does not claim it back is caught',
+          any('companion_of' in p for _s, p in probs), str(probs))
+
+
 def unit_schedule(tmp):
     """`publish_at:` — the moment is read strictly, the gate refuses before it, and the
     tools that make a piece public refuse while the tools that only prepare it warn."""
@@ -4885,6 +4930,7 @@ def main():
         unit_normalization()
         unit_link_extraction()
         unit_review_artifact(tmp)
+        unit_corpus(tmp)
         unit_schedule(tmp)
         unit_scripture(tmp)
         unit_pages(tmp)

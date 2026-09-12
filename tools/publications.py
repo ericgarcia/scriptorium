@@ -80,7 +80,9 @@ def pieces(root):
 
 def piece_dir(root, ref):
     """A slug or a path -> the piece directory. Refuses one that does not exist."""
-    cand = ref if os.sep in ref.rstrip(os.sep) or os.path.isdir(ref) else os.path.join(root, 'pieces', ref)
+    import corpus
+    cand = corpus.find(root, ref) or (
+        ref if os.sep in ref.rstrip(os.sep) else os.path.join(root, 'pieces', ref))
     cand = os.path.normpath(cand)
     if not os.path.isdir(cand):
         raise Refused(f'no such piece: {ref}')

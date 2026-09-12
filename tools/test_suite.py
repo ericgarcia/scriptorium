@@ -389,6 +389,7 @@ def unit_reference_add(tmp):
 
     R.root = lambda: home
     R.tracked = lambda rel, r=None: False        # no git in a scratch tree
+    R.is_ignored = lambda rel, r=None: False
 
     rc = R.cmd_add([src, '--book', 'tst', '--work', '*A Held Work* — An Author (1999)',
                     '--edition', 'First edition', '--restricted'])
@@ -417,6 +418,39 @@ def unit_reference_add(tmp):
           len(cat) == 1 and cat[0]['index'] and cat[0]['restricted'])
     _, stream, offsets = R.load_index(cat[0]['index'])
     check('references add: its text is searchable', 'sentence number 77' in stream)
+
+    # DENY BY DEFAULT: the folder's own .gitignore decides, and a public source needs an
+    # allow line. The direction is the point — an unclassified file is ignored, so a
+    # forgotten line costs a commit rather than leaking a copyrighted source.
+    deny = os.path.join(refs, '.gitignore')
+    check('references add: a restricted source writes NO allow line',
+          not os.path.exists(deny) or 'incoming.txt' not in open(deny).read())
+
+    src2 = os.path.join(tmp, 'open-work.txt')
+    open(src2, 'w').write('a public domain sentence, repeated for length. ' * 20)
+    R.cmd_add([src2, '--book', 'tst', '--work', '*An Open Work* — Someone (1899)', '--public'])
+    body = open(deny).read()
+    check('references add: a public source is allowed by name', '!open-work.txt' in body)
+    check('references add: the deny file denies by default', body.lstrip().startswith('#')
+          and '\n*\n' in body, body[:60])
+    check('references add: README and the folder rules allow themselves',
+          '!README.md' in body and '!.gitignore' in body)
+    n_before = body.count('!open-work.txt')
+    R.ensure_allowed('tst', 'open-work.txt', home)
+    check('references add: the allow line is idempotent',
+          open(deny).read().count('!open-work.txt') == n_before)
+
+    # The safe failure has to be VISIBLE. A public source that is ignored and untracked
+    # is silently uncommittable, and silence is what turns a safe failure into a lost one.
+    import io, contextlib
+    R.is_ignored = lambda rel, r=None: rel.endswith('open-work.txt')
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        R.cmd_check([])
+    R.is_ignored = lambda rel, r=None: False
+    check('references check: a public source that cannot be committed is a finding',
+          'PUBLIC BUT NOT COMMITTABLE: open-work.txt' in buf.getvalue(),
+          buf.getvalue()[-200:])
 
     # A second add of a DIFFERENT file under the same name must not overwrite.
     open(src, 'w').write('completely different bytes')

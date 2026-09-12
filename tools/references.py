@@ -240,6 +240,45 @@ def ensure_ignored(entries, r=None):
     return add
 
 
+DENY_HEADER = """# Deny by default. NOTHING in this folder is committed unless a line below allows it.
+#
+# A file nobody has classified is IGNORED. Forgetting a line means a PUBLIC file does not
+# get committed — visible in `git status`, harmless, fixed in a second. The old
+# arrangement was one ignore line per RESTRICTED file in the root .gitignore, where a
+# forgotten line leaked a copyrighted source into history, which no later edit removes.
+#
+# Written by `framework/tools/references.py add --public`. `--restricted` writes nothing,
+# because the default already covers it. `references.py check` reports any held public
+# source that is not committable, so the safe failure is never silent.
+
+*
+!.gitignore
+!README.md
+"""
+
+
+def deny_file(book, r=None):
+    return os.path.join(refdir(book, r), ".gitignore")
+
+
+def ensure_allowed(book, name, r=None):
+    """Add a `!name` line to the folder's deny-by-default .gitignore, creating it if
+    absent. Append-only and idempotent: another session may be adding a source in the
+    same second, and no allow line is ever worth losing."""
+    path = deny_file(book, r)
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(DENY_HEADER)
+    body = open(path, encoding="utf-8").read()
+    if f"\n!{name}\n" in body or body.endswith(f"!{name}"):
+        return False
+    with open(path, "a", encoding="utf-8") as f:
+        if not body.endswith("\n"):
+            f.write("\n")
+        f.write(f"!{name}\n")
+    return True
+
+
 def tracked(rel, r=None):
     """Is this path already in git's index/history? A ⚠️ file that is TRACKED is not
     fixed by a .gitignore line, and saying otherwise is the dangerous half of this
@@ -406,10 +445,21 @@ def cmd_add(argv):
     # `git add -A` can stage it, and that window is the only irreversible thing here.
     added_ignores = []
     if restricted:
-        added_ignores = ensure_ignored(
-            [ignore_entry(book, name),
-             ignore_entry(book, f"{INDEX_DIR}/{re.sub(r'[.][^.]+$', '', name)}.tsv.gz")], r)
-        print(f"gitignore: +{len(added_ignores)} entr{'y' if len(added_ignores)==1 else 'ies'}")
+        if os.path.exists(deny_file(book, r)):
+            print("gitignore: nothing to write — this folder denies by default, so an "
+                  "unlisted file is already ignored")
+        else:
+            # No deny-by-default file here: fall back to the old per-file root lines
+            # rather than leave a restricted source unprotected.
+            added_ignores = ensure_ignored(
+                [ignore_entry(book, name),
+                 ignore_entry(book, f"{INDEX_DIR}/{re.sub(r'[.][^.]+$', '', name)}.tsv.gz")], r)
+            print(f"gitignore: +{len(added_ignores)} root entr"
+                  f"{'y' if len(added_ignores)==1 else 'ies'} (no deny-by-default file here)")
+    else:
+        if ensure_allowed(book, name, r):
+            print(f"gitignore: allowed in books/{book}/references/.gitignore "
+                  f"(the folder denies by default)")
 
     if os.path.abspath(src) != os.path.abspath(dest):
         if os.path.exists(dest) and sha256(dest) != sha256(src):
@@ -626,9 +676,20 @@ def cmd_check(argv):
         for f in sorted(set(by_name) - disk):
             print(f"  ROW WITH NO FILE: {f}  (line {by_name[f]['line']})")
             bad += 1
+        if not os.path.exists(deny_file(b, r)):
+            print(f"  NO DENY-BY-DEFAULT .gitignore in this folder — a new file here is "
+                  f"committable until somebody remembers a line. "
+                  f"`references.py add --public` creates it.")
         for f in sorted(disk & set(by_name)):
             row = by_name[f]
             rel = f"books/{b}/references/{f}"
+            if not row["restricted"] and is_ignored(rel, r) and not tracked(rel, r):
+                # The safe failure, made visible. Deny-by-default means an unlisted
+                # public source is silently uncommittable; silence is what turns a safe
+                # failure into a lost one.
+                print(f"  PUBLIC BUT NOT COMMITTABLE: {f} — held, redistributable, and "
+                      f"ignored. Add `!{f}` to books/{b}/references/.gitignore.")
+                bad += 1
             if not row.get("verdict_stated"):
                 # Fail-closed protects the bytes; this gets the ROW fixed. A cell this
                 # parser cannot classify is treated as restricted AND reported, because

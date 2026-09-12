@@ -460,17 +460,39 @@ def main():
         # that ships an unfinished draft, and on a piece whose first outlet is still
         # pending it publishes out of order. Caught 2026-09-09, when a composed-but-
         # unpublished piece entered a bundle bound for a live site.
-        if not load_manifest(p).get('published_at') and not o.include_unpublished:
+        policy = schedule.policy_for(o.outlets, o.outlet)
+        # The guard above assumes this outlet publishes AFTER somewhere else, so a piece
+        # with no `published_at` is an unfinished draft. An `on_schedule: immediate`
+        # outlet inverts that: it is the CANONICAL home and publishes first, so its
+        # export is the piece's first publication and there is no earlier date to carry.
+        # The replacement for the guard is not nothing -- it is `publish_at:`, which only
+        # a deliberately scheduled piece has, and which `schedule.py arm --reviewed`
+        # records an approval against. A draft nobody scheduled is still held back.
+        scheduled_first = policy == schedule.IMMEDIATE and schedule.read_field(p)
+        if (not load_manifest(p).get('published_at')
+                and not o.include_unpublished and not scheduled_first):
             unpublished.append(p); continue
         # A piece can be finished, dated, and still not due. `publish_at:` is a moment
         # the piece may not be public before, and the store bundle IS public: a site
         # reads it. So this refuses rather than skipping -- a piece deliberately named
         # on the command line and silently dropped is how an embargo gets discovered
         # in a week. schedule.py holds the field and the rule.
-        refusal = schedule.refuse_if_embargoed(p)
+        # An outlet can be exempt from the moment, and this one may be: the quire
+        # websites are the canonical publication and drive no traffic, so a piece
+        # belongs there as soon as it is finished, while the feed outlets wait
+        # (`on_schedule:` in outlets.yaml; schedule.py's OUTLETS section). The policy
+        # fails closed, so an unreadable registry still refuses.
+        refusal = schedule.refuse_if_embargoed(p, policy=policy)
         if refusal:
             die(12, f'{refusal}\n'
-                    f'  -> `schedule.py list` shows every embargo on the desk.')
+                    f'  -> `schedule.py list` shows every embargo on the desk.\n'
+                    f'  -> an outlet that should publish before the moment carries '
+                    f'`on_schedule: immediate` in publishing/outlets.yaml.')
+        # Say it. A piece published before its moment with nothing printed reads
+        # exactly like a piece that never had one.
+        note = schedule.embargo_note(p, o.outlet or 'this outlet')
+        if note and policy == schedule.IMMEDIATE:
+            print(f'  {note}', file=sys.stderr)
         selected.append(p)
     if unpublished:
         names = ', '.join(os.path.basename(x.rstrip('/')) for x in unpublished)

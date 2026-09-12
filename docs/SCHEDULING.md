@@ -60,6 +60,50 @@ Ordering note for a syndicated piece: the LinkedIn copy carries *Originally publ
 &lt;canonical&gt;*, so it is composed **after** the canonical is live, not before. That is a
 publication-day step, not a preparation step.
 
+## Not every outlet waits — `on_schedule:`
+
+**One piece has one moment; the outlets it names do not all want it.** (Eric, 2026-09-11: *"we
+should be able to configure an outlet for immediate publishing when scheduling … this is because
+the other sites (substack and linkedin) benefit from regular publishing and the websites (using
+quire) are the canonical publications and do not drive traffic".*)
+
+So the policy belongs to the **outlet**, in the instance's `publishing/outlets.yaml`:
+
+```yaml
+outlets:
+  alignmentfellowship:
+    on_schedule: immediate     # canonical quire site: publishes as soon as the piece is ready
+  substack:
+    on_schedule: at_moment     # the default; a feed outlet waits for publish_at
+```
+
+| class | outlets | why |
+|---|---|---|
+| **immediate** | the quire websites | They are the **canonical** publication and drive no traffic. A finished piece belongs there at once, and its URL is what every other outlet points at. |
+| **at_moment** | Substack, LinkedIn | Regular publishing is the point of a feed. The moment is for them. |
+
+**It fails closed, in every direction.** A missing registry, an unknown outlet, an absent
+`on_schedule`, a typo (`imediate`), or no PyYAML all answer `at_moment` — the answer that refuses
+to publish. Only the exact string `immediate`, on that one outlet, turns the moment off.
+
+**An exemption is said out loud.** `md_to_site.py` prints *"… is embargoed until <moment>, and
+<outlet> is configured `on_schedule: immediate` — publishing it there now, on purpose"*, because a
+piece published before its moment with nothing on the terminal reads exactly like a piece that
+never had an embargo.
+
+### The consequence for the unpublished guard, which had to move
+
+`md_to_site.py` holds back a piece with no `published_at`, on the ground that it is an unfinished
+draft (caught 2026-09-09, when a composed-but-unpublished piece entered a bundle bound for a live
+site). **That guard assumed this outlet publishes after somewhere else.** An `immediate` outlet
+inverts it: the canonical site publishes **first**, so its export *is* the piece's first
+publication and there is no earlier date to carry.
+
+What replaces the guard is not nothing — it is **`publish_at:` itself.** An immediate outlet may
+carry a piece with no `published_at` **only when the piece is scheduled**, which is a dated
+decision `schedule.py arm --reviewed` records an approval against. A draft nobody scheduled is
+still held back, and `--include-unpublished` remains the only way to ship one.
+
 ## The wake-up, and what it is for
 
 `schedule.py runbook <piece>` prints a self-contained prompt for a scheduled session: the piece,

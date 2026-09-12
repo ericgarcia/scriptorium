@@ -29,7 +29,9 @@ WHAT IT GATES, AND WHAT IT DELIBERATELY DOES NOT.
 
   REFUSES   Anything that makes the piece public or queues it to become public:
             `md_to_site.py` will not export an embargoed piece into the store bundle
-            (exit 12), which is what a site reads.
+            (exit 12), which is what a site reads -- UNLESS that outlet is configured
+            `on_schedule: immediate` (see OUTLETS below), in which case it exports and
+            says so.
 
   WARNS     Composing. A Substack draft is private and a LinkedIn file is a file on
             this Mac; composing early is how a scheduled publication is prepared at
@@ -46,6 +48,29 @@ the reader happens to be in, and an embargo that opens at a different instant de
 on who asks is not an embargo. A moment with no zone is refused (exit 2) rather than
 assumed. Write the zone you mean: `America/New_York` reads correctly across a DST
 boundary, where a fixed `-04:00` quietly does not.
+
+OUTLETS: THE MOMENT IS NOT THE SAME QUESTION FOR ALL OF THEM, AND THE REASON IS
+EDITORIAL. One piece has one `publish_at:`, but the outlets it names do not all want to
+wait for it. The quire websites are the CANONICAL publication and drive no traffic, so a
+piece belongs there as soon as it is finished; the feed outlets -- Substack, LinkedIn --
+are where regular publishing does work, and they wait for the moment (Eric, 2026-09-11:
+"we should be able to configure an outlet for immediate publishing when scheduling ...
+the websites (using quire) are the canonical publications and do not drive traffic").
+
+So the policy is a property of the OUTLET, in the instance's registry:
+
+  outlets:
+    alignmentfellowship:
+      on_schedule: immediate     # canonical: publishes as soon as the piece is ready
+    substack:
+      on_schedule: at_moment     # the default, and may be left unwritten
+
+`outlet_policy()` reads it and FAILS CLOSED: a missing file, an unknown outlet, an
+unreadable registry or an unrecognised value all answer `at_moment`. The safe direction
+is refusing to publish, so nothing about a typo or an absent PyYAML can turn an embargo
+off. An exemption also has to be SAID -- `embargo_note()` is what a caller prints --
+because a piece published before its moment with nothing on the terminal is
+indistinguishable from a piece that never had an embargo at all.
 
 Exit codes: 0 open (or no field) · 1 usage · 2 a malformed or zoneless moment ·
 4 at least one piece is still embargoed.
@@ -134,13 +159,68 @@ def state(piece_dir, now=None):
     return ('open' if now >= moment else 'embargoed'), moment
 
 
-def refuse_if_embargoed(piece_dir, now=None):
-    """For a caller that publishes. Returns a refusal string, or None to proceed."""
+IMMEDIATE = 'immediate'
+AT_MOMENT = 'at_moment'
+
+
+def policy_for(outlets, outlet):
+    """The same question for a caller that has already loaded the registry (md_to_site
+    does, as `o.outlets`). Fails closed: anything but the exact string `immediate` on
+    that one outlet answers AT_MOMENT."""
+    if not outlet or not isinstance(outlets, dict):
+        return AT_MOMENT
+    cfg = outlets.get(outlet)
+    if not isinstance(cfg, dict):
+        return AT_MOMENT
+    return IMMEDIATE if str(cfg.get('on_schedule')).strip().lower() == IMMEDIATE else AT_MOMENT
+
+
+def outlet_policy(outlets_path, outlet):
+    """What an outlet does with an embargo: IMMEDIATE, or AT_MOMENT (the default).
+
+    Fails closed in every direction. No path, no file, no PyYAML, no such outlet, no
+    key, or a value this function does not recognise all answer AT_MOMENT, because the
+    safe answer is the one that refuses to publish. Only the exact string `immediate`
+    turns the moment off, and only for the outlet that carries it."""
+    if not outlets_path or not outlet:
+        return AT_MOMENT
+    try:
+        # Imported here, not at the top: this module is deliberately a line-reader for
+        # the manifest, and one optional dependency should not become a hard one. No
+        # PyYAML means AT_MOMENT, which is the refusing answer.
+        import yaml as _yaml
+        with open(outlets_path, encoding='utf-8') as f:
+            reg = _yaml.safe_load(f) or {}
+    except Exception:
+        return AT_MOMENT
+    return policy_for(reg.get('outlets') or {}, outlet)
+
+
+def embargo_note(piece_dir, outlet, now=None):
+    """What an exempt caller must PRINT. An early publication with nothing said about it
+    reads exactly like a piece that never had a moment."""
+    try:
+        st, moment = state(piece_dir, now)
+    except Malformed:
+        return None
+    if st != 'embargoed':
+        return None
+    return (f'{os.path.basename(piece_dir.rstrip("/"))} is embargoed until '
+            f'{fmt(moment)} ({human_delta(moment, now)}), and {outlet} is configured '
+            f'`on_schedule: immediate` — publishing it there now, on purpose. The '
+            f'moment still governs every outlet that is not.')
+
+
+def refuse_if_embargoed(piece_dir, now=None, policy=AT_MOMENT):
+    """For a caller that publishes. Returns a refusal string, or None to proceed.
+
+    `policy` comes from `outlet_policy()`; IMMEDIATE proceeds, and the caller is
+    expected to print `embargo_note()` when it does."""
     try:
         st, moment = state(piece_dir, now)
     except Malformed as e:
         return f'{os.path.basename(piece_dir.rstrip("/"))}: {FIELD} is unusable — {e}'
-    if st != 'embargoed':
+    if st != 'embargoed' or policy == IMMEDIATE:
         return None
     return (f'{os.path.basename(piece_dir.rstrip("/"))} is embargoed until '
             f'{fmt(moment)} ({human_delta(moment, now)}). '

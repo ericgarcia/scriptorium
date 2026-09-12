@@ -38,6 +38,40 @@ The line is **public, or not public** — not *finished, or not finished*.
 | **`md_to_linkedin.py`** | warns | It writes a file on this Mac. The warning is there because the next thing anyone does with that file is paste it. |
 | **the `publish` skill** | **stops** | It runs `schedule.py check` in preflight and will not click Publish before the moment. |
 
+## The order: compose, review, THEN arm
+
+**The schedule is not set until the drafts are reviewed and approved.** (Eric, 2026-09-11:
+*"in general, we dont set the schedule until the drafts are reviewed and approved."*)
+
+A scheduled publication is the one kind that fires with nobody watching, so the reading has to
+have happened before it is armed — and the thing to read is produced by composing, which puts
+composing *first* and arming last:
+
+1. **Compose the drafts** under the embargo. A Substack draft is private and a LinkedIn Article
+   is a draft until published; `md_to_substack.py` prints the embargo and carries on, which is
+   what makes this step possible at all.
+2. **The author reads them** — the drafts themselves, and the review artifact beside them.
+3. **Then arm.** Each platform's own scheduler is set to the moment, and any desk-side wake-up
+   is recorded with `schedule.py arm --reviewed "<who, when>"`. **`arm` refuses without
+   `--reviewed`**, and writes who approved it into the manifest, so the order is auditable
+   afterwards rather than merely intended.
+
+Ordering note for a syndicated piece: the LinkedIn copy carries *Originally published at
+&lt;canonical&gt;*, so it is composed **after** the canonical is live, not before. That is a
+publication-day step, not a preparation step.
+
+## The wake-up, and what it is for
+
+`schedule.py runbook <piece>` prints a self-contained prompt for a scheduled session: the piece,
+the moment, the gates, the order, and what to do if it fires late. It is generated from the
+manifest rather than typed, so moving `publish_at` cannot leave a stale moment buried in a prompt
+nobody re-reads. `arm` records the task; `armed` lists what is armed across the desk.
+
+What a wake-up is *for* is the step no platform can do for itself — the canonical store publish
+and the redirect removal. The subscriber email and the syndicated copies belong to Substack's and
+LinkedIn's own schedulers, which need nothing from this Mac and do not care whether the app is
+open.
+
 ## Nothing here fires by itself
 
 Deliberately. `schedule.py` compares a moment to now; it owns no clock and starts no

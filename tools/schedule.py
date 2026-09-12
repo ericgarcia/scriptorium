@@ -16,6 +16,14 @@ Read it with `state()`, or from the command line:
   python3 tools/schedule.py due [--within 48h]   what opens inside the window (or has)
   python3 tools/schedule.py set <piece> "<moment>"
   python3 tools/schedule.py clear <piece>
+  python3 tools/schedule.py runbook <piece>      the prompt a scheduled wake-up needs
+  python3 tools/schedule.py arm <piece> --task … --does … --reviewed "<who, when>"
+  python3 tools/schedule.py armed                what is armed across the desk
+
+THE ORDER IS NOT NEGOTIABLE: compose the drafts, let the author read them, THEN arm. A
+scheduled publication fires with nobody watching, so the reading has to have happened
+first (Eric, 2026-09-11: "we don't set the schedule until the drafts are reviewed and
+approved"). `arm` refuses without `--reviewed`, and records who approved it.
 
 WHAT IT GATES, AND WHAT IT DELIBERATELY DOES NOT.
 
@@ -254,6 +262,119 @@ def cmd_due(args):
     return 0
 
 
+RUNBOOK = """\
+Publication day for {slug} — "{title}".
+
+You are a fresh session with no memory of how this was arranged. Everything you need is here
+and in the piece; read pieces/{slug}/README.md first, and do not improvise past this list.
+
+The desk is {root}. The moment is {moment}; `python3 framework/tools/schedule.py check {slug}`
+must say OPEN before anything public happens. If it says EMBARGOED, stop: you woke early.
+
+IF YOU ARE RUNNING LATE — the app was closed and this fired at launch instead of on time — say
+so in your first line, then check what already went out before you touch anything: the Substack
+post and the LinkedIn article are on their own platforms' schedulers and may already be live.
+
+1. `python3 framework/tools/lease.py acquire {slug} --what "publication day"`.
+2. Gates: `schedule.py check`, `check_verified.py`, `check_links.py`, `check_refs.py` — any
+   refusal stops the run and is reported, not worked around.
+3. The canonical goes first. Cutover steps 1-3 in the README: copy original_published_at to
+   published_at, record blog_url and canonical, export the bundle, publish it to the store, then
+   remove {slug} from TAKEN_DOWN_FOR_REDRAFT in muffinlabs-web/next.config.ts and deploy — a
+   config redirect beats the page route, so the piece cannot appear at its URL until that lands.
+4. Verify the live page yourself before saying it is up, on a cache-busted URL.
+5. Substack and LinkedIn publish on their own schedulers. Confirm rather than assume: if the
+   Substack post is not live within ten minutes of the moment, say so and stop — do NOT click
+   Publish yourself, because that decision was made against a draft the author reviewed and
+   whatever went wrong needs a human.
+6. LinkedIn's Article copy links the canonical, so it is composed only after step 4 passes. If it
+   is still a draft, leave it and say so.
+7. Record it: post_url / blog_url / linkedin_url in publish.yaml, README and the dashboard
+   fragment to published, an append-only log entry, `dashboard.py sync`, release the lease, and
+   commit by path (never `git add` then a bare commit).
+8. Notify the author with: what is live, what is not, and what is left for them (the Note is
+   always theirs — never post it).
+"""
+
+
+def cmd_runbook(args):
+    """Print the self-contained prompt for the scheduled wake-up.
+
+    A scheduled task starts with no memory of the conversation that created it, so the prompt
+    has to carry the piece, the moment, the order and the gates. It is generated from the
+    manifest rather than typed, so moving `publish_at` cannot leave a stale moment inside a
+    prompt nobody re-reads."""
+    pdir = resolve(args.piece)
+    st, moment = state(pdir)
+    if not moment:
+        sys.exit(f'{os.path.basename(pdir)} has no {FIELD} — nothing to arm')
+    title = ''
+    for line in open(os.path.join(pdir, 'publish.yaml'), encoding='utf-8'):
+        if line.startswith('title:'):
+            title = line.split(':', 1)[1].strip().strip('"\'')
+            break
+    print(RUNBOOK.format(slug=os.path.basename(pdir), title=title, moment=fmt(moment),
+                         root=os.path.dirname(os.path.dirname(os.path.abspath(pdir)))))
+    return 0
+
+
+def cmd_arm(args):
+    """Record that a wake-up has been scheduled for this piece, and by what.
+
+    The task itself is created by the session (the scheduler lives in the app, not in this
+    tool). What this writes is the desk's record of it, so `armed` can answer the question
+    a week later and a moved moment shows up as a contradiction rather than a surprise.
+
+    `--reviewed` is required, and it is the rule rather than a formality: **the schedule is
+    not set until the drafts are reviewed and approved** (Eric, 2026-09-11). A scheduled
+    publication fires with nobody watching, so the reading has to have happened first — and
+    the composing is what produces the thing to read, which puts it before the arming and
+    never after. Naming who approved it makes the order auditable in the manifest."""
+    pdir = resolve(args.piece)
+    st, moment = state(pdir)
+    if not moment:
+        sys.exit(f'{os.path.basename(pdir)} has no {FIELD} — set one before arming')
+    if not args.reviewed:
+        sys.exit('refusing to arm: --reviewed is required.\n'
+                 '  The schedule is not set until the drafts are reviewed and approved, because\n'
+                 '  a scheduled publication fires with nobody watching. Compose the drafts, let\n'
+                 '  the author read them, then arm with --reviewed "<who, when>".')
+    path = os.path.join(pdir, 'publish.yaml')
+    src = open(path, encoding='utf-8').read()
+    block = (f'# A scheduled wake-up is armed for this piece. The moment of record is {FIELD};\n'
+             f'# this block is only the note that something was told to fire near it. Armed only\n'
+             f'# after the drafts were read and approved — see `approved`.\n'
+             f'scheduled:\n'
+             f'  task: {args.task}\n'
+             f'  fires: {args.fires or fmt(moment)}\n'
+             f'  does: {args.does}\n'
+             f'  approved: {args.reviewed}\n')
+    src = re.sub(r'(?ms)^# A scheduled wake-up.*?^  does: .*?$\n', '', src)
+    src = src.rstrip('\n') + '\n\n' + block
+    open(path, 'w', encoding='utf-8').write(src)
+    print(f'{os.path.basename(pdir)}: armed — {args.task} fires {args.fires or fmt(moment)}')
+    return 0
+
+
+def cmd_armed(args):
+    rows = []
+    for pdir in all_pieces():
+        p = os.path.join(pdir, 'publish.yaml')
+        if not os.path.exists(p):
+            continue
+        src = open(p, encoding='utf-8').read()
+        m = re.search(r'(?ms)^scheduled:\n  task: (.+?)\n  fires: (.+?)\n  does: (.+?)$', src)
+        if m:
+            rows.append((os.path.basename(pdir), m.group(1), m.group(2), m.group(3)))
+    if not rows:
+        print('nothing armed')
+        return 0
+    w = max(len(r[0]) for r in rows)
+    for slug, task, fires, does in rows:
+        print(f'{slug:{w}}  {task}  fires {fires}  — {does}')
+    return 0
+
+
 def cmd_set(args):
     pdir = resolve(args.piece)
     moment = parse_moment(args.moment)                      # refuse before writing
@@ -307,6 +428,21 @@ def main():
     c = sub.add_parser('due', help='what opens inside a window')
     c.add_argument('--within', default='48h')
     c.set_defaults(fn=cmd_due)
+
+    c = sub.add_parser('runbook', help='the self-contained prompt for a scheduled wake-up')
+    c.add_argument('piece')
+    c.set_defaults(fn=cmd_runbook)
+
+    c = sub.add_parser('arm', help='record that a wake-up is scheduled (after the drafts are approved)')
+    c.add_argument('piece')
+    c.add_argument('--task', required=True, help='the scheduler\'s id for it')
+    c.add_argument('--does', required=True, help='one line: what it will do when it fires')
+    c.add_argument('--fires', help='when, if not the publish_at moment itself')
+    c.add_argument('--reviewed', help='who approved the drafts, and when — REQUIRED')
+    c.set_defaults(fn=cmd_arm)
+
+    c = sub.add_parser('armed', help='what is armed across the desk')
+    c.set_defaults(fn=cmd_armed)
 
     c = sub.add_parser('set', help='write the field')
     c.add_argument('piece')

@@ -1282,6 +1282,24 @@ def unit_schedule(tmp):
     check('schedule: a piece with no publish_at is never embargoed',
           sched.state(d)[0] == 'none' and sched.refuse_if_embargoed(d) is None)
 
+    # Arming is gated on the reading having happened (Eric, 2026-09-11).
+    import subprocess as _sp
+    open(os.path.join(d, 'publish.yaml'), 'w').write(
+        'title: T\npublish_at: 2026-09-15 09:00 America/New_York\n')
+    r = _sp.run([sys.executable, os.path.join(HERE, 'schedule.py'), 'arm', d,
+                 '--task', 't', '--does', 'x'], capture_output=True, text=True)
+    check('schedule: arm refuses without --reviewed',
+          r.returncode != 0 and 'reviewed' in (r.stdout + r.stderr))
+    r = _sp.run([sys.executable, os.path.join(HERE, 'schedule.py'), 'arm', d, '--task', 't',
+                 '--does', 'x', '--reviewed', 'A, today'], capture_output=True, text=True)
+    man = open(os.path.join(d, 'publish.yaml'), encoding='utf-8').read()
+    check('schedule: arm records who approved the drafts',
+          r.returncode == 0 and 'approved: A, today' in man, r.stderr.strip())
+    r = _sp.run([sys.executable, os.path.join(HERE, 'schedule.py'), 'runbook', d],
+                capture_output=True, text=True)
+    check('schedule: the runbook carries the moment and the late-fire instruction',
+          '2026-09-15 09:00' in r.stdout and 'RUNNING LATE' in r.stdout)
+
     # The wiring, stated as the rule it is: public REFUSES, preparing WARNS.
     site = open(os.path.join(HERE, 'md_to_site.py'), encoding='utf-8').read()
     check('schedule: md_to_site refuses an embargoed piece (exit 12)',
